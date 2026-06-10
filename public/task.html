@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Task — Chat with Task</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Host+Grotesk:wght@500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/studio.css" />
+  <link rel="icon" href="/scale-icon.svg" />
+</head>
+<body>
+  <header class="topbar">
+    <a href="/"><img class="logo" src="/scale-logo.svg" alt="Scale" /></a>
+    <div class="app-name">Chat with Task</div>
+    <span class="chip" id="bucket-chip"></span>
+    <span class="mono" id="task-id" style="font-size:12px"></span>
+    <div class="spacer"></div>
+    <select id="move-select">
+      <option value="">move to…</option>
+      <option value="HARD_FAIL">HARD_FAIL</option>
+      <option value="SOFT_FAIL">SOFT_FAIL</option>
+      <option value="PASS">PASS</option>
+      <option value="UNSORTED">UNSORTED</option>
+    </select>
+  </header>
+
+  <div class="task-layout">
+    <nav class="sidebar" id="sidebar">
+      <h3>Documents</h3>
+      <div id="nav-docs"></div>
+      <h3>Trajectories</h3>
+      <div id="nav-trajs"></div>
+      <h3>Files</h3>
+      <div class="file-tree" id="nav-files"></div>
+    </nav>
+
+    <section class="viewer" id="viewer">
+      <div class="viewer-head"><span class="title" id="viewer-title"></span></div>
+      <div id="viewer-body"></div>
+    </section>
+
+    <aside class="chat-panel">
+      <div class="chat-head">
+        <span class="title">Audit copilot</span>
+        <button id="clear-chat">clear</button>
+      </div>
+      <div class="chat-log" id="chat-log"></div>
+      <div class="status-line" id="chat-status"></div>
+      <div class="chat-input">
+        <textarea id="chat-text" placeholder="Ask about this task… (Enter to send, Shift+Enter for newline)"></textarea>
+        <button class="primary" id="chat-send">Send</button>
+      </div>
+    </aside>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script type="module" src="/js/task.js"></script>
+</body>
+</html>

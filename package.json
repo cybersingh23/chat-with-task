@@ -1,0 +1,14 @@
+{
+  "name": "chat-with-task",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Chat-with-Task — QM audit studio for ACC deliveries: bucketed task workspace, review/remediation docs, deep-linked trajectory viewer, and a LiteLLM-backed audit copilot.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

@@ -1,0 +1,68 @@
+import { config } from './config.js';
+
+// One non-streaming chat-completion call against the LiteLLM proxy
+// (OpenAI-compatible; same proxy + key as trajectory-viewer-v2).
+export async function chatCompletion({ messages, tools, temperature = 0.2, maxTokens = 4096 }) {
+  if (!config.litellm.apiKey) throw new Error('LITELLM_API_KEY is not set — copy .env.example to .env');
+  const body = {
+    model: config.litellm.model,
+    messages,
+    temperature,
+    max_tokens: maxTokens,
+  };
+  if (tools?.length) body.tools = tools;
+
+  const res = await fetch(`${config.litellm.baseURL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${config.litellm.apiKey}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`LiteLLM ${res.status}: ${detail.slice(0, 500)}`);
+  }
+  const data = await res.json();
+  const msg = data.choices?.[0]?.message;
+  if (!msg) throw new Error('LiteLLM returned no message');
+  return msg;
+}
+
+// Tool-use agent loop. onEvent receives progress events suitable for SSE:
+//   {type:'tool', name, args}  {type:'assistant', content}
+// Returns the full list of new messages (assistant + tool results) so the
+// caller can persist them.
+export async function runAgentLoop({ messages, tools, executor, onEvent, maxSteps = 15 }) {
+  const transcript = [...messages];
+  const added = [];
+  for (let step = 0; step < maxSteps; step++) {
+    const msg = await chatCompletion({ messages: transcript, tools });
+    transcript.push(msg);
+    added.push(msg);
+    if (msg.content) onEvent?.({ type: 'assistant', content: msg.content });
+    const calls = msg.tool_calls || [];
+    if (!calls.length) return { messages: added, final: msg.content || '' };
+
+    for (const call of calls) {
+      let args = {};
+      try {
+        args = JSON.parse(call.function.arguments || '{}');
+      } catch { /* model sent malformed JSON; executor sees {} */ }
+      onEvent?.({ type: 'tool', name: call.function.name, args });
+      let result;
+      try {
+        result = await executor(call.function.name, args);
+      } catch (e) {
+        result = `ERROR: ${e.message}`;
+      }
+      const toolMsg = { role: 'tool', tool_call_id: call.id, content: String(result) };
+      transcript.push(toolMsg);
+      added.push(toolMsg);
+    }
+  }
+  const note = '[stopped: agent loop hit max steps]';
+  onEvent?.({ type: 'assistant', content: note });
+  return { messages: added, final: note };
+}
