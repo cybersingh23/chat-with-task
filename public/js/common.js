@@ -45,14 +45,18 @@ export async function apiSSE(path, body, onEvent) {
 // trajectory" buttons; clicks are delegated via the data-traj attributes.
 export function renderMarkdown(md) {
   const renderer = new marked.Renderer();
-  const linkBase = renderer.link.bind(renderer);
-  renderer.link = (token) => {
-    const m = /^traj:\/\/(model_[ab])\/(\d+)$/.exec(token.href || '');
+  const linkBase = renderer.link;
+  // marked v12 calls link(href, title, text); v13+ passes a token object.
+  renderer.link = function (hrefOrToken, title, text) {
+    const isToken = typeof hrefOrToken === 'object' && hrefOrToken !== null;
+    const href = isToken ? hrefOrToken.href : hrefOrToken;
+    const label = isToken ? hrefOrToken.text : text;
+    const m = /^traj:\/\/(model_[ab])\/(\d+)$/.exec(href || '');
     if (m) {
-      const label = token.text && token.text !== token.href ? token.text : `${m[1]}[${m[2]}]`;
-      return `<a class="traj-link" href="#" data-traj-model="${m[1]}" data-traj-index="${m[2]}">${escapeHtml(label)} </a>`;
+      const shown = label && label !== href ? label : `${m[1]}[${m[2]}]`;
+      return `<a class="traj-link" href="#" data-traj-model="${m[1]}" data-traj-index="${m[2]}">${escapeHtml(shown)} </a>`;
     }
-    return linkBase(token);
+    return linkBase.call(this, hrefOrToken, title, text);
   };
   const html = marked.parse(md, { renderer, gfm: true, breaks: false });
   return DOMPurify.sanitize(html, { ADD_ATTR: ['data-traj-model', 'data-traj-index'] });

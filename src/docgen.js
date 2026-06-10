@@ -130,13 +130,18 @@ export async function generateDoc(bucket, id, which, onEvent) {
     maxSteps: 25,
   });
 
-  const doc = stripFences(final);
+  const doc = cleanDoc(final);
   writeTaskFile(bucket, id, `${which}.md`, doc);
   return doc;
 }
 
-// Models sometimes wrap whole-document output in a ```markdown fence.
-function stripFences(s) {
+// Models sometimes wrap whole-document output in a ```markdown fence and/or
+// prefix it with a "Let me compile the review" lead-in — keep only the doc,
+// which always starts at the first H1.
+function cleanDoc(s) {
   const m = s.trim().match(/^```(?:markdown|md)?\n([\s\S]*)\n```$/);
-  return (m ? m[1] : s).trim() + '\n';
+  let doc = (m ? m[1] : s).trim();
+  const h1 = doc.search(/^# /m);
+  if (h1 > 0) doc = doc.slice(h1);
+  return doc.trim() + '\n';
 }

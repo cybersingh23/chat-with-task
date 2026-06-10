@@ -12,17 +12,22 @@ export async function chatCompletion({ messages, tools, temperature = 0.2, maxTo
   };
   if (tools?.length) body.tools = tools;
 
-  const res = await fetch(`${config.litellm.baseURL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${config.litellm.apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
+  // The proxy throws transient 429/5xx under load — retry with backoff.
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    res = await fetch(`${config.litellm.baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${config.litellm.apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) break;
+    const retryable = res.status === 429 || res.status >= 500;
     const detail = await res.text().catch(() => '');
-    throw new Error(`LiteLLM ${res.status}: ${detail.slice(0, 500)}`);
+    if (!retryable || attempt >= 3) throw new Error(`LiteLLM ${res.status}: ${detail.slice(0, 500)}`);
+    await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
   }
   const data = await res.json();
   const msg = data.choices?.[0]?.message;
