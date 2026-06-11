@@ -19,19 +19,26 @@ let activeNav = null;
 const viewCache = new Map(); // key -> { node, scrollTop }
 let currentViewKey = null;
 
-// Back navigation (small ‹ in the viewer header): each view registers how to
-// reopen itself; switching views pushes the previous one onto the stack.
-const viewReopeners = new Map(); // key -> () => void
+// Back navigation (pinned ‹ in the viewer header, labelled with where it
+// goes): each view registers how to reopen itself + a display label;
+// switching views pushes the previous one onto the stack.
+const viewReopeners = new Map(); // key -> { reopen: () => void, label: string }
 const navStack = [];
 let suppressHistory = false;
 const backBtn = document.getElementById('back-btn');
+
+function updateBackBtn() {
+  const top = navStack[navStack.length - 1];
+  backBtn.hidden = !top;
+  if (top) backBtn.textContent = `‹ ${top.label}`;
+}
 
 backBtn.addEventListener('click', () => {
   const prev = navStack.pop();
   if (!prev) return;
   suppressHistory = true;
-  Promise.resolve(prev()).finally(() => { suppressHistory = false; });
-  backBtn.hidden = navStack.length === 0;
+  Promise.resolve(prev.reopen()).finally(() => { suppressHistory = false; });
+  updateBackBtn();
 });
 
 function saveCurrentScroll() {
@@ -46,7 +53,7 @@ function mountView(key, build, { refresh = false } = {}) {
     navStack.push(viewReopeners.get(currentViewKey));
     if (navStack.length > 20) navStack.shift();
   }
-  backBtn.hidden = navStack.length === 0;
+  updateBackBtn();
   if (refresh) viewCache.delete(key);
   let entry = viewCache.get(key);
   if (!entry) {
@@ -163,7 +170,7 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
   setActive(navNode);
   hideTrajToolbar();
   viewerTitle.textContent = doc.file;
-  viewReopeners.set(`doc:${doc.key}`, () => openDoc(doc, findDocNav(doc.label)));
+  viewReopeners.set(`doc:${doc.key}`, { label: doc.label, reopen: () => openDoc(doc, findDocNav(doc.label)) });
   if (refresh || !viewCache.has(`doc:${doc.key}`)) {
     let content;
     try {
@@ -217,7 +224,7 @@ function showTaskDef() {
   hideTrajToolbar();
   viewerTitle.textContent = `task definition${taskDef.missing ? '' : ` (${taskDef.source})`}`;
   document.querySelector('.viewer-head .regen')?.remove();
-  viewReopeners.set('taskdef', () => { setActive(findDocNav('Task definition')); showTaskDef(); });
+  viewReopeners.set('taskdef', { label: 'Task definition', reopen: () => { setActive(findDocNav('Task definition')); showTaskDef(); } });
   mountView('taskdef', buildTaskDefView);
 }
 
@@ -324,7 +331,10 @@ async function showTrajectory(model, focusIndex = null) {
   setActive(null); // single highlight: the launcher below is the only active marker
   viewerTitle.textContent = `Trajectory viewer — trajectory_${model}.json`;
   document.querySelector('.viewer-head .regen')?.remove();
-  viewReopeners.set(`traj:${model}`, () => showTrajectory(model));
+  viewReopeners.set(`traj:${model}`, {
+    label: model === 'model_a' ? 'Model A' : 'Model B',
+    reopen: () => showTrajectory(model),
+  });
   const traj = await loadTrajectory(model);
 
   document.getElementById('traj-launch-model_a')?.classList.toggle('active', model === 'model_a');
@@ -454,9 +464,12 @@ async function showFile(relPath) {
   hideTrajToolbar();
   viewerTitle.textContent = relPath;
   document.querySelector('.viewer-head .regen')?.remove();
-  viewReopeners.set(`file:${relPath}`, () => {
-    setActive([...document.querySelectorAll('#nav-files .nav-item')].find((b) => b.title === relPath) || null);
-    showFile(relPath);
+  viewReopeners.set(`file:${relPath}`, {
+    label: relPath.split('/').pop(),
+    reopen: () => {
+      setActive([...document.querySelectorAll('#nav-files .nav-item')].find((b) => b.title === relPath) || null);
+      showFile(relPath);
+    },
   });
   if (viewCache.has(`file:${relPath}`)) {
     mountView(`file:${relPath}`, () => null);
