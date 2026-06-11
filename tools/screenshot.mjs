@@ -26,10 +26,20 @@ const chrome = spawn(
   [`--headless`, `--remote-debugging-port=${port}`, `--user-data-dir=/tmp/cwt-shot-profile`, `--window-size=${width},${height}`, 'about:blank'],
   { stdio: 'ignore' }
 );
-await new Promise((r) => setTimeout(r, 1200));
+// wait for the debug port (Chrome can take a few seconds on cold start)
+async function getTargets() {
+  for (let i = 0; i < 30; i++) {
+    try {
+      return await (await fetch(`http://localhost:${port}/json`)).json();
+    } catch {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+  throw new Error('chrome debug port never came up');
+}
 
 try {
-  const targets = await (await fetch(`http://localhost:${port}/json`)).json();
+  const targets = await getTargets();
   const ws = new WebSocket(targets.find((t) => t.type === 'page').webSocketDebuggerUrl);
   await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
 

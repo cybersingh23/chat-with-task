@@ -42,21 +42,26 @@
     <nav class="sidebar glass" id="sidebar">
       <h3>Documents</h3>
       <div id="nav-docs"></div>
-      <h3>Trajectories</h3>
-      <div id="nav-trajs"></div>
+      <h3>Trajectory viewer</h3>
+      <div class="traj-launcher" id="nav-trajs"></div>
       <h3>Files</h3>
       <div class="file-tree" id="nav-files"></div>
     </nav>
 
     <section class="viewer glass" id="viewer">
       <div class="viewer-head"><span class="title" id="viewer-title"></span></div>
+      <div class="traj-toolbar" id="traj-toolbar" hidden>
+        <div class="traj-tabs" id="traj-tabs"></div>
+        <button class="quiet" id="collapse-all">Collapse all</button>
+      </div>
       <div id="viewer-body"></div>
     </section>
 
-    <aside class="chat-panel glass">
+    <aside class="chat-panel glass" id="chat-panel">
       <div class="chat-head">
         <span class="title">Audit copilot</span>
         <button id="clear-chat">clear</button>
+        <button id="collapse-chat" title="collapse copilot panel">⟩</button>
       </div>
       <div class="chat-log" id="chat-log"></div>
       <div class="status-line" id="chat-status"></div>
@@ -66,6 +71,8 @@
       </div>
     </aside>
   </div>
+
+  <button class="chat-fab glass" id="expand-chat" hidden>Copilot ⟨</button>
 
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>

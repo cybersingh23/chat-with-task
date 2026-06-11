@@ -57,9 +57,23 @@ async function buildSidebar() {
 
   const navTrajs = document.getElementById('nav-trajs');
   navTrajs.replaceChildren(
-    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showTrajectory('model_a'); } }, 'model_a'),
-    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showTrajectory('model_b'); } }, 'model_b'),
+    ...['model_a', 'model_b'].map((m) =>
+      el('button', { class: 'traj-launch', id: `traj-launch-${m}`, onclick: () => { setActive(null); showTrajectory(m); } },
+        el('span', { class: `traj-launch-name traj-${m}` }, m === 'model_a' ? 'Model A' : 'Model B'),
+        el('span', { class: 'traj-launch-meta', id: `traj-meta-${m}` }, '· · ·'),
+      )
+    )
   );
+  // fill message counts in the background
+  for (const m of ['model_a', 'model_b']) {
+    api(`/task/${bucket}/${taskId}/trajectory/${m}`)
+      .then((t) => {
+        trajCache[m] = t;
+        const users = t.messages.filter((x) => x.role === 'user').length;
+        document.getElementById(`traj-meta-${m}`).textContent = `${t.count} msgs · ${users} prompts`;
+      })
+      .catch(() => { document.getElementById(`traj-meta-${m}`).textContent = 'unavailable'; });
+  }
 
   const tree = await api(`/task/${bucket}/${taskId}/files`);
   const navFiles = document.getElementById('nav-files');
@@ -88,6 +102,7 @@ function setActive(node) {
 // ---------- viewers ----------
 async function openDoc(doc, navNode) {
   setActive(navNode);
+  hideTrajToolbar();
   viewerTitle.textContent = doc.file;
   try {
     const f = await api(`/task/${bucket}/${taskId}/file?path=${encodeURIComponent(doc.file)}`);
@@ -136,6 +151,7 @@ function addRegenButton(doc) {
 
 // ---------- task definition / milestones ----------
 function showTaskDef() {
+  hideTrajToolbar();
   viewerTitle.textContent = `task definition${taskDef.missing ? '' : ` (${taskDef.source})`}`;
   document.querySelector('.viewer-head .regen')?.remove();
   if (taskDef.missing) {
@@ -216,41 +232,79 @@ function askCopilotAboutMilestone(m) {
   chatText.focus();
 }
 
+// Trajectory viewer — prompt-grouped turns, matching trajectory-viewer-v2:
+// each user prompt opens a collapsible "Prompt N" group containing the user
+// block and the indented assistant work (text + color-coded tool blocks).
+const TOOL_COLORS = {
+  bash: 'blue', read: 'green', edit: 'amber', apply_patch: 'orange',
+  write: 'cyan', grep: 'purple', glob: 'purple', task: 'stone', agent: 'pink', question: 'pink',
+};
+let activeTrajModel = null;
+
+function groupTurns(messages) {
+  const groups = [];
+  let cur = null;
+  for (const m of messages) {
+    if (m.role === 'user') {
+      cur = { user: m, assistants: [] };
+      groups.push(cur);
+    } else if (cur) {
+      cur.assistants.push(m);
+    } else {
+      cur = { user: null, assistants: [m] };
+      groups.push(cur);
+    }
+  }
+  return groups;
+}
+
+function userText(m) {
+  return m.parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n');
+}
+
+const trajToolbar = document.getElementById('traj-toolbar');
+
+function hideTrajToolbar() {
+  trajToolbar.hidden = true;
+  activeTrajModel = null;
+  document.getElementById('traj-launch-model_a')?.classList.remove('active');
+  document.getElementById('traj-launch-model_b')?.classList.remove('active');
+}
+
 async function showTrajectory(model, focusIndex = null) {
-  viewerTitle.textContent = `trajectories/trajectory_${model}.json`;
+  viewerTitle.textContent = `Trajectory viewer — trajectory_${model}.json`;
   document.querySelector('.viewer-head .regen')?.remove();
   if (!trajCache[model]) {
     viewerBody.replaceChildren(el('p', { class: 'mono' }, `loading ${model}…`));
     trajCache[model] = await api(`/task/${bucket}/${taskId}/trajectory/${model}`);
   }
   const traj = trajCache[model];
-  viewerBody.replaceChildren(
-    ...traj.messages.map((m) =>
-      el('div', { class: `traj-msg role-${m.role}`, id: `msg-${model}-${m.index}` },
-        el('div', { class: 'traj-msg-head' },
-          el('span', { class: 'role' }, `${model}[${m.index}] ${m.role}`),
-          el('span', { class: 'time' }, fmtTime(m.created)),
-          el('button', {
-            class: 'copy', title: 'copy traj:// link for use in chat/docs',
-            onclick: () => navigator.clipboard.writeText(`traj://${model}/${m.index}`),
-          }, 'copy link'),
-        ),
-        m.parts.map((p) => {
-          if (p.type === 'text') return el('div', { class: 'traj-part text' }, p.text);
-          if (p.type === 'reasoning') return el('div', { class: 'traj-part reasoning' }, p.text);
-          return el('div', { class: 'traj-part' },
-            el('details', {},
-              el('summary', {}, `⚙ ${p.tool} ${p.title || ''} [${p.status}]`),
-              el('pre', {}, `input: ${p.input}\n\noutput: ${p.output}`),
-            )
-          );
-        }),
-      )
+  activeTrajModel = model;
+  document.getElementById(`traj-launch-model_a`)?.classList.toggle('active', model === 'model_a');
+  document.getElementById(`traj-launch-model_b`)?.classList.toggle('active', model === 'model_b');
+
+  trajToolbar.hidden = false;
+  document.getElementById('traj-tabs').replaceChildren(
+    ...['model_a', 'model_b'].map((m) =>
+      el('button', {
+        class: `traj-tab ${m === model ? 'active' : ''}`,
+        onclick: () => showTrajectory(m),
+      }, m === 'model_a' ? 'Model A' : 'Model B')
     )
   );
+
+  const groups = groupTurns(traj.messages);
+  viewerBody.replaceChildren(
+    el('div', { class: 'convo' },
+      ...groups.map((g, gi) => renderTurnGroup(model, g, gi))
+    )
+  );
+
   if (focusIndex != null) {
     const node = document.getElementById(`msg-${model}-${focusIndex}`);
     if (node) {
+      node.closest('.turn-body')?.classList.add('open');
+      node.closest('.turn-group')?.querySelector('.arrow')?.classList.add('open');
       node.scrollIntoView({ behavior: 'smooth', block: 'start' });
       node.classList.add('flash');
       setTimeout(() => node.classList.remove('flash'), 2500);
@@ -258,7 +312,100 @@ async function showTrajectory(model, focusIndex = null) {
   }
 }
 
+function renderTurnGroup(model, g, gi) {
+  const preview = g.user ? userText(g.user).slice(0, 130) : '(assistant continues)';
+  const body = el('div', { class: 'turn-body open' });
+
+  if (g.user) {
+    body.append(
+      el('div', { class: 'msg-user', id: `msg-${model}-${g.user.index}` },
+        el('div', { class: 'msg-user-label' },
+          'User',
+          el('span', { class: 'msg-idx' }, ` · ${model}[${g.user.index}] · ${fmtTime(g.user.created)}`),
+          copyLinkBtn(model, g.user.index),
+        ),
+        el('div', { class: 'msg-user-text' }, userText(g.user)),
+      )
+    );
+  }
+  for (const a of g.assistants) {
+    const blocks = [];
+    for (const p of a.parts) {
+      if (p.type === 'text' && p.text.trim()) blocks.push(el('div', { class: 'asst-text' }, p.text));
+      else if (p.type === 'reasoning' && p.text.trim()) blocks.push(el('div', { class: 'asst-text reasoning' }, p.text));
+      else if (p.type === 'tool') blocks.push(renderToolBlock(p));
+    }
+    if (!blocks.length) blocks.push(el('div', { class: 'empty-resp' }, '(no response content)'));
+    body.append(
+      el('div', { class: 'msg-asst', id: `msg-${model}-${a.index}` },
+        el('div', { class: 'step-header' },
+          'Assistant',
+          el('span', { class: 'msg-idx' }, ` · ${model}[${a.index}]`),
+          copyLinkBtn(model, a.index),
+        ),
+        blocks,
+      )
+    );
+  }
+
+  const arrow = el('span', { class: 'arrow open' }, '▶');
+  const header = el('div', {
+    class: 'turn-header',
+    onclick: () => {
+      body.classList.toggle('open');
+      arrow.classList.toggle('open');
+    },
+  },
+    arrow,
+    el('span', { class: 'turn-num' }, g.user ? `Prompt ${gi + 1}` : 'Preamble'),
+    el('span', { class: 'turn-preview' }, preview),
+  );
+  return el('div', { class: 'turn-group' }, header, body);
+}
+
+function copyLinkBtn(model, index) {
+  return el('button', {
+    class: 'copy-link', title: 'copy traj:// link for use in chat/docs',
+    onclick: (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(`traj://${model}/${index}`);
+      e.currentTarget.textContent = 'copied';
+      setTimeout(() => { e.currentTarget && (e.currentTarget.textContent = 'link'); }, 1200);
+    },
+  }, 'link');
+}
+
+function renderToolBlock(p) {
+  const color = TOOL_COLORS[p.tool] || 'default';
+  const body = el('div', { class: 'tool-body' },
+    el('div', { class: 'codeblock' }, `${p.input}`),
+    el('div', { class: 'codeblock out' }, p.output || '(no output)'),
+  );
+  const arrow = el('span', { class: 'arrow' }, '▶');
+  return el('div', { class: `tool-block tbl-${color}` },
+    el('div', {
+      class: 'tool-header',
+      onclick: () => { body.classList.toggle('open'); arrow.classList.toggle('open'); },
+    },
+      arrow,
+      el('span', { class: `tool-badge tb-${color}` }, p.tool),
+      el('span', { class: 'tool-title' }, p.title || ''),
+      el('span', { class: 'tool-dur' }, p.status),
+    ),
+    body,
+  );
+}
+
+let allCollapsed = false;
+document.getElementById('collapse-all').addEventListener('click', (e) => {
+  allCollapsed = !allCollapsed;
+  document.querySelectorAll('.turn-body').forEach((b) => b.classList.toggle('open', !allCollapsed));
+  document.querySelectorAll('.turn-header .arrow').forEach((a) => a.classList.toggle('open', !allCollapsed));
+  e.currentTarget.textContent = allCollapsed ? 'Expand all' : 'Collapse all';
+});
+
 async function showFile(relPath) {
+  hideTrajToolbar();
   viewerTitle.textContent = relPath;
   document.querySelector('.viewer-head .regen')?.remove();
   if (/\.(png|jpg|jpeg|gif|webp)$/i.test(relPath)) {
@@ -391,6 +538,19 @@ verdictSelect.addEventListener('change', async () => {
   });
   refreshState();
 });
+
+// ---------- collapsible chat panel ----------
+const layout = document.querySelector('.task-layout');
+const expandChatBtn = document.getElementById('expand-chat');
+
+function setChatCollapsed(collapsed) {
+  layout.classList.toggle('chat-collapsed', collapsed);
+  expandChatBtn.hidden = !collapsed;
+  localStorage.setItem('cwt_chat_collapsed', collapsed ? '1' : '');
+}
+document.getElementById('collapse-chat').addEventListener('click', () => setChatCollapsed(true));
+expandChatBtn.addEventListener('click', () => setChatCollapsed(false));
+if (localStorage.getItem('cwt_chat_collapsed')) setChatCollapsed(true);
 
 document.getElementById('logout-btn').addEventListener('click', async () => {
   await api('/logout', { method: 'POST' });
