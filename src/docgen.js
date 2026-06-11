@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runAgentLoop } from './llm.js';
 import { TOOL_DEFS, makeExecutor } from './tools.js';
-import { taskDir, writeTaskFile } from './workspace.js';
+import { readTaskDef, taskDir, writeTaskFile } from './workspace.js';
 
 // Shared context block: rank.json digest + audit seed, prepended to every
 // system prompt (chat copilot and doc generation).
@@ -32,6 +32,26 @@ export function taskContext(bucket, id) {
     parts.push('rank.json digest:\n' + JSON.stringify(digest, null, 2));
   } catch {
     parts.push('(rank.json missing or unparseable — flag this immediately, it is a packaging defect)');
+  }
+  const def = readTaskDef(bucket, id);
+  if (def.missing) {
+    parts.push('Task definition: MISSING (informational only per customer policy 2026-06-09 — never a finding).');
+  } else {
+    parts.push(
+      'Task definition (' + def.source + '):\n' +
+      JSON.stringify(
+        {
+          title: def.title,
+          category: def.category,
+          difficulty: def.difficulty,
+          language: def.language,
+          milestones: def.milestones.map((m) => ({ id: m.id, title: m.title, prompt: m.prompt.slice(0, 1200) })),
+          guardrails: def.guardrails.map((g) => g.slice(0, 500)),
+        },
+        null,
+        2
+      ).slice(0, 16_000)
+    );
   }
   const seed = path.join(dir, '_audit_seed.md');
   if (fs.existsSync(seed)) {

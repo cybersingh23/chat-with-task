@@ -68,32 +68,71 @@ input[type='text']:focus, textarea:focus { border-color: var(--evergreen); }
 .chip.PASS { border-color: var(--evergreen); color: var(--evergreen); }
 .chip.UNSORTED { border-color: var(--slate); color: var(--slate); }
 
+/* ---- bucket accent system (color on white only, per brand rules) ---- */
+.accent-HARD_FAIL { --accent: var(--black); }
+.accent-SOFT_FAIL { --accent: var(--tan); }
+.accent-PASS { --accent: var(--evergreen); }
+.accent-UNSORTED { --accent: var(--slate); }
+
 /* ---- index page ---- */
 .index-main { max-width: 1280px; margin: 0 auto; padding: 24px 20px; }
-.claim-box {
-  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-  border: 1px solid var(--gray-med); border-left: 4px solid var(--evergreen);
-  padding: 16px; margin-bottom: 28px; background: var(--white);
+
+.ingest { margin-bottom: 28px; }
+.drop-zone {
+  border: 2px dashed var(--gray-med); border-radius: 4px; padding: 26px 20px;
+  text-align: center; transition: border-color 120ms, background 120ms;
 }
-.claim-box input { width: 320px; }
-.claim-box .hint { font-size: 12px; color: var(--gray-dark); width: 100%; }
+.drop-zone.over { border-color: var(--evergreen); background: var(--gray-light); }
+.drop-title { font-family: var(--font-head); font-size: 17px; font-weight: 600; }
+.drop-sub { font-size: 12.5px; color: var(--gray-dark); margin: 4px 0 14px; }
+.drop-actions { display: flex; gap: 10px; justify-content: center; align-items: center; }
+.drop-status { font-size: 11.5px; margin-top: 10px; min-height: 14px; }
+.progress {
+  height: 4px; background: var(--gray-light); border-radius: 2px;
+  margin: 12px auto 0; max-width: 420px; overflow: hidden;
+}
+.progress-bar { height: 100%; width: 0%; background: var(--evergreen); transition: width 150ms; }
+.claim-secondary { margin-top: 10px; font-size: 12px; color: var(--gray-dark); }
+.claim-secondary summary { cursor: pointer; }
+.claim-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.claim-row input { width: 300px; }
+
 .buckets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.bucket h2 {
-  font-size: 13px; margin: 0 0 10px; padding-bottom: 6px;
-  border-bottom: 2px solid var(--black); display: flex; justify-content: space-between;
+.bucket-head {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--accent, var(--black)); color: var(--white);
+  padding: 7px 12px; border-radius: 3px; margin-bottom: 10px;
 }
-.bucket .count { font-family: var(--font-mono); color: var(--gray-dark); font-weight: 400; }
+.accent-SOFT_FAIL .bucket-head { color: var(--black); }
+.bucket-name { font-family: var(--font-head); font-weight: 600; font-size: 12.5px; letter-spacing: 0.03em; }
+.bucket-count {
+  font-family: var(--font-mono); font-size: 12px; background: var(--white);
+  color: var(--black); border-radius: 2px; padding: 0 7px;
+}
+.bucket-empty {
+  border: 1px dashed var(--gray-med); border-radius: 3px; padding: 14px;
+  font-size: 12px; color: var(--gray-dark); text-align: center;
+}
 .task-card {
-  display: block; border: 1px solid var(--gray-med); border-radius: 3px;
-  padding: 10px 12px; margin-bottom: 8px; text-decoration: none; color: var(--black);
+  display: block; border: 1px solid var(--gray-med); border-left: 4px solid var(--accent, var(--gray-med));
+  border-radius: 3px; padding: 10px 12px; margin-bottom: 8px; text-decoration: none; color: var(--black);
+  transition: box-shadow 120ms, border-color 120ms;
 }
-.task-card:hover { border-color: var(--evergreen); }
+.task-card:hover { border-color: var(--accent); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12); }
 .task-card .tid { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
 .task-card .prob { font-size: 11.5px; color: var(--gray-dark); margin-top: 4px;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.task-card .dots { margin-top: 6px; display: flex; gap: 6px; font-size: 10px; font-family: var(--font-mono); }
-.dot { color: var(--gray-med); }
-.dot.on { color: var(--evergreen); }
+.task-card .pills { margin-top: 7px; display: flex; gap: 5px; flex-wrap: wrap; }
+.pill {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.03em;
+  border: 1px solid var(--gray-light); color: var(--gray-med);
+  border-radius: 2px; padding: 1px 6px;
+}
+.pill.on { border-color: var(--evergreen); color: var(--evergreen); }
+.status-dot { font-size: 9px; color: var(--gray-med); margin-right: 4px; }
+.status-dot.on { color: var(--evergreen); }
+.nav-item.active .status-dot { color: var(--gray-med); }
+.nav-item.active .status-dot.on { color: var(--white); }
 
 /* ---- task page layout ---- */
 .task-layout {
@@ -155,6 +194,31 @@ a.traj-link {
 }
 a.traj-link::after { content: '→'; }
 a.traj-link:hover { background: var(--atlas); color: var(--white); }
+
+/* task definition / milestones */
+.taskdef { max-width: 880px; }
+.taskdef h1 { font-size: 20px; border-bottom: 2px solid var(--black); padding-bottom: 6px; margin-top: 0; }
+.taskdef h2 { font-size: 15px; color: var(--evergreen); margin-top: 26px; }
+.def-chips { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; }
+.chip.diff-hard { background: var(--black); color: var(--white); border-color: var(--black); }
+.chip.diff-medium { border-color: var(--tan); color: var(--tan); }
+.chip.diff-easy { border-color: var(--evergreen); color: var(--evergreen); }
+.callout {
+  border: 1px solid var(--gray-med); border-left: 4px solid var(--tan);
+  border-radius: 3px; padding: 10px 14px; font-size: 13px; margin: 12px 0;
+}
+.callout.info { border-left-color: var(--slate); color: var(--gray-dark); }
+.hint-line { font-size: 11.5px; color: var(--gray-dark); margin: 4px 0 14px; }
+.milestone { border: 1px solid var(--gray-med); border-radius: 3px; margin-bottom: 12px; }
+.milestone-head {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  background: var(--gray-light); flex-wrap: wrap;
+}
+.milestone-head .spacer { flex: 1; }
+.milestone-head button { font-size: 11px; padding: 2px 9px; }
+.chip.milestone-id { background: var(--evergreen); color: var(--white); border-color: var(--evergreen); }
+.milestone-title { font-weight: 600; font-size: 13px; }
+.milestone-prompt { padding: 10px 14px; white-space: pre-wrap; font-size: 12.5px; word-break: break-word; }
 
 /* trajectory viewer */
 .traj-msg { border: 1px solid var(--gray-med); border-radius: 3px; margin-bottom: 10px; max-width: 940px; }

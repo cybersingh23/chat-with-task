@@ -17,9 +17,17 @@ straight to the cited message in the built-in trajectory viewer.
    This creates `workspace/{HARD_FAIL,SOFT_FAIL,PASS,UNSORTED}/<task_id>/` with the full task
    folder plus `_audit_seed.md` — that task's slice of the audit findings.
 
-2. **Claim** — alternatively, a reviewer pastes a task ID from the claim sheet into the home
-   page; the server finds it across `ACC_DELIVERY_*` folders under `DELIVERY_ROOTS` and copies
-   it into the workspace.
+2. **Upload** — reviewers add their claimed task from the browser: drag the `<task_id>` folder
+   (or a .zip of it) onto the home page, or use the pickers. Works when the server runs on a
+   shared host with no access to the reviewer's files. If the upload contains a sibling
+   `_audit/` dir (whole-delivery zip), the audit seed is attached automatically.
+   Claiming by task ID (server-side search of `DELIVERY_ROOTS` for `ACC_DELIVERY_*`) remains
+   as a secondary path for local use.
+
+   **Task definition & milestones** — every task page leads with the task definition
+   (`rank.json:task`, legacy fallback `source_task/task.json`): persona, milestones, and
+   guardrails. Each milestone has *Locate in A/B* (jumps to the closest user turn — navigation,
+   not a coverage verdict) and *Ask copilot* (pre-fills a milestone-coverage check).
 
 3. **Generate docs** — `review.md` and `remediation.md` are written by an LLM agent (LiteLLM
    proxy, tool-use loop over the task's files) and rendered in the UI.

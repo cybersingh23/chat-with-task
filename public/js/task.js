@@ -28,15 +28,28 @@ const DOCS = [
   { key: 'seed', label: 'Audit seed', file: '_audit_seed.md' },
 ];
 
+let taskDef = null;
+let hasReview = false;
+
 async function buildSidebar() {
   const meta = await api(`/task/${bucket}/${taskId}`);
+  hasReview = meta.hasReview;
+  taskDef ||= await api(`/task/${bucket}/${taskId}/taskdef`);
   const navDocs = document.getElementById('nav-docs');
   navDocs.replaceChildren();
+
+  navDocs.append(
+    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showTaskDef(); } },
+      el('span', {}, el('span', { class: `status-dot ${taskDef.missing ? '' : 'on'}` }, '●'), ' Task definition'),
+      el('span', { class: 'missing' }, taskDef.missing ? 'missing' : `${taskDef.milestones.length} milestones`),
+    )
+  );
+
   for (const d of DOCS) {
     const present = d.key === 'review' ? meta.hasReview : d.key === 'remediation' ? meta.hasRemediation : meta.hasAuditSeed;
     navDocs.append(
       el('button', { class: 'nav-item', onclick: (ev) => openDoc(d, ev.currentTarget) },
-        d.label,
+        el('span', {}, el('span', { class: `status-dot ${present ? 'on' : ''}` }, '●'), ` ${d.label}`),
         present ? null : el('span', { class: 'missing' }, d.key === 'seed' ? 'none' : 'generate'),
       )
     );
@@ -119,6 +132,88 @@ function addRegenButton(doc) {
       },
     }, `Generate ${doc.key}.md`)
   );
+}
+
+// ---------- task definition / milestones ----------
+function showTaskDef() {
+  viewerTitle.textContent = `task definition${taskDef.missing ? '' : ` (${taskDef.source})`}`;
+  document.querySelector('.viewer-head .regen')?.remove();
+  if (taskDef.missing) {
+    viewerBody.replaceChildren(
+      el('div', { class: 'callout info' },
+        'No task definition shipped with this task (no embedded rank.json "task" object, no source_task/task.json). ',
+        'Informational only per customer policy 2026-06-09 — never a finding.'),
+    );
+    return;
+  }
+  viewerBody.replaceChildren(
+    el('div', { class: 'taskdef' },
+      el('h1', {}, taskDef.title || 'Task definition'),
+      el('div', { class: 'def-chips' },
+        taskDef.category ? el('span', { class: 'chip' }, taskDef.category) : null,
+        taskDef.difficulty ? el('span', { class: `chip diff-${taskDef.difficulty}` }, taskDef.difficulty) : null,
+        taskDef.language ? el('span', { class: 'chip' }, taskDef.language) : null,
+      ),
+      taskDef.user_persona
+        ? el('div', { class: 'callout' }, el('strong', {}, 'User persona — '), taskDef.user_persona)
+        : null,
+      el('h2', {}, `Milestones (${taskDef.milestones.length})`),
+      el('p', { class: 'hint-line' },
+        'The annotator must enter each milestone prompt (paraphrase counts) in order, in both trajectories. ',
+        '“Locate” jumps to the closest user turn — it is navigation, not a coverage verdict.'),
+      taskDef.milestones.map((m, i) =>
+        el('div', { class: 'milestone' },
+          el('div', { class: 'milestone-head' },
+            el('span', { class: 'chip milestone-id' }, m.id),
+            el('span', { class: 'milestone-title' }, m.title || `Milestone ${i + 1}`),
+            el('span', { class: 'spacer' }),
+            el('button', { onclick: () => locateMilestone('model_a', m) }, 'Locate in A'),
+            el('button', { onclick: () => locateMilestone('model_b', m) }, 'Locate in B'),
+            el('button', { onclick: () => askCopilotAboutMilestone(m) }, 'Ask copilot'),
+          ),
+          el('div', { class: 'milestone-prompt' }, m.prompt),
+        )
+      ),
+      taskDef.guardrails.length
+        ? [el('h2', {}, 'Guardrails'), el('ul', {}, taskDef.guardrails.map((g) => el('li', {}, g)))]
+        : null,
+    )
+  );
+}
+
+// Jump to the user turn that best lexically matches the milestone prompt.
+// Deliberately framed as navigation: fuzzy matching cannot prove a milestone
+// was or wasn't entered.
+async function locateMilestone(model, milestone) {
+  if (!trajCache[model]) trajCache[model] = await api(`/task/${bucket}/${taskId}/trajectory/${model}`);
+  const tokens = tokenize(milestone.prompt);
+  let best = null;
+  for (const m of trajCache[model].messages) {
+    if (m.role !== 'user') continue;
+    const text = m.parts.filter((p) => p.type === 'text').map((p) => p.text).join(' ');
+    const overlap = score(tokens, tokenize(text));
+    if (!best || overlap > best.overlap) best = { index: m.index, overlap };
+  }
+  if (!best) {
+    alert(`${model} has no user turns — likely a stub trajectory.`);
+    return;
+  }
+  setActive(null);
+  showTrajectory(model, best.index);
+}
+
+function tokenize(s) {
+  return new Set(String(s).toLowerCase().match(/[a-z0-9_]{3,}/g) || []);
+}
+function score(a, b) {
+  let hit = 0;
+  for (const t of a) if (b.has(t)) hit++;
+  return a.size ? hit / a.size : 0;
+}
+
+function askCopilotAboutMilestone(m) {
+  chatText.value = `Check milestone ${m.id} ("${m.title || m.prompt.slice(0, 80)}") in both trajectories: was its intent entered by the annotator (paraphrase counts) or done proactively by the model? Cite the matching user turns with traj:// links, or quote evidence it is genuinely absent.`;
+  chatText.focus();
 }
 
 async function showTrajectory(model, focusIndex = null) {
@@ -264,7 +359,11 @@ await buildSidebar();
 const params = new URLSearchParams(location.search);
 if (params.get('traj')) {
   showTrajectory(params.get('traj'), params.has('msg') ? Number(params.get('msg')) : null);
+} else if (!hasReview && !taskDef.missing) {
+  // fresh task: lead with the task definition so milestones are front and center
+  setActive(document.querySelector('#nav-docs .nav-item'));
+  showTaskDef();
 } else {
-  openDoc(DOCS[0], document.querySelector('#nav-docs .nav-item'));
+  openDoc(DOCS[0], document.querySelectorAll('#nav-docs .nav-item')[1]);
 }
 await loadChat();

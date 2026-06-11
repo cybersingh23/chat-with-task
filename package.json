@@ -9,6 +9,7 @@
     "dev": "node --watch server.js"
   },
   "dependencies": {
+    "busboy": "^1.6.0",
     "express": "^4.21.0"
   }
 }

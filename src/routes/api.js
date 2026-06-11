@@ -4,9 +4,10 @@ import path from 'node:path';
 import { config } from '../config.js';
 import {
   listWorkspace, taskMeta, listFiles, readTaskFile, readTrajectory,
-  moveTask, taskDir, resolveSafe,
+  readTaskDef, moveTask, taskDir, resolveSafe,
 } from '../workspace.js';
 import { ingestTask, findTaskSources } from '../ingest.js';
+import { handleUpload } from '../upload.js';
 import { runAgentLoop } from '../llm.js';
 import { TOOL_DEFS, makeExecutor } from '../tools.js';
 import { generateDoc, taskContext, CITATION_RULES } from '../docgen.js';
@@ -28,6 +29,11 @@ api.post('/ingest', wrap(async (req, res) => {
 }));
 
 api.get('/find/:taskId', wrap(async (req, res) => res.json({ sources: findTaskSources(req.params.taskId) })));
+
+// multipart folder/zip upload — must NOT go through express.json
+api.post('/upload', handleUpload);
+
+api.get('/task/:bucket/:id/taskdef', wrap(async (req, res) => res.json(readTaskDef(req.params.bucket, req.params.id))));
 
 api.get('/task/:bucket/:id', wrap(async (req, res) => res.json(taskMeta(req.params.bucket, req.params.id))));
 

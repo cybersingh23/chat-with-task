@@ -18,73 +18,42 @@
   </header>
 
   <main class="index-main">
-    <div class="claim-box">
-      <input type="text" id="claim-input" placeholder="paste full 24-char task_id to claim" maxlength="24" spellcheck="false" />
-      <select id="claim-bucket">
-        <option value="UNSORTED">UNSORTED</option>
-        <option value="HARD_FAIL">HARD_FAIL</option>
-        <option value="SOFT_FAIL">SOFT_FAIL</option>
-        <option value="PASS">PASS</option>
-      </select>
-      <button class="primary" id="claim-btn">Claim task</button>
-      <span class="mono" id="claim-status"></span>
-      <div class="hint">
-        Claims search every ACC_DELIVERY_* folder under the configured delivery roots and copy the
-        task (plus its _audit findings as a seed) into the workspace. Bulk-sort an audited delivery
-        with <code>python3 tools/sort_delivery.py &lt;delivery_dir&gt;</code>.
+    <section class="ingest">
+      <div class="drop-zone" id="drop-zone">
+        <div class="drop-title">Add a task to audit</div>
+        <div class="drop-sub">Drag the <span class="mono">&lt;task_id&gt;</span> folder (or a .zip of it) here</div>
+        <div class="drop-actions">
+          <button class="primary" id="pick-folder">Select folder…</button>
+          <button id="pick-zip">Select .zip…</button>
+          <select id="upload-bucket" title="bucket for the new task">
+            <option value="UNSORTED">→ UNSORTED</option>
+            <option value="HARD_FAIL">→ HARD_FAIL</option>
+            <option value="SOFT_FAIL">→ SOFT_FAIL</option>
+            <option value="PASS">→ PASS</option>
+          </select>
+        </div>
+        <div class="progress" id="upload-progress" hidden>
+          <div class="progress-bar" id="upload-bar"></div>
+        </div>
+        <div class="mono drop-status" id="upload-status"></div>
+        <input type="file" id="folder-input" webkitdirectory multiple hidden />
+        <input type="file" id="zip-input" accept=".zip" hidden />
       </div>
-    </div>
+      <details class="claim-secondary">
+        <summary>…or claim by task ID (server-side search of local delivery folders)</summary>
+        <div class="claim-row">
+          <input type="text" id="claim-input" placeholder="full 24-char task_id" maxlength="24" spellcheck="false" />
+          <button id="claim-btn">Claim</button>
+          <span class="mono" id="claim-status"></span>
+        </div>
+      </details>
+    </section>
+
     <div class="buckets" id="buckets"></div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
-  <script type="module">
-    import { api, el } from '/js/common.js';
-
-    const ORDER = ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'];
-
-    async function load() {
-      const [ws, cfg] = await Promise.all([api('/workspace'), api('/config')]);
-      document.getElementById('config-meta').textContent = `${cfg.model} · ${cfg.workspaceRoot}`;
-      const root = document.getElementById('buckets');
-      root.replaceChildren();
-      for (const bucket of ORDER) {
-        const tasks = ws[bucket] || [];
-        root.append(
-          el('section', { class: 'bucket' },
-            el('h2', {}, el('span', { class: `chip ${bucket}` }, bucket), el('span', { class: 'count' }, String(tasks.length))),
-            tasks.map((t) =>
-              el('a', { class: 'task-card', href: `/task/${bucket}/${t.id}` },
-                el('div', { class: 'tid' }, t.id),
-                t.problem ? el('div', { class: 'prob' }, t.problem) : null,
-                el('div', { class: 'dots' },
-                  el('span', { class: `dot ${t.hasReview ? 'on' : ''}` }, '● review'),
-                  el('span', { class: `dot ${t.hasRemediation ? 'on' : ''}` }, '● remediation'),
-                  el('span', { class: `dot ${t.hasAuditSeed ? 'on' : ''}` }, '● seed'),
-                ),
-              )
-            ),
-          )
-        );
-      }
-    }
-
-    document.getElementById('claim-btn').addEventListener('click', async () => {
-      const status = document.getElementById('claim-status');
-      const taskId = document.getElementById('claim-input').value.trim();
-      const bucket = document.getElementById('claim-bucket').value;
-      status.textContent = 'searching…';
-      try {
-        const r = await api('/ingest', { method: 'POST', body: { taskId, bucket } });
-        status.textContent = `claimed from ${r.source}`;
-        location.href = `/task/${r.bucket}/${r.taskId}`;
-      } catch (e) {
-        status.textContent = e.message;
-      }
-    });
-
-    load();
-  </script>
+  <script type="module" src="/js/index.js"></script>
 </body>
 </html>

@@ -151,6 +151,70 @@ function clip(s) {
   return s.length > PART_TEXT_CAP ? s.slice(0, PART_TEXT_CAP) + `\n… [truncated, ${s.length} chars total]` : s;
 }
 
+// Task definition: v2 schema embeds it in rank.json under "task" (object);
+// legacy batches carry a CDS URL string there, with source_task/task.json as
+// the only local fallback. Missing is INFORMATIONAL per customer policy.
+export function readTaskDef(bucket, id) {
+  const dir = taskDir(bucket, id);
+  let task = null;
+  let source = null;
+  try {
+    const rank = JSON.parse(fs.readFileSync(path.join(dir, 'rank.json'), 'utf8'));
+    if (rank.task && typeof rank.task === 'object') {
+      task = rank.task;
+      source = 'rank.json:task';
+    }
+  } catch { /* fall through to legacy file */ }
+  if (!task) {
+    const legacy = path.join(dir, 'source_task', 'task.json');
+    if (fs.existsSync(legacy)) {
+      try {
+        task = JSON.parse(fs.readFileSync(legacy, 'utf8'));
+        source = 'source_task/task.json';
+      } catch { /* unparseable */ }
+    }
+  }
+  if (!task) return { missing: true };
+  const ui = task.user_intent || {};
+  return {
+    missing: false,
+    source,
+    title: task.task_title || '',
+    category: [task.task_category, task.task_subcategory].filter(Boolean).join(' / '),
+    difficulty: task.difficulty || '',
+    language: task.language || '',
+    user_persona: typeof ui.user_persona === 'string' ? ui.user_persona : JSON.stringify(ui.user_persona || ''),
+    milestones: asList(ui.milestones).map((m, i) =>
+      typeof m === 'string'
+        ? { id: `m${i + 1}`, title: '', prompt: m }
+        : { id: m.milestone_id || `m${i + 1}`, title: m.title || '', prompt: m.prompt || '' }
+    ),
+    guardrails: guardrailLines(ui.guardrails),
+  };
+}
+
+// Vendor task.json fields drift between string / array / object shapes.
+function asList(v) {
+  if (v == null) return [];
+  if (Array.isArray(v)) return v;
+  if (typeof v === 'object') return Object.values(v);
+  return [v];
+}
+
+// guardrails is usually {max_turns, session_abort_criteria: [...], notes} but
+// drifts; flatten to display lines, one per rule.
+function guardrailLines(g) {
+  if (g == null) return [];
+  if (typeof g === 'string') return [g];
+  if (Array.isArray(g)) return g.map((x) => (typeof x === 'string' ? x : JSON.stringify(x)));
+  const lines = [];
+  for (const [k, v] of Object.entries(g)) {
+    if (Array.isArray(v)) for (const item of v) lines.push(`${k}: ${typeof item === 'string' ? item : JSON.stringify(item)}`);
+    else lines.push(`${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+  }
+  return lines;
+}
+
 export function httpError(status, message) {
   const e = new Error(message);
   e.status = status;
