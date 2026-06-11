@@ -6,14 +6,40 @@ const chip = document.getElementById('bucket-chip');
 chip.textContent = bucket;
 chip.className = `chip ${bucket}`;
 
+const viewerEl = document.getElementById('viewer');
 const viewerBody = document.getElementById('viewer-body');
 const viewerTitle = document.getElementById('viewer-title');
+const trajToolbar = document.getElementById('traj-toolbar');
 const trajCache = {};
 let activeNav = null;
 
+// ---------- view cache: every view keeps its DOM + scroll position ----------
+// Switching between review.md, the trajectory, and files swaps live nodes in
+// and out, so scroll position AND expanded/collapsed turn state persist.
+const viewCache = new Map(); // key -> { node, scrollTop }
+let currentViewKey = null;
+
+function saveCurrentScroll() {
+  if (currentViewKey && viewCache.has(currentViewKey)) {
+    viewCache.get(currentViewKey).scrollTop = viewerEl.scrollTop;
+  }
+}
+
+function mountView(key, build, { refresh = false } = {}) {
+  saveCurrentScroll();
+  if (refresh) viewCache.delete(key);
+  let entry = viewCache.get(key);
+  if (!entry) {
+    entry = { node: build(), scrollTop: 0 };
+    viewCache.set(key, entry);
+  }
+  viewerBody.replaceChildren(entry.node);
+  currentViewKey = key;
+  viewerEl.scrollTop = entry.scrollTop;
+  return entry;
+}
+
 // ---------- global traj:// deep-link delegation ----------
-// Any element with data-traj-model/index (markdown links, chat citations)
-// opens the trajectory viewer at that message.
 document.addEventListener('click', (e) => {
   const a = e.target.closest('[data-traj-model]');
   if (!a) return;
@@ -40,7 +66,7 @@ async function buildSidebar() {
 
   navDocs.append(
     el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showTaskDef(); } },
-      el('span', {}, el('span', { class: `status-dot ${taskDef.missing ? '' : 'on'}` }, '●'), ' Task definition'),
+      el('span', {}, 'Task definition'),
       el('span', { class: 'missing' }, taskDef.missing ? 'missing' : `${taskDef.milestones.length} milestones`),
     )
   );
@@ -49,7 +75,7 @@ async function buildSidebar() {
     const present = d.key === 'review' ? meta.hasReview : d.key === 'remediation' ? meta.hasRemediation : meta.hasAuditSeed;
     navDocs.append(
       el('button', { class: 'nav-item', onclick: (ev) => openDoc(d, ev.currentTarget) },
-        el('span', {}, el('span', { class: `status-dot ${present ? 'on' : ''}` }, '●'), ` ${d.label}`),
+        el('span', {}, d.label),
         present ? null : el('span', { class: 'missing' }, d.key === 'seed' ? 'none' : 'generate'),
       )
     );
@@ -64,11 +90,9 @@ async function buildSidebar() {
       )
     )
   );
-  // fill message counts in the background
   for (const m of ['model_a', 'model_b']) {
-    api(`/task/${bucket}/${taskId}/trajectory/${m}`)
+    loadTrajectory(m)
       .then((t) => {
-        trajCache[m] = t;
         const users = t.messages.filter((x) => x.role === 'user').length;
         document.getElementById(`traj-meta-${m}`).textContent = `${t.count} msgs · ${users} prompts`;
       })
@@ -78,9 +102,9 @@ async function buildSidebar() {
   const tree = await api(`/task/${bucket}/${taskId}/files`);
   const navFiles = document.getElementById('nav-files');
   navFiles.replaceChildren();
-  const addEntries = (entries, depth) => {
+  const addEntries = (entries) => {
     for (const entry of entries) {
-      if (entry.dir) { addEntries(entry.children, depth + 1); continue; }
+      if (entry.dir) { addEntries(entry.children); continue; }
       const name = entry.path;
       if (['review.md', 'remediation.md', '_audit_seed.md', '_chat.json', '_studio.json'].includes(name)) continue;
       if (/^trajectories\//.test(name)) continue;
@@ -90,7 +114,7 @@ async function buildSidebar() {
       );
     }
   };
-  addEntries(tree, 0);
+  addEntries(tree);
 }
 
 function setActive(node) {
@@ -99,24 +123,39 @@ function setActive(node) {
   node?.classList.add('active');
 }
 
-// ---------- viewers ----------
-async function openDoc(doc, navNode) {
+function loadTrajectory(model) {
+  trajCache[model] ||= api(`/task/${bucket}/${taskId}/trajectory/${model}`);
+  return trajCache[model];
+}
+
+function hideTrajToolbar() {
+  trajToolbar.hidden = true;
+  document.getElementById('traj-launch-model_a')?.classList.remove('active');
+  document.getElementById('traj-launch-model_b')?.classList.remove('active');
+}
+
+// ---------- documents ----------
+async function openDoc(doc, navNode, { refresh = false } = {}) {
   setActive(navNode);
   hideTrajToolbar();
   viewerTitle.textContent = doc.file;
-  try {
-    const f = await api(`/task/${bucket}/${taskId}/file?path=${encodeURIComponent(doc.file)}`);
-    viewerBody.replaceChildren(el('div', { class: 'md' }));
-    viewerBody.firstChild.innerHTML = renderMarkdown(f.text);
-    if (doc.key !== 'seed') addRegenButton(doc);
-  } catch {
-    viewerBody.replaceChildren(
-      el('p', {}, doc.key === 'seed'
-        ? 'No _audit_seed.md — this task was claimed from a delivery without /acc audit artifacts.'
-        : `No ${doc.file} yet.`),
-    );
-    if (doc.key !== 'seed') addRegenButton(doc);
+  if (refresh || !viewCache.has(`doc:${doc.key}`)) {
+    let content;
+    try {
+      const f = await api(`/task/${bucket}/${taskId}/file?path=${encodeURIComponent(doc.file)}`);
+      content = el('div', { class: 'md' });
+      content.innerHTML = renderMarkdown(f.text);
+    } catch {
+      content = el('p', { class: 'hint-line' },
+        doc.key === 'seed'
+          ? 'No _audit_seed.md — this task was added without /acc audit artifacts.'
+          : `No ${doc.file} yet — generate it from the button above.`);
+    }
+    mountView(`doc:${doc.key}`, () => content, { refresh: true });
+  } else {
+    mountView(`doc:${doc.key}`, () => null);
   }
+  if (doc.key !== 'seed') addRegenButton(doc);
 }
 
 function addRegenButton(doc) {
@@ -135,8 +174,7 @@ function addRegenButton(doc) {
             if (m.type === 'tool') progress.textContent = `⚙ ${m.name} ${JSON.stringify(m.args)}`;
             if (m.type === 'error') progress.textContent = `error: ${m.message}`;
             if (m.type === 'done') {
-              viewerBody.replaceChildren(el('div', { class: 'md' }));
-              viewerBody.firstChild.innerHTML = renderMarkdown(m.doc);
+              openDoc(doc, activeNav, { refresh: true });
               buildSidebar();
             }
           });
@@ -154,57 +192,53 @@ function showTaskDef() {
   hideTrajToolbar();
   viewerTitle.textContent = `task definition${taskDef.missing ? '' : ` (${taskDef.source})`}`;
   document.querySelector('.viewer-head .regen')?.remove();
+  mountView('taskdef', buildTaskDefView);
+}
+
+function buildTaskDefView() {
   if (taskDef.missing) {
-    viewerBody.replaceChildren(
-      el('div', { class: 'callout info' },
-        'No task definition shipped with this task (no embedded rank.json "task" object, no source_task/task.json). ',
-        'Informational only per customer policy 2026-06-09 — never a finding.'),
-    );
-    return;
+    return el('div', { class: 'callout info' },
+      'No task definition shipped with this task (no embedded rank.json "task" object, no source_task/task.json). ',
+      'Informational only per customer policy 2026-06-09 — never a finding.');
   }
-  viewerBody.replaceChildren(
-    el('div', { class: 'taskdef' },
-      el('h1', {}, taskDef.title || 'Task definition'),
-      el('div', { class: 'def-chips' },
-        taskDef.category ? el('span', { class: 'chip' }, taskDef.category) : null,
-        taskDef.difficulty ? el('span', { class: `chip diff-${taskDef.difficulty}` }, taskDef.difficulty) : null,
-        taskDef.language ? el('span', { class: 'chip' }, taskDef.language) : null,
-      ),
-      taskDef.user_persona
-        ? el('div', { class: 'callout' }, el('strong', {}, 'User persona — '), taskDef.user_persona)
-        : null,
-      el('h2', {}, `Milestones (${taskDef.milestones.length})`),
-      el('p', { class: 'hint-line' },
-        'The annotator must enter each milestone prompt (paraphrase counts) in order, in both trajectories. ',
-        '“Locate” jumps to the closest user turn — it is navigation, not a coverage verdict.'),
-      taskDef.milestones.map((m, i) =>
-        el('div', { class: 'milestone' },
-          el('div', { class: 'milestone-head' },
-            el('span', { class: 'chip milestone-id' }, m.id),
-            el('span', { class: 'milestone-title' }, m.title || `Milestone ${i + 1}`),
-            el('span', { class: 'spacer' }),
-            el('button', { onclick: () => locateMilestone('model_a', m) }, 'Locate in A'),
-            el('button', { onclick: () => locateMilestone('model_b', m) }, 'Locate in B'),
-            el('button', { onclick: () => askCopilotAboutMilestone(m) }, 'Ask copilot'),
-          ),
-          el('div', { class: 'milestone-prompt' }, m.prompt),
-        )
-      ),
-      taskDef.guardrails.length
-        ? [el('h2', {}, 'Guardrails'), el('ul', {}, taskDef.guardrails.map((g) => el('li', {}, g)))]
-        : null,
-    )
+  return el('div', { class: 'taskdef' },
+    el('h1', {}, taskDef.title || 'Task definition'),
+    el('div', { class: 'def-chips' },
+      taskDef.category ? el('span', { class: 'chip' }, taskDef.category) : null,
+      taskDef.difficulty ? el('span', { class: `chip diff-${taskDef.difficulty}` }, taskDef.difficulty) : null,
+      taskDef.language ? el('span', { class: 'chip' }, taskDef.language) : null,
+    ),
+    taskDef.user_persona
+      ? el('div', { class: 'callout' }, el('strong', {}, 'User persona — '), taskDef.user_persona)
+      : null,
+    el('h2', {}, `Milestones (${taskDef.milestones.length})`),
+    el('p', { class: 'hint-line' },
+      'The annotator must enter each milestone prompt (paraphrase counts) in order, in both trajectories. ',
+      '"Locate" jumps to the closest user turn — it is navigation, not a coverage verdict.'),
+    taskDef.milestones.map((m, i) =>
+      el('div', { class: 'milestone' },
+        el('div', { class: 'milestone-head' },
+          el('span', { class: 'chip milestone-id' }, m.id),
+          el('span', { class: 'milestone-title' }, m.title || `Milestone ${i + 1}`),
+          el('span', { class: 'spacer' }),
+          el('button', { onclick: () => locateMilestone('model_a', m) }, 'Locate in A'),
+          el('button', { onclick: () => locateMilestone('model_b', m) }, 'Locate in B'),
+          el('button', { onclick: () => askCopilotAboutMilestone(m) }, 'Ask copilot'),
+        ),
+        el('div', { class: 'milestone-prompt' }, m.prompt),
+      )
+    ),
+    taskDef.guardrails.length
+      ? [el('h2', {}, 'Guardrails'), el('ul', {}, taskDef.guardrails.map((g) => el('li', {}, g)))]
+      : null,
   );
 }
 
-// Jump to the user turn that best lexically matches the milestone prompt.
-// Deliberately framed as navigation: fuzzy matching cannot prove a milestone
-// was or wasn't entered.
 async function locateMilestone(model, milestone) {
-  if (!trajCache[model]) trajCache[model] = await api(`/task/${bucket}/${taskId}/trajectory/${model}`);
+  const traj = await loadTrajectory(model);
   const tokens = tokenize(milestone.prompt);
   let best = null;
-  for (const m of trajCache[model].messages) {
+  for (const m of traj.messages) {
     if (m.role !== 'user') continue;
     const text = m.parts.filter((p) => p.type === 'text').map((p) => p.text).join(' ');
     const overlap = score(tokens, tokenize(text));
@@ -228,18 +262,16 @@ function score(a, b) {
 }
 
 function askCopilotAboutMilestone(m) {
+  setChatCollapsed(false);
   chatText.value = `Check milestone ${m.id} ("${m.title || m.prompt.slice(0, 80)}") in both trajectories: was its intent entered by the annotator (paraphrase counts) or done proactively by the model? Cite the matching user turns with traj:// links, or quote evidence it is genuinely absent.`;
   chatText.focus();
 }
 
-// Trajectory viewer — prompt-grouped turns, matching trajectory-viewer-v2:
-// each user prompt opens a collapsible "Prompt N" group containing the user
-// block and the indented assistant work (text + color-coded tool blocks).
+// ---------- trajectory viewer (prompt-grouped, matching trajectory-viewer-v2) ----------
 const TOOL_COLORS = {
   bash: 'blue', read: 'green', edit: 'amber', apply_patch: 'orange',
   write: 'cyan', grep: 'purple', glob: 'purple', task: 'stone', agent: 'pink', question: 'pink',
 };
-let activeTrajModel = null;
 
 function groupTurns(messages) {
   const groups = [];
@@ -262,27 +294,13 @@ function userText(m) {
   return m.parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n');
 }
 
-const trajToolbar = document.getElementById('traj-toolbar');
-
-function hideTrajToolbar() {
-  trajToolbar.hidden = true;
-  activeTrajModel = null;
-  document.getElementById('traj-launch-model_a')?.classList.remove('active');
-  document.getElementById('traj-launch-model_b')?.classList.remove('active');
-}
-
 async function showTrajectory(model, focusIndex = null) {
   viewerTitle.textContent = `Trajectory viewer — trajectory_${model}.json`;
   document.querySelector('.viewer-head .regen')?.remove();
-  if (!trajCache[model]) {
-    viewerBody.replaceChildren(el('p', { class: 'mono' }, `loading ${model}…`));
-    trajCache[model] = await api(`/task/${bucket}/${taskId}/trajectory/${model}`);
-  }
-  const traj = trajCache[model];
-  activeTrajModel = model;
-  document.getElementById(`traj-launch-model_a`)?.classList.toggle('active', model === 'model_a');
-  document.getElementById(`traj-launch-model_b`)?.classList.toggle('active', model === 'model_b');
+  const traj = await loadTrajectory(model);
 
+  document.getElementById('traj-launch-model_a')?.classList.toggle('active', model === 'model_a');
+  document.getElementById('traj-launch-model_b')?.classList.toggle('active', model === 'model_b');
   trajToolbar.hidden = false;
   document.getElementById('traj-tabs').replaceChildren(
     ...['model_a', 'model_b'].map((m) =>
@@ -293,19 +311,17 @@ async function showTrajectory(model, focusIndex = null) {
     )
   );
 
-  const groups = groupTurns(traj.messages);
-  viewerBody.replaceChildren(
-    el('div', { class: 'convo' },
-      ...groups.map((g, gi) => renderTurnGroup(model, g, gi))
-    )
+  mountView(`traj:${model}`, () =>
+    el('div', { class: 'convo' }, ...groupTurns(traj.messages).map((g, gi) => renderTurnGroup(model, g, gi)))
   );
 
+  // An explicit citation jump overrides the remembered scroll position.
   if (focusIndex != null) {
     const node = document.getElementById(`msg-${model}-${focusIndex}`);
     if (node) {
       node.closest('.turn-body')?.classList.add('open');
-      node.closest('.turn-group')?.querySelector('.arrow')?.classList.add('open');
-      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      node.closest('.turn-group')?.querySelector('.turn-header .arrow')?.classList.add('open');
+      node.scrollIntoView({ behavior: 'instant', block: 'start' });
       node.classList.add('flash');
       setTimeout(() => node.classList.remove('flash'), 2500);
     }
@@ -369,8 +385,9 @@ function copyLinkBtn(model, index) {
     onclick: (e) => {
       e.stopPropagation();
       navigator.clipboard.writeText(`traj://${model}/${index}`);
-      e.currentTarget.textContent = 'copied';
-      setTimeout(() => { e.currentTarget && (e.currentTarget.textContent = 'link'); }, 1200);
+      const btn = e.currentTarget;
+      btn.textContent = 'copied';
+      setTimeout(() => { btn.textContent = 'link'; }, 1200);
     },
   }, 'link');
 }
@@ -399,33 +416,38 @@ function renderToolBlock(p) {
 let allCollapsed = false;
 document.getElementById('collapse-all').addEventListener('click', (e) => {
   allCollapsed = !allCollapsed;
-  document.querySelectorAll('.turn-body').forEach((b) => b.classList.toggle('open', !allCollapsed));
-  document.querySelectorAll('.turn-header .arrow').forEach((a) => a.classList.toggle('open', !allCollapsed));
+  viewerBody.querySelectorAll('.turn-body').forEach((b) => b.classList.toggle('open', !allCollapsed));
+  viewerBody.querySelectorAll('.turn-header .arrow').forEach((a) => a.classList.toggle('open', !allCollapsed));
   e.currentTarget.textContent = allCollapsed ? 'Expand all' : 'Collapse all';
 });
 
+// ---------- files ----------
 async function showFile(relPath) {
   hideTrajToolbar();
   viewerTitle.textContent = relPath;
   document.querySelector('.viewer-head .regen')?.remove();
-  if (/\.(png|jpg|jpeg|gif|webp)$/i.test(relPath)) {
-    viewerBody.replaceChildren(
-      el('img', { class: 'proof', src: `/api/task/${bucket}/${taskId}/file?path=${encodeURIComponent(relPath)}` })
-    );
+  if (viewCache.has(`file:${relPath}`)) {
+    mountView(`file:${relPath}`, () => null);
     return;
   }
-  const f = await api(`/task/${bucket}/${taskId}/file?path=${encodeURIComponent(relPath)}`);
-  if (relPath.endsWith('.md')) {
-    viewerBody.replaceChildren(el('div', { class: 'md' }));
-    viewerBody.firstChild.innerHTML = renderMarkdown(f.text);
-  } else if (relPath.endsWith('.json')) {
-    let pretty = f.text;
-    try { pretty = JSON.stringify(JSON.parse(f.text), null, 2); } catch { /* show raw */ }
-    viewerBody.replaceChildren(el('pre', { class: 'raw' }, pretty));
+  let content;
+  if (/\.(png|jpg|jpeg|gif|webp)$/i.test(relPath)) {
+    content = el('img', { class: 'proof', src: `/api/task/${bucket}/${taskId}/file?path=${encodeURIComponent(relPath)}` });
   } else {
-    viewerBody.replaceChildren(el('pre', { class: 'raw' }, f.text));
+    const f = await api(`/task/${bucket}/${taskId}/file?path=${encodeURIComponent(relPath)}`);
+    if (relPath.endsWith('.md')) {
+      content = el('div', { class: 'md' });
+      content.innerHTML = renderMarkdown(f.text);
+    } else if (relPath.endsWith('.json')) {
+      let pretty = f.text;
+      try { pretty = JSON.stringify(JSON.parse(f.text), null, 2); } catch { /* show raw */ }
+      content = el('pre', { class: 'raw' }, pretty);
+    } else {
+      content = el('pre', { class: 'raw' }, f.text);
+    }
+    if (f.truncated) content = el('div', {}, el('p', { class: 'hint-line' }, '[file clipped at 200k chars]'), content);
   }
-  if (f.truncated) viewerBody.prepend(el('p', { class: 'mono' }, '[file clipped at 200k chars]'));
+  mountView(`file:${relPath}`, () => content);
 }
 
 // ---------- chat ----------
@@ -494,6 +516,7 @@ document.getElementById('clear-chat').addEventListener('click', async () => {
   chatLog.replaceChildren();
 });
 
+// ---------- claim / verdict / move ----------
 document.getElementById('move-select').addEventListener('change', async (e) => {
   const to = e.target.value;
   if (!to || to === bucket) return;
@@ -501,7 +524,6 @@ document.getElementById('move-select').addEventListener('change', async (e) => {
   location.href = `/task/${to}/${taskId}`;
 });
 
-// ---------- claim / verdict ----------
 const claimBtn = document.getElementById('claim-btn');
 const claimChip = document.getElementById('claim-chip');
 const verdictSelect = document.getElementById('verdict-select');
@@ -539,36 +561,70 @@ verdictSelect.addEventListener('change', async () => {
   refreshState();
 });
 
-// ---------- collapsible chat panel ----------
-const layout = document.querySelector('.task-layout');
-const expandChatBtn = document.getElementById('expand-chat');
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  await api('/logout', { method: 'POST' });
+  location.href = '/login.html';
+});
 
+// ---------- resizable / collapsible chat panel ----------
+const layout = document.querySelector('.task-layout');
+const resizer = document.getElementById('chat-resizer');
+const expandChatBtn = document.getElementById('expand-chat');
+const MIN_CHAT = 300, MAX_CHAT = 720, COLLAPSE_AT = 200;
+
+function setChatWidth(px) {
+  layout.style.setProperty('--chat-w', `${Math.min(MAX_CHAT, Math.max(MIN_CHAT, px))}px`);
+}
 function setChatCollapsed(collapsed) {
   layout.classList.toggle('chat-collapsed', collapsed);
   expandChatBtn.hidden = !collapsed;
   localStorage.setItem('cwt_chat_collapsed', collapsed ? '1' : '');
 }
-document.getElementById('collapse-chat').addEventListener('click', () => setChatCollapsed(true));
-expandChatBtn.addEventListener('click', () => setChatCollapsed(false));
+
+const savedW = Number(localStorage.getItem('cwt_chat_w'));
+if (savedW) setChatWidth(savedW);
 if (localStorage.getItem('cwt_chat_collapsed')) setChatCollapsed(true);
 
-document.getElementById('logout-btn').addEventListener('click', async () => {
-  await api('/logout', { method: 'POST' });
-  location.href = '/login.html';
+resizer.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  resizer.setPointerCapture(e.pointerId);
+  resizer.classList.add('dragging');
+  document.body.style.cursor = 'col-resize';
+  const onMove = (ev) => {
+    const w = window.innerWidth - ev.clientX - 20; // 20px page padding
+    if (w < COLLAPSE_AT) {
+      setChatCollapsed(true);
+    } else {
+      setChatCollapsed(false);
+      setChatWidth(w);
+    }
+  };
+  const onUp = () => {
+    resizer.classList.remove('dragging');
+    document.body.style.cursor = '';
+    const w = parseInt(layout.style.getPropertyValue('--chat-w')) || 400;
+    localStorage.setItem('cwt_chat_w', String(w));
+    resizer.removeEventListener('pointermove', onMove);
+    resizer.removeEventListener('pointerup', onUp);
+  };
+  resizer.addEventListener('pointermove', onMove);
+  resizer.addEventListener('pointerup', onUp);
 });
+resizer.addEventListener('dblclick', () => setChatCollapsed(true));
+document.getElementById('collapse-chat').addEventListener('click', () => setChatCollapsed(true));
+expandChatBtn.addEventListener('click', () => setChatCollapsed(false));
 
 // ---------- boot ----------
 const me = await api('/me'); // 401 redirects to login
 document.getElementById('user-chip').hidden = false;
 document.getElementById('user-name').textContent = me.username;
 await refreshState();
-setInterval(refreshState, 10_000); // reflect other reviewers' claims live
+setInterval(refreshState, 10_000);
 await buildSidebar();
 const params = new URLSearchParams(location.search);
 if (params.get('traj')) {
   showTrajectory(params.get('traj'), params.has('msg') ? Number(params.get('msg')) : null);
 } else if (!hasReview && !taskDef.missing) {
-  // fresh task: lead with the task definition so milestones are front and center
   setActive(document.querySelector('#nav-docs .nav-item'));
   showTaskDef();
 } else {
