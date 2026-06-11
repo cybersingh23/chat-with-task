@@ -19,6 +19,21 @@ let activeNav = null;
 const viewCache = new Map(); // key -> { node, scrollTop }
 let currentViewKey = null;
 
+// Back navigation (small ‹ in the viewer header): each view registers how to
+// reopen itself; switching views pushes the previous one onto the stack.
+const viewReopeners = new Map(); // key -> () => void
+const navStack = [];
+let suppressHistory = false;
+const backBtn = document.getElementById('back-btn');
+
+backBtn.addEventListener('click', () => {
+  const prev = navStack.pop();
+  if (!prev) return;
+  suppressHistory = true;
+  Promise.resolve(prev()).finally(() => { suppressHistory = false; });
+  backBtn.hidden = navStack.length === 0;
+});
+
 function saveCurrentScroll() {
   if (currentViewKey && viewCache.has(currentViewKey)) {
     viewCache.get(currentViewKey).scrollTop = viewerEl.scrollTop;
@@ -27,6 +42,11 @@ function saveCurrentScroll() {
 
 function mountView(key, build, { refresh = false } = {}) {
   saveCurrentScroll();
+  if (currentViewKey && currentViewKey !== key && !suppressHistory && viewReopeners.has(currentViewKey)) {
+    navStack.push(viewReopeners.get(currentViewKey));
+    if (navStack.length > 20) navStack.shift();
+  }
+  backBtn.hidden = navStack.length === 0;
   if (refresh) viewCache.delete(key);
   let entry = viewCache.get(key);
   if (!entry) {
@@ -123,6 +143,10 @@ function setActive(node) {
   node?.classList.add('active');
 }
 
+function findDocNav(label) {
+  return [...document.querySelectorAll('#nav-docs .nav-item')].find((b) => b.textContent.includes(label)) || null;
+}
+
 function loadTrajectory(model) {
   trajCache[model] ||= api(`/task/${bucket}/${taskId}/trajectory/${model}`);
   return trajCache[model];
@@ -139,6 +163,7 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
   setActive(navNode);
   hideTrajToolbar();
   viewerTitle.textContent = doc.file;
+  viewReopeners.set(`doc:${doc.key}`, () => openDoc(doc, findDocNav(doc.label)));
   if (refresh || !viewCache.has(`doc:${doc.key}`)) {
     let content;
     try {
@@ -192,6 +217,7 @@ function showTaskDef() {
   hideTrajToolbar();
   viewerTitle.textContent = `task definition${taskDef.missing ? '' : ` (${taskDef.source})`}`;
   document.querySelector('.viewer-head .regen')?.remove();
+  viewReopeners.set('taskdef', () => { setActive(findDocNav('Task definition')); showTaskDef(); });
   mountView('taskdef', buildTaskDefView);
 }
 
@@ -295,8 +321,10 @@ function userText(m) {
 }
 
 async function showTrajectory(model, focusIndex = null) {
+  setActive(null); // single highlight: the launcher below is the only active marker
   viewerTitle.textContent = `Trajectory viewer — trajectory_${model}.json`;
   document.querySelector('.viewer-head .regen')?.remove();
+  viewReopeners.set(`traj:${model}`, () => showTrajectory(model));
   const traj = await loadTrajectory(model);
 
   document.getElementById('traj-launch-model_a')?.classList.toggle('active', model === 'model_a');
@@ -426,6 +454,10 @@ async function showFile(relPath) {
   hideTrajToolbar();
   viewerTitle.textContent = relPath;
   document.querySelector('.viewer-head .regen')?.remove();
+  viewReopeners.set(`file:${relPath}`, () => {
+    setActive([...document.querySelectorAll('#nav-files .nav-item')].find((b) => b.title === relPath) || null);
+    showFile(relPath);
+  });
   if (viewCache.has(`file:${relPath}`)) {
     mountView(`file:${relPath}`, () => null);
     return;
@@ -486,6 +518,7 @@ async function send() {
   const message = chatText.value.trim();
   if (!message) return;
   chatText.value = '';
+  chatText.style.height = '38px';
   appendChat('user', message);
   document.getElementById('chat-send').disabled = true;
   chatStatus.textContent = 'thinking…';
@@ -510,6 +543,11 @@ async function send() {
 document.getElementById('chat-send').addEventListener('click', send);
 chatText.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+// single-line input that grows only when the draft does
+chatText.addEventListener('input', () => {
+  chatText.style.height = '38px';
+  chatText.style.height = Math.min(132, chatText.scrollHeight) + 'px';
 });
 document.getElementById('clear-chat').addEventListener('click', async () => {
   await api(`/task/${bucket}/${taskId}/chat`, { method: 'DELETE' });
