@@ -2,16 +2,38 @@ import { api, el } from '/js/common.js';
 
 const ORDER = ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'];
 const EMPTY_HINTS = {
-  HARD_FAIL: 'No hard fails claimed.',
-  SOFT_FAIL: 'No soft fails claimed.',
-  PASS: 'Nothing verified yet.',
-  UNSORTED: 'Upload a task to start.',
+  HARD_FAIL: 'No hard fails.',
+  SOFT_FAIL: 'No soft fails.',
+  PASS: 'Nothing in pass.',
+  UNSORTED: 'Nothing unsorted.',
+};
+const VERDICT_LABELS = {
+  NO_ISSUES: 'No issues',
+  SBQ: 'SBQ',
+  FIXES_IN_PROGRESS: 'Fixes in progress',
+  SECOND_OPINION: 'Second opinion',
 };
 
-async function load() {
-  const [ws, cfg] = await Promise.all([api('/workspace'), api('/config')]);
+let me = null;
+
+async function boot() {
+  me = await api('/me'); // 401 redirects to login
+  document.getElementById('user-chip').hidden = false;
+  document.getElementById('user-name').textContent = me.username;
+  document.getElementById('user-role').textContent = me.role;
+  document.getElementById('ingest-section').hidden = me.role !== 'admin';
+  const cfg = await api('/config');
   document.getElementById('config-meta').textContent = cfg.model;
+  await load();
+  setInterval(load, 8000); // live claim/verdict status from other reviewers
+}
+
+async function load() {
+  const ws = await api('/workspace');
   const root = document.getElementById('buckets');
+  const total = ORDER.reduce((n, b) => n + (ws[b]?.length || 0), 0);
+  document.getElementById('ws-summary').textContent =
+    `${total} tasks · ` + ORDER.map((b) => `${b.replace('_FAIL', '').toLowerCase()} ${ws[b]?.length || 0}`).join(' · ');
   root.replaceChildren();
   for (const bucket of ORDER) {
     const tasks = ws[bucket] || [];
@@ -20,6 +42,10 @@ async function load() {
         el('div', { class: 'bucket-head' },
           el('span', { class: 'bucket-name' }, bucket.replace('_', ' ')),
           el('span', { class: 'bucket-count' }, String(tasks.length)),
+          el('button', {
+            class: 'bucket-dl', title: 'download task_id list for this column',
+            onclick: () => { location.href = `/api/export/ids/${bucket}`; },
+          }, '⬇ ids'),
         ),
         tasks.length
           ? tasks.map((t) =>
@@ -27,10 +53,11 @@ async function load() {
                 el('div', { class: 'tid' }, t.id),
                 t.problem ? el('div', { class: 'prob' }, t.problem) : null,
                 el('div', { class: 'pills' },
+                  t.claimedBy ? el('span', { class: 'chip claimed' }, `⬤ ${t.claimedBy}`) : null,
+                  t.verdict ? el('span', { class: `chip v-${t.verdict}` }, VERDICT_LABELS[t.verdict] || t.verdict) : null,
                   pill('review', t.hasReview),
                   pill('remediation', t.hasRemediation),
                   pill('seed', t.hasAuditSeed),
-                  pill('chat', t.hasChat),
                 ),
               )
             )
@@ -44,7 +71,13 @@ function pill(label, on) {
   return el('span', { class: `pill ${on ? 'on' : ''}` }, `${on ? '✓' : '·'} ${label}`);
 }
 
-// ---------- folder / zip upload ----------
+document.getElementById('export-csv').addEventListener('click', () => { location.href = '/api/export/all.csv'; });
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  await api('/logout', { method: 'POST' });
+  location.href = '/login.html';
+});
+
+// ---------- admin: delivery upload ----------
 const statusEl = document.getElementById('upload-status');
 const progressEl = document.getElementById('upload-progress');
 const barEl = document.getElementById('upload-bar');
@@ -76,7 +109,6 @@ async function uploadFiles(files) {
   form.append('bucket', document.getElementById('upload-bucket').value);
   let total = 0;
   for (const f of files) {
-    // webkitRelativePath keeps the folder structure; plain files (zip) use the name.
     form.append('files', f, f.webkitRelativePath || f.name);
     total += f.size;
   }
@@ -85,8 +117,12 @@ async function uploadFiles(files) {
   barEl.style.width = '0%';
   try {
     const r = await uploadFormData(form);
-    statusEl.textContent = `done — ${r.taskId} (${r.files} files${r.seeded ? ', audit seed attached' : ''})`;
-    location.href = `/task/${r.bucket}/${r.taskId}`;
+    const counts = Object.entries(r.counts || {}).map(([b, n]) => `${b} ${n}`).join(', ') || 'none';
+    const skipped = r.skipped_existing?.length ? ` · skipped ${r.skipped_existing.length} already-known task(s)` : '';
+    statusEl.textContent = `done — sorted: ${counts}${skipped}`;
+    progressEl.hidden = true;
+    if (r.ingested?.length === 1) location.href = `/task/${r.bucket}/${r.taskId}`;
+    else load();
   } catch (e) {
     statusEl.textContent = e.message;
     progressEl.hidden = true;
@@ -103,8 +139,7 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
 dropZone.addEventListener('drop', async (e) => {
   e.preventDefault();
   dropZone.classList.remove('over');
-  const files = await collectDropped(e.dataTransfer);
-  uploadFiles(files);
+  uploadFiles(await collectDropped(e.dataTransfer));
 });
 
 // Dropped folders need the webkitGetAsEntry tree walk to recover relative paths.
@@ -130,7 +165,7 @@ async function collectDropped(dt) {
   return out;
 }
 
-// ---------- secondary: claim by id ----------
+// ---------- admin: ingest by id ----------
 document.getElementById('claim-btn').addEventListener('click', async () => {
   const status = document.getElementById('claim-status');
   const taskId = document.getElementById('claim-input').value.trim();
@@ -144,4 +179,4 @@ document.getElementById('claim-btn').addEventListener('click', async () => {
   }
 });
 
-load();
+boot();

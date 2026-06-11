@@ -6,6 +6,10 @@ export async function api(path, opts = {}) {
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
+  if (res.status === 401 && !location.pathname.endsWith('/login.html')) {
+    location.href = '/login.html';
+    throw new Error('login required');
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `${res.status} ${res.statusText}`);
@@ -58,7 +62,24 @@ export function renderMarkdown(md) {
     }
     return linkBase.call(this, hrefOrToken, title, text);
   };
-  const html = marked.parse(md, { renderer, gfm: true, breaks: false });
+
+  // ```alerts fences -> big glaring-issue banner ("NONE" suppresses it).
+  const codeBase = renderer.code;
+  renderer.code = function (codeOrToken, infostring, escaped) {
+    const isToken = typeof codeOrToken === 'object' && codeOrToken !== null;
+    const lang = (isToken ? codeOrToken.lang : infostring) || '';
+    const body = isToken ? codeOrToken.text : codeOrToken;
+    if (lang.trim() === 'alerts') {
+      const lines = String(body).split('\n').map((l) => l.trim()).filter((l) => l && l.toUpperCase() !== 'NONE');
+      if (!lines.length) return '';
+      return `<div class="alert-banner">${lines.map((l) => `<div class="alert-line">${escapeHtml(l)}</div>`).join('')}</div>`;
+    }
+    return codeBase.call(this, codeOrToken, infostring, escaped);
+  };
+
+  let html = marked.parse(md, { renderer, gfm: true, breaks: false });
+  // [HARD]/[SOFT]/[INFO] tags in finding headings -> severity badges.
+  html = html.replace(/\[(HARD|SOFT|INFO)\]/g, (_, sev) => `<span class="sev sev-${sev}">${sev}</span>`);
   return DOMPurify.sanitize(html, { ADD_ATTR: ['data-traj-model', 'data-traj-index'] });
 }
 

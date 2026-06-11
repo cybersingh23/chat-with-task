@@ -67,7 +67,26 @@ export function taskMeta(bucket, id) {
   } catch {
     /* rank.json missing or unparseable — meta stays minimal */
   }
+  try {
+    const state = JSON.parse(fs.readFileSync(path.join(dir, '_studio.json'), 'utf8'));
+    meta.claimedBy = state.claimed_by || null;
+    meta.verdict = state.verdict || null;
+  } catch {
+    meta.claimedBy = null;
+    meta.verdict = null;
+  }
   return meta;
+}
+
+export function existingTaskIds() {
+  ensureWorkspace();
+  const ids = new Set();
+  for (const b of BUCKETS) {
+    for (const n of fs.readdirSync(path.join(config.workspaceRoot, b))) {
+      if (TASK_ID_RE.test(n)) ids.add(n);
+    }
+  }
+  return ids;
 }
 
 export function listFiles(bucket, id) {

@@ -8,6 +8,8 @@ import {
 } from '../workspace.js';
 import { ingestTask, findTaskSources } from '../ingest.js';
 import { handleUpload } from '../upload.js';
+import { verifyLogin, createSession, destroySession, requireAuth, requireAdmin } from '../auth.js';
+import { claimTask, releaseTask, setVerdict, getState, VERDICTS } from '../state.js';
 import { runAgentLoop } from '../llm.js';
 import { TOOL_DEFS, makeExecutor } from '../tools.js';
 import { generateDoc, taskContext, CITATION_RULES } from '../docgen.js';
@@ -16,6 +18,25 @@ export const api = express.Router();
 api.use(express.json({ limit: '2mb' }));
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+// ---- auth (the only routes that don't require a session) ----
+api.post('/login', wrap(async (req, res) => {
+  const user = verifyLogin(String(req.body.username || ''), String(req.body.password || ''));
+  if (!user) return res.status(401).json({ error: 'invalid username or password' });
+  const sid = createSession(user);
+  res.setHeader('set-cookie', `cwt_sid=${sid}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax`);
+  res.json(user);
+}));
+
+api.post('/logout', requireAuth, wrap(async (req, res) => {
+  destroySession(req.sid);
+  res.setHeader('set-cookie', 'cwt_sid=; HttpOnly; Path=/; Max-Age=0');
+  res.json({ ok: true });
+}));
+
+api.use(requireAuth);
+
+api.get('/me', (req, res) => res.json(req.user));
 
 api.get('/workspace', wrap(async (req, res) => res.json(listWorkspace())));
 
@@ -30,10 +51,49 @@ api.post('/ingest', wrap(async (req, res) => {
 
 api.get('/find/:taskId', wrap(async (req, res) => res.json({ sources: findTaskSources(req.params.taskId) })));
 
-// multipart folder/zip upload — must NOT go through express.json
-api.post('/upload', handleUpload);
+// multipart folder/zip upload — admin only, must NOT go through express.json
+api.post('/upload', requireAdmin, handleUpload);
 
 api.get('/task/:bucket/:id/taskdef', wrap(async (req, res) => res.json(readTaskDef(req.params.bucket, req.params.id))));
+
+// ---- claim / verdict / export ----
+api.post('/task/:bucket/:id/claim', wrap(async (req, res) =>
+  res.json(claimTask(req.params.bucket, req.params.id, req.user.username))
+));
+
+api.post('/task/:bucket/:id/release', wrap(async (req, res) =>
+  res.json(releaseTask(req.params.bucket, req.params.id, req.user.username, req.user.role === 'admin'))
+));
+
+api.post('/task/:bucket/:id/verdict', wrap(async (req, res) =>
+  res.json(setVerdict(req.params.bucket, req.params.id, req.body.verdict ?? null, req.user.username))
+));
+
+api.get('/task/:bucket/:id/state', wrap(async (req, res) => res.json(getState(req.params.bucket, req.params.id))));
+
+// One task_id per line for a bucket column, or ?verdict=SBQ for a verdict group.
+api.get('/export/ids/:bucket', wrap(async (req, res) => {
+  const ws = listWorkspace();
+  let tasks = ws[req.params.bucket];
+  if (!tasks) return res.status(400).json({ error: `unknown bucket ${req.params.bucket}` });
+  if (req.query.verdict) tasks = tasks.filter((t) => t.verdict === req.query.verdict);
+  res.setHeader('content-type', 'text/plain');
+  res.setHeader('content-disposition', `attachment; filename="${req.params.bucket}${req.query.verdict ? '_' + req.query.verdict : ''}_task_ids.txt"`);
+  res.send(tasks.map((t) => t.id).join('\n') + (tasks.length ? '\n' : ''));
+}));
+
+api.get('/export/all.csv', wrap(async (req, res) => {
+  const ws = listWorkspace();
+  const lines = ['task_id,bucket,verdict,claimed_by,has_review,has_remediation'];
+  for (const [bucket, tasks] of Object.entries(ws)) {
+    for (const t of tasks) {
+      lines.push([t.id, bucket, t.verdict || '', t.claimedBy || '', t.hasReview, t.hasRemediation].join(','));
+    }
+  }
+  res.setHeader('content-type', 'text/csv');
+  res.setHeader('content-disposition', 'attachment; filename="workspace_export.csv"');
+  res.send(lines.join('\n') + '\n');
+}));
 
 api.get('/task/:bucket/:id', wrap(async (req, res) => res.json(taskMeta(req.params.bucket, req.params.id))));
 

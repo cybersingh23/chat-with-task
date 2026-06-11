@@ -4,32 +4,37 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Chat with Task — ACC Audit Studio</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Host+Grotesk:wght@500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/studio.css" />
   <link rel="icon" href="/scale-icon.svg" />
 </head>
 <body>
   <header class="topbar">
-    <img class="logo" src="/scale-logo.svg" alt="Scale" />
     <div class="app-name">Chat with Task <span>/ ACC Audit Studio</span></div>
     <div class="spacer"></div>
     <div class="meta" id="config-meta"></div>
+    <div class="user-chip" id="user-chip" hidden>
+      <span id="user-name"></span><span class="role" id="user-role"></span>
+      <button id="logout-btn">sign out</button>
+    </div>
   </header>
 
   <main class="index-main">
-    <section class="ingest">
-      <div class="drop-zone" id="drop-zone">
-        <div class="drop-title">Add a task to audit</div>
-        <div class="drop-sub">Drag the <span class="mono">&lt;task_id&gt;</span> folder (or a .zip of it) here</div>
+    <section class="ingest" id="ingest-section" hidden>
+      <div class="drop-zone glass" id="drop-zone">
+        <div class="drop-title">Upload a delivery</div>
+        <div class="drop-sub">
+          Drag a tasks .zip or a <span class="mono">&lt;task_id&gt;</span> folder here — tasks are
+          auto-sorted into Hard / Soft / Pass from the bundled audit verdicts; anything already in
+          the workspace from a previous delivery is skipped.
+        </div>
         <div class="drop-actions">
-          <button class="primary" id="pick-folder">Select folder…</button>
-          <button id="pick-zip">Select .zip…</button>
-          <select id="upload-bucket" title="bucket for the new task">
-            <option value="UNSORTED">→ UNSORTED</option>
-            <option value="HARD_FAIL">→ HARD_FAIL</option>
-            <option value="SOFT_FAIL">→ SOFT_FAIL</option>
-            <option value="PASS">→ PASS</option>
+          <button class="primary" id="pick-zip">Select .zip…</button>
+          <button id="pick-folder">Select folder…</button>
+          <select id="upload-bucket" title="bucket used only when the upload carries no verdicts">
+            <option value="UNSORTED">no verdicts → UNSORTED</option>
+            <option value="HARD_FAIL">no verdicts → HARD_FAIL</option>
+            <option value="SOFT_FAIL">no verdicts → SOFT_FAIL</option>
+            <option value="PASS">no verdicts → PASS</option>
           </select>
         </div>
         <div class="progress" id="upload-progress" hidden>
@@ -40,15 +45,21 @@
         <input type="file" id="zip-input" accept=".zip" hidden />
       </div>
       <details class="claim-secondary">
-        <summary>…or claim by task ID (server-side search of local delivery folders)</summary>
+        <summary>…or ingest by task ID (server-side search of local delivery folders)</summary>
         <div class="claim-row">
           <input type="text" id="claim-input" placeholder="full 24-char task_id" maxlength="24" spellcheck="false" />
-          <button id="claim-btn">Claim</button>
+          <button id="claim-btn">Ingest</button>
           <span class="mono" id="claim-status"></span>
         </div>
       </details>
     </section>
 
+    <div class="toolbar">
+      <span class="mono" style="font-size:11px;color:var(--text-dim)" id="ws-summary"></span>
+      <div class="right">
+        <button id="export-csv">⬇ Export all (CSV)</button>
+      </div>
+    </div>
     <div class="buckets" id="buckets"></div>
   </main>
 

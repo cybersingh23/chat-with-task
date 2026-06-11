@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in — Chat with Task</title>
+  <link rel="stylesheet" href="/css/studio.css" />
+  <link rel="icon" href="/scale-icon.svg" />
+</head>
+<body>
+  <div class="login-wrap">
+    <form class="login-card glass" id="login-form">
+      <h1>Chat with Task</h1>
+      <div class="sub">ACC audit studio — sign in to continue</div>
+      <input type="text" id="username" placeholder="username" autocomplete="username" autofocus />
+      <input type="password" id="password" placeholder="password" autocomplete="current-password" />
+      <button class="primary" type="submit">Sign in</button>
+      <div class="login-error" id="error"></div>
+    </form>
+  </div>
+  <script type="module">
+    import { api } from '/js/common.js';
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const error = document.getElementById('error');
+      error.textContent = '';
+      try {
+        await api('/login', {
+          method: 'POST',
+          body: {
+            username: document.getElementById('username').value.trim(),
+            password: document.getElementById('password').value,
+          },
+        });
+        location.href = '/';
+      } catch (err) {
+        error.textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

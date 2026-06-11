@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { config } from './config.js';
-import { assertBucket, ensureWorkspace, httpError } from './workspace.js';
+import { assertBucket, ensureWorkspace, existingTaskIds, httpError } from './workspace.js';
 import { writeAuditSeed } from './ingest.js';
 
 const execFileP = promisify(execFile);
@@ -68,8 +68,6 @@ function sanitizeRel(filename) {
 }
 
 async function finalizeUpload(tmp, fields) {
-  const bucket = assertBucket(fields.bucket || 'UNSORTED');
-
   // Single zip → extract in place, then treat like a folder upload.
   const rootEntries = fs.readdirSync(tmp);
   if (rootEntries.length === 1 && rootEntries[0].toLowerCase().endsWith('.zip')) {
@@ -82,42 +80,110 @@ async function finalizeUpload(tmp, fields) {
     fs.unlinkSync(zipPath);
   }
 
-  // Locate the task root: the shallowest directory containing rank.json.
-  const taskRoot = findRankRoot(tmp);
-  if (!taskRoot) throw httpError(400, 'no rank.json found in the upload — select the task folder itself (the <task_id> directory)');
+  // Delivery upload (multiple <task_id>/rank.json folders) → bulk-sort.
+  // Single-task upload → land in the requested bucket.
+  const taskRoots = findTaskRoots(tmp);
+  if (!taskRoots.length) {
+    throw httpError(400, 'no rank.json found in the upload — upload a <task_id> folder or a delivery zip of them');
+  }
+  if (taskRoots.length > 1 || TASK_ID_RE.test(path.basename(taskRoots[0]))) {
+    return bulkIngest(taskRoots, fields);
+  }
 
+  // Single folder not named by task id — fall back to explicit/derived id.
+  const taskRoot = taskRoots[0];
   const taskId = deriveTaskId(taskRoot, fields.taskId);
   if (!taskId) {
     throw httpError(400, 'could not derive a 24-char task id from the folder name — name the folder after the task id or fill the task id field');
   }
-
-  const dest = path.join(config.workspaceRoot, bucket, taskId);
-  if (fs.existsSync(dest)) throw httpError(409, `task ${taskId} already in workspace`);
-  fs.cpSync(taskRoot, dest, { recursive: true });
-
-  // If the upload included a sibling _audit dir (whole-delivery zip), seed from it.
-  const deliveryDir = path.dirname(taskRoot);
-  let seeded = false;
-  if (fs.existsSync(path.join(deliveryDir, '_audit'))) {
-    seeded = writeAuditSeed(deliveryDir, taskId, dest);
-  }
-
-  const fileTotal = countFiles(dest);
-  return { taskId, bucket, files: fileTotal, seeded };
+  const r = bulkIngest([taskRoot], fields, taskId);
+  if (r.skipped_existing.length) throw httpError(409, `task ${taskId} already in workspace`);
+  return r;
 }
 
-function findRankRoot(root) {
-  const queue = [root];
-  while (queue.length) {
-    // BFS so the shallowest rank.json wins.
-    const dir = queue.shift();
-    if (fs.existsSync(path.join(dir, 'rank.json'))) return dir;
+// Sort every uploaded task into HARD_FAIL/SOFT_FAIL/PASS via the delivery's
+// _audit/final_verdicts.json (fallback: the requested bucket). Tasks already
+// in the workspace — i.e. anything from a previous delivery — are skipped.
+function bulkIngest(taskRoots, fields, forcedId = null) {
+  const fallbackBucket = assertBucket(fields.bucket || 'UNSORTED');
+  const existing = existingTaskIds();
+  const ingested = [];
+  const skippedExisting = [];
+  const skippedBadId = [];
+
+  for (const taskRoot of taskRoots) {
+    const taskId = forcedId || (TASK_ID_RE.test(path.basename(taskRoot)) ? path.basename(taskRoot) : null);
+    if (!taskId) {
+      skippedBadId.push(path.basename(taskRoot));
+      continue;
+    }
+    if (existing.has(taskId)) {
+      skippedExisting.push(taskId);
+      continue;
+    }
+    const deliveryDir = path.dirname(taskRoot);
+    const verdicts = loadVerdicts(deliveryDir);
+    const bucket = verdicts ? bucketFor(verdicts.get(taskId)) : fallbackBucket;
+    const dest = path.join(config.workspaceRoot, bucket, taskId);
+    fs.cpSync(taskRoot, dest, { recursive: true });
+    let seeded = false;
+    if (fs.existsSync(path.join(deliveryDir, '_audit'))) {
+      seeded = writeAuditSeed(deliveryDir, taskId, dest);
+    }
+    existing.add(taskId);
+    ingested.push({ taskId, bucket, seeded });
+  }
+
+  const first = ingested[0];
+  return {
+    taskId: first?.taskId || null,
+    bucket: first?.bucket || null,
+    ingested,
+    counts: countBy(ingested, (t) => t.bucket),
+    skipped_existing: skippedExisting,
+    skipped_bad_id: skippedBadId,
+    seeded: ingested.some((t) => t.seeded),
+    files: ingested.length === 1 ? countFiles(path.join(config.workspaceRoot, first.bucket, first.taskId)) : undefined,
+  };
+}
+
+function loadVerdicts(deliveryDir) {
+  try {
+    const rows = JSON.parse(fs.readFileSync(path.join(deliveryDir, '_audit', 'final_verdicts.json'), 'utf8'));
+    if (Array.isArray(rows)) return new Map(rows.map((r) => [r.task_id, r.verdict]));
+  } catch { /* no verdicts shipped with this upload */ }
+  return null;
+}
+
+function bucketFor(verdict) {
+  const v = String(verdict || '').toUpperCase();
+  if (v.startsWith('HARD')) return 'HARD_FAIL';
+  if (v.startsWith('SOFT')) return 'SOFT_FAIL';
+  if (v.startsWith('PASS')) return 'PASS';
+  return 'UNSORTED';
+}
+
+function countBy(items, fn) {
+  const out = {};
+  for (const it of items) out[fn(it)] = (out[fn(it)] || 0) + 1;
+  return out;
+}
+
+// Every directory that contains a rank.json (depth-first, no descent past a hit).
+function findTaskRoots(root) {
+  const roots = [];
+  const walk = (dir) => {
+    if (fs.existsSync(path.join(dir, 'rank.json'))) {
+      roots.push(dir);
+      return;
+    }
     for (const name of fs.readdirSync(dir)) {
       const p = path.join(dir, name);
-      if (fs.statSync(p).isDirectory()) queue.push(p);
+      if (fs.statSync(p).isDirectory() && name !== '_audit') walk(p);
     }
-  }
-  return null;
+  };
+  walk(root);
+  return roots;
 }
 
 function deriveTaskId(taskRoot, explicit) {

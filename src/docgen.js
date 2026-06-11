@@ -76,48 +76,80 @@ Citation rules (mandatory):
 `.trim();
 
 const REVIEW_PROMPT = `
-You are an expert ACC delivery auditor writing review.md for a QM reviewer.
+You are an expert ACC delivery auditor writing review.md for a QM reviewer. The reviewer is
+busy: the document must surface what matters in seconds, not minutes. Substance over prose.
 
 Investigate the task thoroughly using your tools (list_files first, then rank.json, both
 trajectories, ranking_proof justifications, snapshots as needed). Then output ONLY the final
-markdown document (no preamble) with this structure:
+markdown document (no preamble) with EXACTLY this structure:
 
 # Review — <task_id>
-## Verdict summary
-One paragraph: overall assessment, proposed bucket (HARD_FAIL / SOFT_FAIL / PASS), and why.
-## Task overview
-Problem statement summary, model_a/model_b codename mapping, ranks, preference rating.
-## Trajectory walkthrough
-Brief per-model narrative of what the annotator did, with traj:// citations.
+
+\`\`\`alerts
+ONE LINE PER GLARING ISSUE, WORST FIRST (e.g. "MODEL A IS A 2-MESSAGE GREETING STUB — NOTHING TO AUDIT ON THE WINNER SIDE")
+\`\`\`
+The alerts block renders as a large red banner at the top of the page. Put ONLY true blockers
+in it — things the reviewer must know before reading anything else. Plain caps text, no
+markdown inside. If there are no glaring issues, output the block with the single line: NONE.
+
+## Verdict
+**Proposed bucket: HARD_FAIL | SOFT_FAIL | PASS** — then at most 3 sentences why.
+
+## At a glance
+A markdown table, one row per fact: models (codename → real model mapping), ranks, preference
+rating, trajectory lengths (msgs, user turns), milestones entered, claim spot-check result.
+
 ## Findings
-Numbered findings, most severe first. Each finding: severity (HARD/SOFT/INFO), the verbatim
-rank.json claim and its field path, the trajectory evidence with traj:// citations and search
-hit counts, and the impact (which side, whether rank/scores are affected).
+One block per finding, most severe first, EACH separated by a horizontal rule (---).
+Block format:
+### [HARD|SOFT|INFO] F<n> — <short title>
+- **Claim:** "<verbatim quote>" — \`<rank.json field path>\`
+- **Evidence:** search hits / quoted trajectory text, with traj:// citations
+- **Impact:** which side, whether rank/scores are affected
+Keep each block under ~8 lines. Do NOT merge multiple problems into one block — one error,
+one block. No filler sentences; every line must carry a fact.
+
 Check at minimum: initial-prompt consistency between models, claim accuracy of every specific
 number/quote in the rationales, coaching/guidance asymmetry, duplicate prompts, stub/forfeit
 trajectories (≤3 msgs or greeting-stub "Hello! How can I help you today?"), milestone coverage,
 ranking_proof justification vs rank.json consistency.
-## Informational notes
-Idle time, missing task definition, and other non-finding observations.
+
+## Informational
+Idle time, missing task definition, and other non-finding observations. One bullet each.
 `.trim();
 
 const REMEDIATION_PROMPT = `
-You are an expert ACC delivery auditor writing remediation.md — the concrete path to fixing this
-task so it can ship. You are given review.md; verify anything you rely on with your tools.
+You are an expert ACC delivery auditor writing remediation.md — a pinpoint repair manual.
+The reviewer should never have to hunt: every fix names the exact place to go and the exact
+change to make. Verify anything you rely on from review.md with your tools first.
 
-Output ONLY the final markdown document (no preamble):
+Output ONLY the final markdown document (no preamble) with EXACTLY this structure:
 
 # Remediation — <task_id>
-## Goal state
-What a shippable version of this task looks like.
-## Steps
-Numbered, ordered remediation steps. Each step: the owner (annotator / vendor / internal-QM),
-exactly what to change (file + field path for rank.json edits, e.g. /results/<codename>/grading/...),
-the trajectory evidence motivating it with traj:// citations, and how to verify the fix.
+
+\`\`\`alerts
+ONE LINE IF THE TASK IS UNSALVAGEABLE WITHOUT VENDOR ACTION (e.g. "BLOCKED ON VENDOR: REAL MODEL_A TRAJECTORY MUST BE RE-EXPORTED FIRST"), otherwise: NONE
+\`\`\`
+
+## Fix list
+One block per fix, in the order they must be done, separated by --- . Block format:
+### R<n> — <imperative title> (owner: annotator | vendor | internal-QM)
+- **Go to:** the exact location — file + field path for rank.json edits
+  (e.g. \`rank.json /results/<codename>/grading/correctness/rationale\`), or the trajectory
+  point as a traj:// citation, or the exact artifact file (e.g. \`ranking_proof/a_proof_justification.txt\`)
+- **Problem:** one line.
+- **Fix:** the concrete change. For text edits give before → after: quote the current wrong
+  text, then give replacement text the owner can paste or adapt. For re-exports/re-runs give
+  the exact artifact to produce.
+- **Verify:** the exact check that proves the fix landed (a search string + expected hit count,
+  a field value, a message index to re-read).
+
 ## Re-audit checklist
-Checkboxes the reviewer ticks before moving the task to PASS.
-## Escalation
-When to escalate instead of remediate (e.g. byte-identical unremediated resubmission, vendor stub).
+- [ ] one checkbox per fix above, phrased as the verification, plus a final full /acc re-run line.
+
+## Escalate instead if
+Bullet conditions under which remediation is wrong (byte-identical unremediated resubmission,
+vendor stub, fabrication pattern across tasks) and who to escalate to.
 `.trim();
 
 export async function generateDoc(bucket, id, which, onEvent) {

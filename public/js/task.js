@@ -68,7 +68,7 @@ async function buildSidebar() {
     for (const entry of entries) {
       if (entry.dir) { addEntries(entry.children, depth + 1); continue; }
       const name = entry.path;
-      if (['review.md', 'remediation.md', '_audit_seed.md', '_chat.json'].includes(name)) continue;
+      if (['review.md', 'remediation.md', '_audit_seed.md', '_chat.json', '_studio.json'].includes(name)) continue;
       if (/^trajectories\//.test(name)) continue;
       navFiles.append(
         el('button', { class: 'nav-item', title: name, onclick: (ev) => { setActive(ev.currentTarget); showFile(name); } },
@@ -354,7 +354,55 @@ document.getElementById('move-select').addEventListener('change', async (e) => {
   location.href = `/task/${to}/${taskId}`;
 });
 
+// ---------- claim / verdict ----------
+const claimBtn = document.getElementById('claim-btn');
+const claimChip = document.getElementById('claim-chip');
+const verdictSelect = document.getElementById('verdict-select');
+
+async function refreshState() {
+  const s = await api(`/task/${bucket}/${taskId}/state`);
+  const mine = s.claimed_by === me.username;
+  claimChip.hidden = !s.claimed_by;
+  claimChip.textContent = s.claimed_by ? (mine ? '⬤ claimed by you' : `⬤ claimed by ${s.claimed_by}`) : '';
+  claimBtn.hidden = false;
+  claimBtn.textContent = s.claimed_by ? (mine || me.role === 'admin' ? 'Release' : 'Claimed') : 'Claim task';
+  claimBtn.disabled = Boolean(s.claimed_by) && !mine && me.role !== 'admin';
+  claimBtn.classList.toggle('primary', !s.claimed_by);
+  verdictSelect.value = s.verdict || '';
+}
+
+claimBtn.addEventListener('click', async () => {
+  const s = await api(`/task/${bucket}/${taskId}/state`);
+  const action = s.claimed_by ? 'release' : 'claim';
+  try {
+    await api(`/task/${bucket}/${taskId}/${action}`, { method: 'POST' });
+  } catch (e) {
+    alert(e.message);
+  }
+  refreshState();
+});
+
+verdictSelect.addEventListener('change', async () => {
+  const v = verdictSelect.value;
+  if (!v) return;
+  await api(`/task/${bucket}/${taskId}/verdict`, {
+    method: 'POST',
+    body: { verdict: v === '__clear' ? null : v },
+  });
+  refreshState();
+});
+
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  await api('/logout', { method: 'POST' });
+  location.href = '/login.html';
+});
+
 // ---------- boot ----------
+const me = await api('/me'); // 401 redirects to login
+document.getElementById('user-chip').hidden = false;
+document.getElementById('user-name').textContent = me.username;
+await refreshState();
+setInterval(refreshState, 10_000); // reflect other reviewers' claims live
 await buildSidebar();
 const params = new URLSearchParams(location.search);
 if (params.get('traj')) {

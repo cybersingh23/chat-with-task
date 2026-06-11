@@ -1,47 +1,50 @@
 # Chat with Task — ACC Audit Studio
 
-A separate layer on top of the existing `/acc` eval pipeline: a website where QM reviewers
-**chat with a claimed task**. Tasks are sorted into verdict buckets, every task carries a
-generated `review.md` (thorough flaw review) and `remediation.md` (fix plan), and both the
-docs and the copilot cite trajectory points as **"Show in trajectory" buttons** that jump
-straight to the cited message in the built-in trajectory viewer.
+A separate layer on top of the existing `/acc` eval pipeline: a multi-user website where QM
+reviewers **claim a task and chat with it**. Dark liquid-glass UI. Tasks are auto-sorted into
+verdict buckets on upload, every task carries a generated `review.md` (glaring issues banner +
+segmented findings) and `remediation.md` (pinpoint fix list), and both the docs and the copilot
+cite trajectory points as **"Show in trajectory" buttons** that jump straight to the cited
+message in the built-in trajectory viewer.
 
 ## Flow
 
-1. **Sort** an audited delivery into buckets (uses `_audit/final_verdicts.json` from `/acc`):
+1. **Admin builds & uploads a tasks zip.** Build it from an audited delivery:
 
    ```sh
-   python3 tools/sort_delivery.py ~/Downloads/ACC_DELIVERY_0610
+   python3 tools/make_tasks_zip.py ~/Downloads/ACC_DELIVERY_0610 --out tasks_0610.zip
    ```
 
-   This creates `workspace/{HARD_FAIL,SOFT_FAIL,PASS,UNSORTED}/<task_id>/` with the full task
-   folder plus `_audit_seed.md` — that task's slice of the audit findings.
+   The zip bundles the `<task_id>/` folders plus the delivery's `_audit/` artifacts. On upload
+   (admin-only, drag-and-drop), every task is sorted into **HARD_FAIL / SOFT_FAIL / PASS** from
+   `_audit/final_verdicts.json`, gets its `_audit_seed.md` slice, and **anything already in the
+   workspace from a previous delivery is skipped** (reported in the upload summary).
 
-2. **Upload** — reviewers add their claimed task from the browser: drag the `<task_id>` folder
-   (or a .zip of it) onto the home page, or use the pickers. Works when the server runs on a
-   shared host with no access to the reviewer's files. If the upload contains a sibling
-   `_audit/` dir (whole-delivery zip), the audit seed is attached automatically.
-   Claiming by task ID (server-side search of `DELIVERY_ROOTS` for `ACC_DELIVERY_*`) remains
-   as a secondary path for local use.
+2. **Reviewers sign in and claim.** Four seeded accounts (`data/users.json`, created on first
+   boot — see Setup). A claimed task shows `⬤ claimed by <user>` on everyone's board (the index
+   polls every 8s). Only the claimer or an admin can release it.
 
-   **Task definition & milestones** — every task page leads with the task definition
-   (`rank.json:task`, legacy fallback `source_task/task.json`): persona, milestones, and
-   guardrails. Each milestone has *Locate in A/B* (jumps to the closest user turn — navigation,
-   not a coverage verdict) and *Ask copilot* (pre-fills a milestone-coverage check).
+3. **Audit** — task page leads with the task definition (milestones with Locate-in-A/B +
+   Ask-copilot), generated docs, trajectory viewers, and the audit copilot panel (LiteLLM
+   tool-use loop over the task's files; history persists per task).
 
-3. **Generate docs** — `review.md` and `remediation.md` are written by an LLM agent (LiteLLM
-   proxy, tool-use loop over the task's files) and rendered in the UI.
+4. **Verdict** — the reviewer sets one of **No issues / SBQ / Fixes in progress / Second
+   opinion** from the task header; it shows as a chip on the board.
 
-4. **Chat** — the right-hand copilot panel has the same file tools (`list_files`, `read_file`,
-   `search`, `read_trajectory`). Reviewers go back and forth to verify claims; chat history
-   persists per task in `_chat.json`.
+5. **Export** — each bucket column has a **⬇ ids** button (one task_id per line), and
+   **Export all (CSV)** gives `task_id,bucket,verdict,claimed_by,has_review,has_remediation`.
+   Filtered export: `/api/export/ids/HARD_FAIL?verdict=SBQ`.
 
-5. **Deep links** — any `traj://model_a/23` link in a doc or chat reply renders as a button
-   that opens the trajectory viewer scrolled to message 23 (highlighted). Each trajectory
-   message has a *copy link* button to cite it back. URLs also work directly:
-   `/task/<bucket>/<id>?traj=model_a&msg=23`.
+## Doc conventions
 
-6. **Re-bucket** — after remediation review, move the task between buckets from the header.
+- `review.md` starts with a ```` ```alerts ```` fence — one line per glaring issue — rendered as
+  a large red banner at the top of the page ("MODEL A IS A 2-MESSAGE GREETING STUB…"). Findings
+  are one-error-one-block: `### [HARD] F1 — title` with Claim / Evidence / Impact bullets,
+  separated by horizontal rules.
+- `remediation.md` is a pinpoint fix list: each `### R<n>` block has **Go to** (exact file/field
+  path or traj:// point), **Problem**, **Fix** (before → after), **Verify**.
+- `traj://model_a/23` links anywhere (docs, chat) render as buttons that open the trajectory
+  viewer scrolled to that message. URL form: `/task/<bucket>/<id>?traj=model_a&msg=23`.
 
 ## Setup
 
@@ -51,11 +54,19 @@ cp .env.example .env   # fill in LITELLM_API_KEY (same key as trajectory-viewer-
 npm start              # http://localhost:4100
 ```
 
+First boot seeds `data/users.json` with four accounts:
+`admin/admin-cwt26` (admin), `qm1/qm1-cwt26`, `qm2/qm2-cwt26`, `qm3/qm3-cwt26` (reviewers).
+Passwords are scrypt-hashed; to reset one, replace its entry's hash fields with
+`"password": "newpass"` — it re-hashes on next login. Sessions are in-memory (a server restart
+logs everyone out).
+
 ## Notes
 
-- `workspace/` is gitignored — task data never leaves the machine.
+- `workspace/` and `data/` are gitignored — task data and credentials never leave the machine.
+- Claim/verdict state lives in `<task>/_studio.json`; chat history in `<task>/_chat.json`.
 - The copilot's system prompt encodes the audit house rules: grep-verify every specific
   number/quote, absence-claim polarity, complete 24-char IDs, idle time + missing task
   definition are informational-only.
 - Trajectory format: opencode export (`{info, messages:[{info:{role}, parts:[text|reasoning|tool]}]}`),
   normalized server-side; `step-start`/`step-finish` parts are dropped.
+- Dev screenshots with auth: `node tools/screenshot.mjs http://localhost:4100/ out.png`.

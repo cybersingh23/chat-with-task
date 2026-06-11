@@ -4,29 +4,42 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Task — Chat with Task</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Host+Grotesk:wght@500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/studio.css" />
   <link rel="icon" href="/scale-icon.svg" />
 </head>
 <body>
   <header class="topbar">
-    <a href="/"><img class="logo" src="/scale-logo.svg" alt="Scale" /></a>
-    <div class="app-name">Chat with Task</div>
+    <a href="/" style="text-decoration:none;color:inherit"><div class="app-name">Chat with Task</div></a>
     <span class="chip" id="bucket-chip"></span>
-    <span class="mono" id="task-id" style="font-size:12px"></span>
+    <span class="mono" id="task-id" style="font-size:12px;color:var(--text-dim)"></span>
     <div class="spacer"></div>
-    <select id="move-select">
-      <option value="">move to…</option>
-      <option value="HARD_FAIL">HARD_FAIL</option>
-      <option value="SOFT_FAIL">SOFT_FAIL</option>
-      <option value="PASS">PASS</option>
-      <option value="UNSORTED">UNSORTED</option>
-    </select>
+    <div class="claim-bar">
+      <span class="chip claimed" id="claim-chip" hidden></span>
+      <button id="claim-btn" hidden>Claim task</button>
+      <select class="verdict-select" id="verdict-select" title="reviewer verdict">
+        <option value="">verdict…</option>
+        <option value="NO_ISSUES">No issues</option>
+        <option value="SBQ">SBQ</option>
+        <option value="FIXES_IN_PROGRESS">Fixes in progress</option>
+        <option value="SECOND_OPINION">Second opinion</option>
+        <option value="__clear">— clear verdict</option>
+      </select>
+      <select id="move-select" title="move between buckets">
+        <option value="">move to…</option>
+        <option value="HARD_FAIL">HARD_FAIL</option>
+        <option value="SOFT_FAIL">SOFT_FAIL</option>
+        <option value="PASS">PASS</option>
+        <option value="UNSORTED">UNSORTED</option>
+      </select>
+    </div>
+    <div class="user-chip" id="user-chip" hidden>
+      <span id="user-name"></span>
+      <button id="logout-btn">sign out</button>
+    </div>
   </header>
 
   <div class="task-layout">
-    <nav class="sidebar" id="sidebar">
+    <nav class="sidebar glass" id="sidebar">
       <h3>Documents</h3>
       <div id="nav-docs"></div>
       <h3>Trajectories</h3>
@@ -35,12 +48,12 @@
       <div class="file-tree" id="nav-files"></div>
     </nav>
 
-    <section class="viewer" id="viewer">
+    <section class="viewer glass" id="viewer">
       <div class="viewer-head"><span class="title" id="viewer-title"></span></div>
       <div id="viewer-body"></div>
     </section>
 
-    <aside class="chat-panel">
+    <aside class="chat-panel glass">
       <div class="chat-head">
         <span class="title">Audit copilot</span>
         <button id="clear-chat">clear</button>
