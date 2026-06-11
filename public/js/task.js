@@ -30,7 +30,7 @@ const backBtn = document.getElementById('back-btn');
 function updateBackBtn() {
   const top = navStack[navStack.length - 1];
   backBtn.hidden = !top;
-  if (top) backBtn.textContent = `‹ ${top.label}`;
+  if (top) backBtn.textContent = `‹ Back to ${top.label}`;
 }
 
 backBtn.addEventListener('click', () => {
