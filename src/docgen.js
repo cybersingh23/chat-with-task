@@ -86,11 +86,14 @@ markdown document (no preamble) with EXACTLY this structure:
 # Review — <task_id>
 
 \`\`\`alerts
-ONE LINE PER GLARING ISSUE, WORST FIRST (e.g. "MODEL A IS A 2-MESSAGE GREETING STUB — NOTHING TO AUDIT ON THE WINNER SIDE")
+Short title, eight words max — one-sentence detail in plain language.
 \`\`\`
-The alerts block renders as a large red banner at the top of the page. Put ONLY true blockers
-in it — things the reviewer must know before reading anything else. Plain caps text, no
-markdown inside. If there are no glaring issues, output the block with the single line: NONE.
+The alerts block renders as a "Critical issues" card at the top of the page. One line per
+glaring issue, worst first, ONLY true blockers — things the reviewer must know before reading
+anything else. Each line is "title — detail", sentence case (never all caps; acronyms fine),
+no markdown inside. Example:
+Model A is a 2-message greeting stub — the winner-side trajectory contains no work, so every model_1 claim is unverifiable.
+If there are no glaring issues, output the block with the single line: NONE.
 
 ## Verdict
 **Proposed bucket: HARD_FAIL | SOFT_FAIL | PASS** — then at most 3 sentences why.
@@ -128,7 +131,7 @@ Output ONLY the final markdown document (no preamble) with EXACTLY this structur
 # Remediation — <task_id>
 
 \`\`\`alerts
-ONE LINE IF THE TASK IS UNSALVAGEABLE WITHOUT VENDOR ACTION (e.g. "BLOCKED ON VENDOR: REAL MODEL_A TRAJECTORY MUST BE RE-EXPORTED FIRST"), otherwise: NONE
+One "title — detail" line in sentence case if the task is unsalvageable without vendor action (e.g. "Blocked on vendor — the real model_a trajectory must be re-exported before any other fix can land."), otherwise: NONE
 \`\`\`
 
 ## Fix list

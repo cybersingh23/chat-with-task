@@ -72,7 +72,16 @@ export function renderMarkdown(md) {
     if (lang.trim() === 'alerts') {
       const lines = String(body).split('\n').map((l) => l.trim()).filter((l) => l && l.toUpperCase() !== 'NONE');
       if (!lines.length) return '';
-      return `<div class="alert-banner">${lines.map((l) => `<div class="alert-line">${escapeHtml(l)}</div>`).join('')}</div>`;
+      const items = lines.map((line) => {
+        const l = sentenceCaseIfShouting(line);
+        const dash = l.indexOf(' — ');
+        const title = dash === -1 ? l : l.slice(0, dash);
+        const detail = dash === -1 ? '' : l.slice(dash + 3);
+        return `<div class="alert-item"><div class="alert-title">${escapeHtml(title)}</div>${
+          detail ? `<div class="alert-detail">${escapeHtml(detail)}</div>` : ''
+        }</div>`;
+      });
+      return `<div class="alert-banner"><div class="alert-head">Critical issues</div>${items.join('')}</div>`;
     }
     return codeBase.call(this, codeOrToken, infostring, escaped);
   };
@@ -81,6 +90,14 @@ export function renderMarkdown(md) {
   // [HARD]/[SOFT]/[INFO] tags in finding headings -> severity badges.
   html = html.replace(/\[(HARD|SOFT|INFO)\]/g, (_, sev) => `<span class="sev sev-${sev}">${sev}</span>`);
   return DOMPurify.sanitize(html, { ADD_ATTR: ['data-traj-model', 'data-traj-index'] });
+}
+
+// Legacy docs shipped all-caps alert lines; tame them to sentence case.
+function sentenceCaseIfShouting(line) {
+  const letters = line.replace(/[^a-zA-Z]/g, '');
+  if (!letters || letters.replace(/[^A-Z]/g, '').length / letters.length < 0.7) return line;
+  const lower = line.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
 export function escapeHtml(s) {

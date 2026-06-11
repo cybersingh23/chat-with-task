@@ -243,19 +243,24 @@ pre.raw {
   padding: 16px 18px; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
 }
 
-/* glaring-issue banner */
+/* critical-issues card */
 .alert-banner {
-  background: rgba(255, 97, 89, 0.09);
-  border: 1px solid rgba(255, 97, 89, 0.35);
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--red);
   border-radius: var(--r-md);
-  padding: 18px 22px; margin: 20px 0 28px;
+  padding: 14px 22px 8px; margin: 20px 0 28px;
 }
-.alert-line {
-  display: flex; gap: 12px; align-items: baseline;
-  color: var(--red); font-weight: 700; font-size: 15.5px; line-height: 1.45;
-  letter-spacing: 0; margin: 6px 0;
+.alert-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--red); padding-bottom: 4px;
 }
-.alert-line::before { content: '⚠'; flex-shrink: 0; }
+.alert-head::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+.alert-item { padding: 10px 0 12px; }
+.alert-item + .alert-item { border-top: 1px solid var(--edge); }
+.alert-title { font-weight: 600; font-size: 15px; line-height: 1.45; color: var(--text); }
+.alert-detail { font-size: 13px; color: var(--text-2); line-height: 1.6; margin-top: 3px; }
 
 /* severity badges */
 .sev {
