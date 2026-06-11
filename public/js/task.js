@@ -363,7 +363,7 @@ async function refreshState() {
   const s = await api(`/task/${bucket}/${taskId}/state`);
   const mine = s.claimed_by === me.username;
   claimChip.hidden = !s.claimed_by;
-  claimChip.textContent = s.claimed_by ? (mine ? '⬤ claimed by you' : `⬤ claimed by ${s.claimed_by}`) : '';
+  claimChip.textContent = s.claimed_by ? (mine ? 'claimed by you' : `claimed by ${s.claimed_by}`) : '';
   claimBtn.hidden = false;
   claimBtn.textContent = s.claimed_by ? (mine || me.role === 'admin' ? 'Release' : 'Claimed') : 'Claim task';
   claimBtn.disabled = Boolean(s.claimed_by) && !mine && me.role !== 'admin';

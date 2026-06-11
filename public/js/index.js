@@ -45,7 +45,7 @@ async function load() {
           el('button', {
             class: 'bucket-dl', title: 'download task_id list for this column',
             onclick: () => { location.href = `/api/export/ids/${bucket}`; },
-          }, '⬇ ids'),
+          }, 'ids ↓'),
         ),
         tasks.length
           ? tasks.map((t) =>
@@ -53,11 +53,10 @@ async function load() {
                 el('div', { class: 'tid' }, t.id),
                 t.problem ? el('div', { class: 'prob' }, t.problem) : null,
                 el('div', { class: 'pills' },
-                  t.claimedBy ? el('span', { class: 'chip claimed' }, `⬤ ${t.claimedBy}`) : null,
+                  t.claimedBy ? el('span', { class: 'chip claimed' }, t.claimedBy) : null,
                   t.verdict ? el('span', { class: `chip v-${t.verdict}` }, VERDICT_LABELS[t.verdict] || t.verdict) : null,
-                  pill('review', t.hasReview),
-                  pill('remediation', t.hasRemediation),
-                  pill('seed', t.hasAuditSeed),
+                  docmark('review', t.hasReview),
+                  docmark('remediation', t.hasRemediation),
                 ),
               )
             )
@@ -67,8 +66,8 @@ async function load() {
   }
 }
 
-function pill(label, on) {
-  return el('span', { class: `pill ${on ? 'on' : ''}` }, `${on ? '✓' : '·'} ${label}`);
+function docmark(label, on) {
+  return el('span', { class: `docmark ${on ? 'on' : ''}`, title: on ? `${label}.md generated` : `no ${label}.md yet` }, label);
 }
 
 document.getElementById('export-csv').addEventListener('click', () => { location.href = '/api/export/all.csv'; });
