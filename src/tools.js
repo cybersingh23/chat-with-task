@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { listFiles, readTaskFile, readTrajectory, resolveSafe, taskDir } from './workspace.js';
+import { readSpec, SPEC_FILES } from './spec.js';
 
 // Tools the audit copilot can call against the claimed task's folder.
 export const TOOL_DEFS = [
@@ -49,6 +50,21 @@ export const TOOL_DEFS = [
   {
     type: 'function',
     function: {
+      name: 'read_spec',
+      description:
+        'Read the full text of a customer program spec document when you need exact wording beyond the embedded canon: qc_rubric (QC Rubric v2 — the 16 sub-dimension fail bars), nwr_checklist (the 29 ONL-* check codes + customer report format), gap_analysis (evidence base: canonical fabrication/fairness cases).',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', enum: Object.keys(SPEC_FILES) },
+        },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'read_trajectory',
       description:
         'Read normalized trajectory messages for model_a or model_b. Each message has an index N — cite it as traj://<model>/<N> so the reviewer gets a "Show in trajectory" button. Returns role, text parts, and tool calls (clipped). Page with start/count.',
@@ -84,6 +100,8 @@ export function makeExecutor(bucket, id) {
       }
       case 'search':
         return searchTask(dir, args);
+      case 'read_spec':
+        return readSpec(args.name);
       case 'read_trajectory': {
         const traj = readTrajectory(bucket, id, args.model);
         let msgs = traj.messages;

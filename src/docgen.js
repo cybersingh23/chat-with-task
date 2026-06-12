@@ -3,6 +3,7 @@ import path from 'node:path';
 import { runAgentLoop } from './llm.js';
 import { TOOL_DEFS, makeExecutor } from './tools.js';
 import { readTaskDef, taskDir, writeTaskFile } from './workspace.js';
+import { QUALITY_CANON } from './spec.js';
 
 // Shared context block: rank.json digest + audit seed, prepended to every
 // system prompt (chat copilot and doc generation).
@@ -160,6 +161,7 @@ export async function generateDoc(bucket, id, which, onEvent) {
   const dir = taskDir(bucket, id);
   const system = [
     isReview ? REVIEW_PROMPT : REMEDIATION_PROMPT,
+    QUALITY_CANON,
     CITATION_RULES,
     taskContext(bucket, id),
   ].join('\n\n');
