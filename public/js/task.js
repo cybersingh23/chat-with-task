@@ -66,12 +66,19 @@ function mountView(key, build, { refresh = false } = {}) {
   return entry;
 }
 
-// ---------- global traj:// deep-link delegation ----------
+// ---------- global traj:// + spec:// deep-link delegation ----------
 document.addEventListener('click', (e) => {
-  const a = e.target.closest('[data-traj-model]');
-  if (!a) return;
-  e.preventDefault();
-  showTrajectory(a.dataset.trajModel, Number(a.dataset.trajIndex));
+  const t = e.target.closest('[data-traj-model]');
+  if (t) {
+    e.preventDefault();
+    showTrajectory(t.dataset.trajModel, Number(t.dataset.trajIndex));
+    return;
+  }
+  const s = e.target.closest('[data-spec-key]');
+  if (s) {
+    e.preventDefault();
+    showQcSpec(s.dataset.specKey);
+  }
 });
 
 // ---------- sidebar ----------
@@ -95,7 +102,11 @@ async function buildSidebar() {
     el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showTaskDef(); } },
       el('span', {}, 'Task definition'),
       el('span', { class: 'missing' }, taskDef.missing ? 'missing' : `${taskDef.milestones.length} milestones`),
-    )
+    ),
+    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showQcSpec(); } },
+      el('span', {}, 'QC spec'),
+      el('span', { class: 'missing' }, 'V5'),
+    ),
   );
 
   for (const d of DOCS) {
@@ -298,6 +309,68 @@ function askCopilotAboutMilestone(m) {
   setChatCollapsed(false);
   chatText.value = `Check milestone ${m.id} ("${m.title || m.prompt.slice(0, 80)}") in both trajectories: was its intent entered by the annotator (paraphrase counts) or done proactively by the model? Cite the matching user turns with traj:// links, or quote evidence it is genuinely absent.`;
   chatText.focus();
+}
+
+// ---------- QC spec (V5 rubric) ----------
+let rubricPromise = null;
+
+async function showQcSpec(focusKey = null) {
+  hideTrajToolbar();
+  viewerTitle.textContent = 'QC spec — V5 rubric';
+  document.querySelector('.viewer-head .regen')?.remove();
+  viewReopeners.set('qcspec', { label: 'QC spec', reopen: () => { setActive(findDocNav('QC spec')); showQcSpec(); } });
+  rubricPromise ||= api('/spec/rubric');
+  const { dimensions } = await rubricPromise;
+  mountView('qcspec', () => buildQcSpecView(dimensions));
+  if (focusKey) {
+    setActive(findDocNav('QC spec'));
+    const node = document.getElementById(`spec-${focusKey}`);
+    if (node) {
+      node.scrollIntoView({ behavior: 'instant', block: 'start' });
+      node.classList.add('flash');
+      setTimeout(() => node.classList.remove('flash'), 2500);
+    }
+  }
+}
+
+function buildQcSpecView(dimensions) {
+  if (!dimensions.length) {
+    return el('div', { class: 'callout info' },
+      'V5 rubric not found — place V5_RUBRIC.csv in the server\'s spec/ directory (see spec/README.md).');
+  }
+  const byCategory = new Map();
+  for (const d of dimensions) {
+    if (!byCategory.has(d.category)) byCategory.set(d.category, []);
+    byCategory.get(d.category).push(d);
+  }
+  const SCORE_LABEL = { 2: 'Fail', 3: 'Non-Fail', 5: 'Pass' };
+  return el('div', { class: 'qcspec' },
+    el('h1', {}, 'QC spec — V5 rubric'),
+    el('p', { class: 'hint-line' },
+      `${dimensions.length} dimensions. Scores: 2 = Fail, 3 = Non-Fail, 5 = Pass. `,
+      'The copilot and docs cite these as R-keys; clicking a citation lands here.'),
+    ...[...byCategory.entries()].flatMap(([category, dims]) => [
+      el('h2', {}, category),
+      dims.map((d) =>
+        el('div', { class: 'spec-dim', id: `spec-${d.key}` },
+          el('div', { class: 'spec-dim-head' },
+            el('span', { class: 'chip milestone-id' }, d.key),
+            el('span', { class: 'spec-dim-name' }, d.name),
+          ),
+          d.description ? el('div', { class: 'spec-dim-desc' }, d.description) : null,
+          el('div', { class: 'spec-options' },
+            d.options.map((o) =>
+              el('div', { class: `spec-opt sev-band-${o.score}` },
+                el('span', { class: `sev ${o.score === 2 ? 'sev-HARD' : o.score === 3 ? 'sev-SOFT' : 'sev-PASS'}` },
+                  `${o.score} ${SCORE_LABEL[o.score] || ''}`),
+                el('span', { class: 'spec-opt-text' }, o.text),
+              )
+            ),
+          ),
+        )
+      ),
+    ]),
+  );
 }
 
 // ---------- trajectory viewer (prompt-grouped, matching trajectory-viewer-v2) ----------

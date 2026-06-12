@@ -67,6 +67,9 @@ Citation rules (mandatory):
   [model_a msg 23](traj://model_a/23). The UI turns these into "Show in trajectory" buttons that
   jump the reviewer to that exact message. model is model_a or model_b; the number is the message
   index shown by read_trajectory. Cite generously — every factual claim about a trajectory needs one.
+- Whenever a V5 rubric dimension decides a severity or verdict, cite it as a spec:// link:
+  [R12 Summaries · Accuracy](spec://R12). The UI turns these into buttons that open the QC spec
+  at that exact rubric row. Use the R-keys from the canon (R1-R25).
 - "model_a"/"model_b" map to model codenames via rank.json model_assignment; always state the mapping once.
 - Verify before you assert: every specific number or quoted prompt in rank.json is a falsifiable
   claim — use the search tool against the trajectories before calling it accurate or fabricated.

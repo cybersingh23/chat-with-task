@@ -60,6 +60,11 @@ export function renderMarkdown(md) {
       const shown = label && label !== href ? label : `${m[1]}[${m[2]}]`;
       return `<a class="traj-link" href="#" data-traj-model="${m[1]}" data-traj-index="${m[2]}">${escapeHtml(shown)} </a>`;
     }
+    const s = /^spec:\/\/(R\d{1,2})$/.exec(href || '');
+    if (s) {
+      const shown = label && label !== href ? label : s[1];
+      return `<a class="spec-link" href="#" data-spec-key="${s[1]}">${escapeHtml(shown)}</a>`;
+    }
     return linkBase.call(this, hrefOrToken, title, text);
   };
 
@@ -89,7 +94,7 @@ export function renderMarkdown(md) {
   let html = marked.parse(md, { renderer, gfm: true, breaks: false });
   // [HARD]/[SOFT]/[INFO] tags in finding headings -> severity badges.
   html = html.replace(/\[(HARD|SOFT|INFO)\]/g, (_, sev) => `<span class="sev sev-${sev}">${sev}</span>`);
-  return DOMPurify.sanitize(html, { ADD_ATTR: ['data-traj-model', 'data-traj-index'] });
+  return DOMPurify.sanitize(html, { ADD_ATTR: ['data-traj-model', 'data-traj-index', 'data-spec-key'] });
 }
 
 // Legacy docs shipped all-caps alert lines; tame them to sentence case.
