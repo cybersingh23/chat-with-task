@@ -4,8 +4,8 @@ const [, , bucket, taskId] = location.pathname.split('/');
 const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
 document.getElementById('task-id').textContent = taskId;
 const sevChip = document.getElementById('sev-chip');
-sevChip.textContent = SEV_LABEL[bucket] || bucket;
-sevChip.className = `chip sev-badge ${bucket}`;
+sevChip.textContent = (SEV_LABEL[bucket] || bucket) + ' ▾';
+sevChip.className = `sev-badge-btn ${bucket}`;
 
 const viewerEl = document.getElementById('viewer');
 const viewerBody = document.getElementById('viewer-body');
@@ -659,13 +659,30 @@ document.getElementById('clear-chat').addEventListener('click', async () => {
 });
 
 // ---------- claim / decision / severity ----------
-const moveSelect = document.getElementById('move-select');
-moveSelect.value = bucket; // reflects current severity
-moveSelect.addEventListener('change', async (e) => {
-  const to = e.target.value;
-  if (!to || to === bucket) return;
-  await api(`/task/${bucket}/${taskId}/move`, { method: 'POST', body: { to } });
-  location.href = `/task/${to}/${taskId}`;
+// Severity reclassify lives on the badge itself (click → small menu), so the
+// header stays uncluttered.
+sevChip.addEventListener('click', () => {
+  const r = sevChip.getBoundingClientRect();
+  const SEVS = [['HARD_FAIL', 'Hard'], ['SOFT_FAIL', 'Soft'], ['PASS', 'Pass'], ['UNSORTED', 'Unsorted']];
+  const menu = el('div', { class: 'pop-menu glass' },
+    el('div', { class: 'pop-menu-title' }, 'Severity'),
+    ...SEVS.map(([k, label]) =>
+      el('button', {
+        class: k === bucket ? 'current' : '',
+        onclick: async () => {
+          menu.remove();
+          if (k === bucket) return;
+          await api(`/task/${bucket}/${taskId}/move`, { method: 'POST', body: { to: k } });
+          location.href = `/task/${k}/${taskId}`;
+        },
+      }, label + (k === bucket ? '  ✓' : '')),
+    ),
+  );
+  menu.style.left = `${r.left}px`;
+  menu.style.top = `${r.bottom + 6}px`;
+  document.body.append(menu);
+  const away = (e) => { if (!menu.contains(e.target) && e.target !== sevChip) { menu.remove(); document.removeEventListener('mousedown', away); } };
+  setTimeout(() => document.addEventListener('mousedown', away), 0);
 });
 
 const claimBtn = document.getElementById('claim-btn');
@@ -702,6 +719,7 @@ async function refreshState() {
     claimBtn.className = '';
   }
   verdictSelect.value = s.verdict || '';
+  verdictSelect.className = 'verdict-select' + (s.verdict ? ` set v-${s.verdict}` : '');
 }
 
 claimBtn.addEventListener('click', async () => {

@@ -32,6 +32,21 @@ function avatarHue(name) {
   for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
   return h;
 }
+// Claim straight from the board without opening the task (opening = view only).
+// stopPropagation/preventDefault so the click doesn't follow the card link.
+function claimAction(t) {
+  return el('span', {
+    class: 'card-claim', role: 'button', title: 'assign this task to you',
+    onclick: async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { await api(`/task/${t.bucket}/${t.id}/claim`, { method: 'POST' }); }
+      catch (err) { toast(err.message); }
+      load();
+    },
+  }, el('span', { class: 'avatar ghost' }), 'Claim');
+}
+
 function assignee(name) {
   if (!name) {
     return el('span', { class: 'assignee none' },
@@ -153,7 +168,7 @@ function ticketCard(t) {
     el('div', { class: 'tid' }, t.id),
     t.problem ? el('div', { class: 'prob' }, t.problem) : null,
     el('div', { class: 'ticket-foot' },
-      assignee(t.claimedBy),
+      t.claimedBy ? assignee(t.claimedBy) : claimAction(t),
       t.verdict ? el('span', { class: `chip v-${t.verdict}` }, VERDICT_LABELS[t.verdict] || t.verdict) : null,
     ),
   );

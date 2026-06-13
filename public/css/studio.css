@@ -256,6 +256,16 @@ select option { background: #14161c; }
 .avatar.ghost { background: transparent; box-shadow: inset 0 0 0 1.5px var(--edge-strong); }
 .assignee-name { font-weight: 550; }
 
+/* claim-from-board affordance (unclaimed tickets) */
+.card-claim {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+  padding: 2px 9px 2px 3px; border-radius: 999px; border: 1px solid var(--edge);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.card-claim:hover { background: var(--blue); border-color: transparent; color: #fff; }
+.card-claim:hover .avatar.ghost { box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.6); }
+
 .ticket { cursor: grab; }
 .ticket.dragging { opacity: 0.4; cursor: grabbing; }
 .lane.drop-target {
@@ -327,31 +337,45 @@ select option { background: #14161c; }
 .nav-item .missing { font-size: 10.5px; color: var(--text-3); }
 .file-tree .nav-item { padding: 4px 10px; font-size: 11.5px; font-family: var(--mono); }
 
-/* task header: back · severity · id ……… claim state · decision · severity · user */
+/* task header: back · severity badge · id ……… claim · decision · user */
 .back-home {
   font-size: 13px; font-weight: 600; color: var(--text-2); white-space: nowrap;
   padding: 5px 10px; border-radius: var(--r-sm);
 }
 .back-home:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
-.topbar .sev-badge { font-size: 11px; font-weight: 600; }
 .topbar .task-id { font-family: var(--mono); font-size: 12px; color: var(--text-3); }
 
-.claim-state {
-  display: flex; align-items: center; gap: 8px;
-  padding: 4px 4px 4px 12px; border-radius: 999px;
-  background: var(--surface); border: 1px solid var(--edge);
+/* severity badge doubles as the reclassify control */
+.sev-badge-btn {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  padding: 3px 9px; border-radius: 999px; border: 1px solid transparent;
 }
+.sev-badge-btn.HARD_FAIL { color: var(--red); background: rgba(255, 97, 89, 0.13); }
+.sev-badge-btn.SOFT_FAIL { color: var(--orange); background: rgba(255, 161, 79, 0.13); }
+.sev-badge-btn.PASS { color: var(--green); background: rgba(67, 209, 124, 0.13); }
+.sev-badge-btn.UNSORTED { color: var(--teal); background: rgba(100, 210, 255, 0.12); }
+.sev-badge-btn:hover { border-color: currentColor; }
+
 .claim-who { font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
 .claim-who.unclaimed { color: var(--text-3); }
 .claim-who.claimed { color: var(--text); }
-.claim-state button { font-size: 12px; padding: 4px 13px; }
-.claim-state button[hidden] { display: none; }
+#claim-btn { font-size: 12px; padding: 5px 14px; }
+#claim-btn[hidden] { display: none; }
 
-.hdr-field { display: inline-flex; align-items: center; gap: 7px; }
-.hdr-field-label { font-size: 11px; font-weight: 600; color: var(--text-3); letter-spacing: 0.03em; }
-.hdr-field select { font-size: 12.5px; padding: 5px 26px 5px 11px; }
-.hdr-field.subtle .hdr-field-label { color: var(--text-3); }
-.hdr-field.subtle select { color: var(--text-2); }
+/* decision select, self-describing: dim when unset, colored when a decision is set */
+.verdict-select { font-size: 12.5px; padding: 5px 26px 5px 12px; color: var(--text-3); }
+.verdict-select.set { color: var(--text); font-weight: 600; }
+.verdict-select.v-NO_ISSUES { color: var(--green); border-color: rgba(67, 209, 124, 0.4); }
+.verdict-select.v-FIXES_MADE { color: var(--blue); border-color: rgba(108, 165, 255, 0.4); }
+.verdict-select.v-SBQ { color: var(--red); border-color: rgba(255, 97, 89, 0.4); }
+.verdict-select.v-SECOND_OPINION { color: var(--purple); border-color: rgba(185, 140, 245, 0.4); }
+
+/* shared small popover menu (severity reclassify) */
+.pop-menu { position: fixed; z-index: 200; min-width: 150px; padding: 7px; display: flex; flex-direction: column; gap: 2px; }
+.pop-menu-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-3); padding: 3px 8px 5px; }
+.pop-menu button { text-align: left; border: none; background: transparent; padding: 7px 10px; border-radius: var(--r-sm); font-size: 13px; }
+.pop-menu button:hover { background: var(--surface-2); }
+.pop-menu button.current { color: var(--text-2); }
 
 /* viewer */
 .viewer { overflow-y: auto; padding: 0 36px 48px; }

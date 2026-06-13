@@ -10,35 +10,20 @@
 <body>
   <header class="topbar">
     <a href="/" class="back-home" title="back to board">‹ Board</a>
-    <span class="chip sev-badge" id="sev-chip"></span>
+    <button class="sev-badge-btn" id="sev-chip" title="reclassify severity"></button>
     <span class="mono task-id" id="task-id"></span>
     <div class="spacer"></div>
 
-    <div class="claim-state">
-      <span class="claim-who" id="claim-who"></span>
-      <button id="claim-btn"></button>
-    </div>
+    <span class="claim-who" id="claim-who"></span>
+    <button id="claim-btn"></button>
 
-    <label class="hdr-field">
-      <span class="hdr-field-label">Decision</span>
-      <select class="verdict-select" id="verdict-select" title="reviewer decision">
-        <option value="">— none —</option>
-        <option value="NO_ISSUES">No Issues</option>
-        <option value="FIXES_MADE">Fixes made</option>
-        <option value="SBQ">SBQ</option>
-        <option value="SECOND_OPINION">Second Opinion Needed</option>
-      </select>
-    </label>
-
-    <label class="hdr-field subtle">
-      <span class="hdr-field-label">Severity</span>
-      <select id="move-select" title="reclassify severity">
-        <option value="HARD_FAIL">Hard</option>
-        <option value="SOFT_FAIL">Soft</option>
-        <option value="PASS">Pass</option>
-        <option value="UNSORTED">Unsorted</option>
-      </select>
-    </label>
+    <select class="verdict-select" id="verdict-select" title="set your decision">
+      <option value="">Set decision…</option>
+      <option value="NO_ISSUES">No Issues</option>
+      <option value="FIXES_MADE">Fixes made</option>
+      <option value="SBQ">SBQ</option>
+      <option value="SECOND_OPINION">Second Opinion Needed</option>
+    </select>
 
     <div class="user-chip" id="user-chip" hidden>
       <span id="user-name"></span>
