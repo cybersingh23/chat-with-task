@@ -120,6 +120,11 @@ async function buildSidebar() {
       )
     );
   }
+  navDocs.append(
+    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showChecklist(); } },
+      el('span', {}, 'Checklist'),
+    )
+  );
 
   const navTrajs = document.getElementById('nav-trajs');
   navTrajs.replaceChildren(
@@ -389,6 +394,127 @@ function buildQcSpecView(dimensions) {
       }),
     ]),
   );
+}
+
+// ---------- checklist (adjudicate review findings → decision) ----------
+const CHECK_VERDS = [
+  ['NO_ISSUES', 'No Issues'],
+  ['FIXES_MADE', 'Fixes made'],
+  ['SBQ', 'SBQ'],
+  ['SECOND_OPINION', 'Second Opinion Needed'],
+];
+
+function parseFindings(md) {
+  const out = [];
+  const re = /^###\s*\[(HARD|SOFT|INFO)\]\s*(F\d+)\s*[—–-]+\s*(.+?)\s*$/gm;
+  let m;
+  while ((m = re.exec(md))) out.push({ sev: m[1], id: m[2], title: m[3] });
+  return out;
+}
+
+async function showChecklist() {
+  hideTrajToolbar();
+  viewerTitle.textContent = 'Checklist';
+  document.querySelector('.viewer-head .regen')?.remove();
+  viewReopeners.set('checklist', { label: 'Checklist', reopen: () => { setActive(findDocNav('Checklist')); showChecklist(); } });
+  let reviewText = '';
+  try { reviewText = (await api(`/task/${bucket}/${taskId}/file?path=review.md`)).text; } catch { /* no review yet */ }
+  const state = await api(`/task/${bucket}/${taskId}/state`);
+  mountView('checklist', () => buildChecklistView(parseFindings(reviewText), state.checklist || {}, state.verdict), { refresh: true });
+}
+
+function buildChecklistView(findings, checks, verdict) {
+  const container = el('div', { class: 'checklist' });
+  container.append(el('h1', {}, 'Checklist'));
+  if (!findings.length) {
+    container.append(el('p', { class: 'hint-line' },
+      'No findings yet — generate the Review and its findings will populate this checklist.'));
+    return container;
+  }
+  container.append(el('p', { class: 'hint-line' },
+    'Adjudicate each review finding — mark it Done (fixed / verified) or Over-flag (not a real issue) — then record the decision below.'));
+
+  const local = { ...checks };
+  const statusOf = (id) => local[id]?.status || 'open';
+  const summary = el('div', { class: 'check-summary' });
+  const suggestion = el('div', { class: 'check-suggestion' });
+
+  function recompute() {
+    const c = { open: 0, done: 0, overflag: 0, hardOpen: 0 };
+    for (const f of findings) {
+      const s = statusOf(f.id);
+      c[s]++;
+      if (s === 'open' && f.sev === 'HARD') c.hardOpen++;
+    }
+    summary.replaceChildren(
+      el('span', {}, `${findings.length} findings`), sep(),
+      el('span', { class: 'c-done' }, `${c.done} done`), sep(),
+      el('span', { class: 'c-overflag' }, `${c.overflag} over-flagged`), sep(),
+      el('span', { class: c.open ? 'c-open' : '' }, `${c.open} open`),
+    );
+    suggestion.textContent =
+      c.open === 0
+        ? (c.overflag === findings.length ? 'Everything over-flagged → likely No Issues.' : 'All findings addressed → likely Fixes made or No Issues.')
+        : c.hardOpen
+          ? `${c.hardOpen} HARD finding(s) still open → likely SBQ, or send for a second opinion.`
+          : `${c.open} finding(s) still open.`;
+  }
+  const sep = () => el('span', { class: 'dot-sep' }, '·');
+
+  async function onSet(id, status) {
+    await api(`/task/${bucket}/${taskId}/checklist`, { method: 'POST', body: { key: id, status } });
+    if (status) local[id] = { status }; else delete local[id];
+    recompute();
+  }
+
+  const list = el('div', { class: 'check-list' });
+  for (const f of findings) list.append(checkRow(f, statusOf, onSet));
+  container.append(list);
+
+  const verdictBtns = CHECK_VERDS.map(([k, label]) =>
+    el('button', {
+      class: `vbtn v-${k}${verdict === k ? ' active' : ''}`, 'data-v': k,
+      onclick: async () => {
+        await api(`/task/${bucket}/${taskId}/verdict`, { method: 'POST', body: { verdict: k } });
+        verdictSelect.value = k;
+        verdictSelect.className = `verdict-select set v-${k}`;
+        refreshState();
+        container.querySelectorAll('.check-verdicts .vbtn').forEach((b) => b.classList.toggle('active', b.dataset.v === k));
+      },
+    }, label)
+  );
+  container.append(
+    el('div', { class: 'check-panel' },
+      el('h2', {}, 'Decision'),
+      summary,
+      el('p', { class: 'check-suggestion-wrap' }, suggestion),
+      el('div', { class: 'check-verdicts' }, ...verdictBtns),
+    )
+  );
+  recompute();
+  return container;
+}
+
+function checkRow(f, statusOf, onSet) {
+  const row = el('div', {},
+    el('span', { class: `sev sev-${f.sev}` }, f.sev),
+    el('span', { class: 'check-title' }, `${f.id} — ${f.title}`),
+    el('span', { class: 'check-actions' }),
+  );
+  const actions = row.querySelector('.check-actions');
+  const apply = () => {
+    const s = statusOf(f.id);
+    row.className = `check-row s-${s}`;
+    actions.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.s === s));
+  };
+  for (const [s, label] of [['done', '✓ Done'], ['overflag', '⚑ Over-flag']]) {
+    actions.append(el('button', {
+      'data-s': s,
+      onclick: async () => { await onSet(f.id, statusOf(f.id) === s ? '' : s); apply(); },
+    }, label));
+  }
+  apply();
+  return row;
 }
 
 // ---------- trajectory viewer (prompt-grouped, matching trajectory-viewer-v2) ----------

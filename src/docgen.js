@@ -132,12 +132,46 @@ You are an expert ACC delivery auditor writing remediation.md — a pinpoint rep
 The reviewer should never have to hunt: every fix names the exact place to go and the exact
 change to make. Verify anything you rely on from review.md with your tools first.
 
-Output ONLY the final markdown document (no preamble) with EXACTLY this structure:
+FIRST decide whether this is a TRAJECTORY-DEFECT task, because those are NOT normally remediable
+and must NOT get a list of content fixes. A trajectory defect = an incomplete trajectory, missing
+milestones, or a greeting/placeholder stub (e.g. only "hello" / "Hello! How can I help you today?")
+on one or both sides. When you see one, there is nothing to "fix" in rank.json — the work is to
+recover or redo the trajectory. Differentiate by reading BOTH models' actual responses in the
+trajectories (and the rank.json summaries):
+
+- **Genuinely incomplete trajectory** — if the defective side's responses are themselves stunted /
+  nonsensical / abandoned (the model never really did the task), then the session itself was
+  incomplete and the real trajectory most likely does NOT exist anywhere. → This task is UNUSABLE
+  as shipped: it must be redone from scratch. Do not propose content edits.
+- **Trajectory not pulled correctly** — if BOTH sides actually contain well-formed, substantive
+  responses in the underlying data but a shipped trajectory file is a stub/empty/truncated, then
+  the real trajectory exists and was just exported wrong. → Direct the QM to locate the missing
+  trajectory in a different VERSION CARD on agent-env and perform a MANUAL BACKFILL, and to TRACK
+  the backfill in the team Google Sheet. Do not propose content edits.
+
+If it IS a trajectory defect, output this instead of the normal fix list:
 
 # Remediation — <task_id>
 
 \`\`\`alerts
-One "title — detail" line in sentence case if the task is unsalvageable without vendor action (e.g. "Blocked on vendor — the real model_a trajectory must be re-exported before any other fix can land."), otherwise: NONE
+One sentence: which defect and the single required action (e.g. "Greeting-stub on model_a — recover the real trajectory from another agent-env version card and backfill, or mark unusable.")
+\`\`\`
+
+## Trajectory defect
+- **What's wrong:** the defect + the side(s), with a traj:// citation, and the deciding V5 link ([R6 Trajectory Completeness](spec://R6)).
+- **Which case:** state "genuinely incomplete" vs "not pulled correctly" and the evidence — quote/summarize both models' responses you inspected (well-formed vs stunted) that led to the call.
+- **Action (the only path):**
+  - If *not pulled correctly*: "Find the trajectory in another version card for this task on agent-env, manually backfill it into this delivery, and log the backfill in the team Google Sheet (task id, version card used, who/when)." Nothing in rank.json should be edited until the real trajectory is in place.
+  - If *genuinely incomplete*: "This task is unusable as shipped — the trajectory was never completed and the real one does not live elsewhere. It must be redone end-to-end; do not attempt content fixes. Escalate for re-collection."
+- **Do NOT** propose rank.json/claim/score edits — they are meaningless against a missing or fake trajectory.
+
+Stop there for trajectory defects (no Fix list / Re-audit checklist). Otherwise, for a normal task
+with a real trajectory, use the structure below.
+
+# Remediation — <task_id>
+
+\`\`\`alerts
+One "title — detail" line in sentence case if the task is unsalvageable without vendor action, otherwise: NONE
 \`\`\`
 
 ## Fix list

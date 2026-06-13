@@ -39,6 +39,23 @@ export function releaseTask(bucket, id, username, isAdmin) {
   return state;
 }
 
+// Per-finding checklist status, keyed by finding id (F1, F2…): 'done' (fixed /
+// verified) or 'overflag' (over-flagged, not a real issue). Cleared = open.
+const CHECK_STATUSES = ['done', 'overflag'];
+
+export function setChecklistItem(bucket, id, key, status, username) {
+  if (!key) throw httpError(400, 'key required');
+  if (status && !CHECK_STATUSES.includes(status)) {
+    throw httpError(400, `status must be one of ${CHECK_STATUSES.join(', ')} (or empty to clear)`);
+  }
+  const state = getState(bucket, id);
+  state.checklist ||= {};
+  if (!status) delete state.checklist[key];
+  else state.checklist[key] = { status, by: username, at: new Date().toISOString() };
+  saveState(bucket, id, state);
+  return state;
+}
+
 export function setVerdict(bucket, id, verdict, username) {
   if (verdict !== null && !VERDICTS.includes(verdict)) {
     throw httpError(400, `verdict must be one of ${VERDICTS.join(', ')} (or null to clear)`);

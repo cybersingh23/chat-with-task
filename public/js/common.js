@@ -1,5 +1,27 @@
 // Shared helpers: API calls, SSE consumption, markdown with traj:// deep links.
 
+// Liquid-glass refraction: an SVG turbulence+displacement filter referenced by
+// backdrop-filter on .glass panels. Chrome renders the refraction; Safari/FF
+// fall back to the plain blur (they ignore url() filters in backdrop-filter).
+// Injected once per page; only distorts the blurred backdrop, never the panel's
+// own content, so text stays crisp.
+(function injectGlassFilter() {
+  if (typeof document === 'undefined' || document.getElementById('cwt-glass-svg')) return;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.id = 'cwt-glass-svg';
+  svg.setAttribute('width', '0');
+  svg.setAttribute('height', '0');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.style.cssText = 'position:absolute;width:0;height:0;pointer-events:none';
+  svg.innerHTML =
+    '<filter id="liquid-glass" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">' +
+    '<feTurbulence type="fractalNoise" baseFrequency="0.006 0.009" numOctaves="2" seed="7" result="n"/>' +
+    '<feGaussianBlur in="n" stdDeviation="1.2" result="nb"/>' +
+    '<feDisplacementMap in="SourceGraphic" in2="nb" scale="22" xChannelSelector="R" yChannelSelector="G"/>' +
+    '</filter>';
+  (document.body || document.documentElement).appendChild(svg);
+})();
+
 export async function api(path, opts = {}) {
   const res = await fetch(`/api${path}`, {
     headers: { 'content-type': 'application/json' },

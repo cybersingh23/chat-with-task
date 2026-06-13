@@ -127,12 +127,11 @@ async function boot() {
   document.getElementById('user-role').textContent = me.role;
   document.getElementById('ingest-section').hidden = me.role !== 'admin';
   document.getElementById('admin-link').hidden = me.role !== 'admin';
-  const cfg = await api('/config');
-  document.getElementById('config-meta').textContent = cfg.model;
   if (me.role === 'admin') refreshRubricStatus();
   const q = new URLSearchParams(location.search).get('q');
   if (q) searchInput.value = q;
   await load();
+  moveSlider();
   setInterval(load, 8000); // live claim/verdict status from other reviewers
 }
 
@@ -224,13 +223,22 @@ function render() {
 
 searchInput.addEventListener('input', render);
 
+const sevSlider = document.getElementById('sev-slider');
+function moveSlider() {
+  const active = document.querySelector('.sev-chip.active');
+  if (!active) return;
+  sevSlider.style.left = `${active.offsetLeft}px`;
+  sevSlider.style.width = `${active.offsetWidth}px`;
+}
 document.getElementById('sev-filter').addEventListener('click', (e) => {
   const btn = e.target.closest('.sev-chip');
   if (!btn) return;
   sevFilter = btn.dataset.sev;
   document.querySelectorAll('.sev-chip').forEach((b) => b.classList.toggle('active', b === btn));
+  moveSlider();
   render();
 });
+window.addEventListener('resize', moveSlider);
 
 // ---------- admin: QC rubric upload ----------
 async function refreshRubricStatus() {

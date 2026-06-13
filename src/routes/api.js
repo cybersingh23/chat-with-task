@@ -9,12 +9,12 @@ import {
 import { ingestTask, findTaskSources } from '../ingest.js';
 import { handleUpload } from '../upload.js';
 import { verifyLogin, createSession, destroySession, requireAuth, requireAdmin } from '../auth.js';
-import { claimTask, releaseTask, setVerdict, getState, VERDICTS } from '../state.js';
+import { claimTask, releaseTask, setVerdict, setChecklistItem, getState, VERDICTS } from '../state.js';
 import { runAgentLoop } from '../llm.js';
 import { TOOL_DEFS, makeExecutor } from '../tools.js';
 import { generateDoc, taskContext, CITATION_RULES } from '../docgen.js';
 import { QUALITY_CANON, getRubric, saveRubricCsv } from '../spec.js';
-import { recordUsage, readUsage } from '../usage.js';
+import { recordUsage, readUsage, usageCsv } from '../usage.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '2mb' }));
@@ -46,6 +46,12 @@ api.get('/spec/rubric', (req, res) => res.json({ dimensions: getRubric() }));
 api.get('/admin/usage', requireAdmin, wrap(async (req, res) =>
   res.json(readUsage(Math.min(2000, Number(req.query.limit) || 500)))
 ));
+
+api.get('/admin/usage.csv', requireAdmin, wrap(async (req, res) => {
+  res.setHeader('content-type', 'text/csv');
+  res.setHeader('content-disposition', 'attachment; filename="copilot_usage.csv"');
+  res.send(usageCsv());
+}));
 
 // admin uploads the QC rubric CSV once (raw text body); everyone reads it
 api.post('/spec/rubric', requireAdmin, express.text({ type: '*/*', limit: '8mb' }), wrap(async (req, res) => {
@@ -85,6 +91,10 @@ api.post('/task/:bucket/:id/verdict', wrap(async (req, res) =>
 ));
 
 api.get('/task/:bucket/:id/state', wrap(async (req, res) => res.json(getState(req.params.bucket, req.params.id))));
+
+api.post('/task/:bucket/:id/checklist', wrap(async (req, res) =>
+  res.json(setChecklistItem(req.params.bucket, req.params.id, String(req.body.key || ''), req.body.status || '', req.user.username))
+));
 
 // One task_id per line for a bucket column, or ?verdict=SBQ for a verdict group.
 api.get('/export/ids/:bucket', wrap(async (req, res) => {

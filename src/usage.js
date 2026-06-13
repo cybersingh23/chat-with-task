@@ -66,6 +66,23 @@ export function readUsage(limit = 500) {
   return { events: events.slice(-limit).reverse(), byUser, byDay, totals, rate: rate() };
 }
 
+// Full event log as CSV (admin export).
+export function usageCsv() {
+  let events = [];
+  try {
+    events = fs.readFileSync(USAGE_PATH, 'utf8').trim().split('\n').filter(Boolean)
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  } catch { /* no log yet */ }
+  const cols = ['ts', 'user', 'taskId', 'kind', 'model', 'prompt_tokens', 'completion_tokens', 'cost', 'text'];
+  const esc = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const lines = [cols.join(',')];
+  for (const e of events) lines.push(cols.map((c) => esc(e[c])).join(','));
+  return lines.join('\n') + '\n';
+}
+
 function blank() {
   return { interactions: 0, prompt_tokens: 0, completion_tokens: 0, cost: 0 };
 }
