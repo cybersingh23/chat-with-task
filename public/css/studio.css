@@ -10,9 +10,9 @@
   --edge: rgba(255, 255, 255, 0.08);
   --edge-strong: rgba(255, 255, 255, 0.14);
 
-  --text: #e9ebf1;
-  --text-2: #9ba1ad;
-  --text-3: #5f6570;
+  --text: #f3f5fa;
+  --text-2: #aeb4c0;
+  --text-3: #6b7280;
 
   --blue: #6ca5ff;
   --blue-deep: #2f6fed;
@@ -667,6 +667,14 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 .traj-toolbar .quiet { margin-left: auto; font-size: 12px; color: var(--text-3); }
 .traj-toolbar .quiet:hover { color: var(--text); }
 
+/* prompt click-through stepper */
+.prompt-nav { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-sm); padding: 2px; }
+.prompt-nav[hidden] { display: none; }
+.prompt-nav button { border: none; background: transparent; color: var(--text-2); font-size: 11px; padding: 4px 9px; border-radius: 6px; }
+.prompt-nav button:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.prompt-nav button:disabled { opacity: 0.3; }
+.prompt-nav-label { font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; min-width: 84px; text-align: center; }
+
 /* deep-link / locate targets clear the sticky viewer header when scrolled to */
 .msg-user, .msg-asst, .spec-card { scroll-margin-top: 72px; }
 
@@ -717,10 +725,10 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 /* ASSISTANT turn — indented and quieter than the user, but still readable */
 .msg-asst { margin: 0 0 14px 28px; padding: 0 0 0 16px; border-left: 1px solid var(--edge); }
 .asst-text {
-  padding: 7px 0; margin: 2px 0; color: var(--text); font-size: 13px; line-height: 1.7;
+  padding: 8px 0; margin: 2px 0; color: var(--text); font-size: 14px; line-height: 1.78;
   white-space: pre-wrap; word-break: break-word;
 }
-.asst-text.reasoning { font-style: italic; color: var(--text-3); font-size: 12.5px; }
+.asst-text.reasoning { font-style: italic; color: var(--text-2); font-size: 13px; }
 .empty-resp { padding: 8px 12px; color: var(--text-3); font-size: 12px; font-style: italic; margin: 4px 0; }
 
 /* tool blocks — colored left border per tool, like the original */
@@ -779,8 +787,8 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
   background: rgba(47, 111, 237, 0.13);
   border-radius: var(--r-md); padding: 10px 14px; white-space: pre-wrap; font-size: 13px;
 }
-.chat-msg.assistant .bubble { font-size: 13px; }
-.chat-msg .bubble.md { max-width: none; font-size: 13px; }
+.chat-msg.assistant .bubble { font-size: 13.5px; line-height: 1.7; }
+.chat-msg .bubble.md { max-width: none; font-size: 13.5px; line-height: 1.7; }
 .chat-msg .bubble.md h1, .chat-msg .bubble.md h2, .chat-msg .bubble.md h3 {
   font-size: 12.5px; border: none; margin: 12px 0 4px; text-transform: none; letter-spacing: 0; color: var(--text);
 }

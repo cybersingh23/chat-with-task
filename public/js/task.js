@@ -570,18 +570,49 @@ async function showTrajectory(model, focusIndex = null) {
     el('div', { class: 'convo' }, ...groupTurns(traj.messages).map((g, gi) => renderTurnGroup(model, g, gi)))
   );
 
+  // prompt click-through: step between user turns without scrolling
+  trajModel = model;
+  trajPrompts = traj.messages.filter((m) => m.role === 'user').map((m) => m.index);
+  trajCursor = focusIndex != null ? trajPrompts.indexOf(focusIndex) : -1;
+  renderPromptNav();
+
   // An explicit citation jump overrides the remembered scroll position.
-  if (focusIndex != null) {
-    const node = document.getElementById(`msg-${model}-${focusIndex}`);
-    if (node) {
-      node.closest('.turn-body')?.classList.add('open');
-      node.closest('.turn-group')?.querySelector('.turn-header .arrow')?.classList.add('open');
-      node.scrollIntoView({ behavior: 'instant', block: 'start' });
-      node.classList.add('flash');
-      setTimeout(() => node.classList.remove('flash'), 2500);
-    }
-  }
+  if (focusIndex != null) jumpToMessage(model, focusIndex);
 }
+
+function jumpToMessage(model, index) {
+  const node = document.getElementById(`msg-${model}-${index}`);
+  if (!node) return;
+  node.closest('.turn-body')?.classList.add('open');
+  node.closest('.turn-group')?.querySelector('.turn-header .arrow')?.classList.add('open');
+  node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  node.classList.add('flash');
+  setTimeout(() => node.classList.remove('flash'), 2500);
+}
+
+// ---------- prompt click-through ----------
+let trajModel = null;
+let trajPrompts = [];
+let trajCursor = -1;
+const promptNav = document.getElementById('prompt-nav');
+const promptNavLabel = document.getElementById('prompt-nav-label');
+
+function renderPromptNav() {
+  if (!trajPrompts.length) { promptNav.hidden = true; return; }
+  promptNav.hidden = false;
+  promptNavLabel.textContent = trajCursor >= 0 ? `Prompt ${trajCursor + 1} / ${trajPrompts.length}` : `${trajPrompts.length} prompts`;
+  document.getElementById('prompt-prev').disabled = trajCursor <= 0;
+  document.getElementById('prompt-next').disabled = trajCursor >= trajPrompts.length - 1;
+}
+
+function stepPrompt(delta) {
+  if (!trajPrompts.length) return;
+  trajCursor = Math.max(0, Math.min(trajPrompts.length - 1, (trajCursor < 0 ? -1 : trajCursor) + delta));
+  jumpToMessage(trajModel, trajPrompts[trajCursor]);
+  renderPromptNav();
+}
+document.getElementById('prompt-prev').addEventListener('click', () => stepPrompt(-1));
+document.getElementById('prompt-next').addEventListener('click', () => stepPrompt(trajCursor < 0 ? 1 : 1));
 
 function renderTurnGroup(model, g, gi) {
   const preview = g.user ? userText(g.user).slice(0, 130) : '(assistant continues)';
