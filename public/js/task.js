@@ -82,10 +82,11 @@ document.addEventListener('click', (e) => {
 });
 
 // ---------- sidebar ----------
+// _audit_seed.md is intentionally NOT listed here: it stays on disk and is fed
+// to the copilot/docgen as grounding, but is not surfaced as a reviewer tab.
 const DOCS = [
   { key: 'review', label: 'Review', file: 'review.md' },
   { key: 'remediation', label: 'Remediation', file: 'remediation.md' },
-  { key: 'seed', label: 'Audit seed', file: '_audit_seed.md' },
 ];
 
 let taskDef = null;
@@ -110,11 +111,11 @@ async function buildSidebar() {
   );
 
   for (const d of DOCS) {
-    const present = d.key === 'review' ? meta.hasReview : d.key === 'remediation' ? meta.hasRemediation : meta.hasAuditSeed;
+    const present = d.key === 'review' ? meta.hasReview : meta.hasRemediation;
     navDocs.append(
       el('button', { class: 'nav-item', onclick: (ev) => openDoc(d, ev.currentTarget) },
         el('span', {}, d.label),
-        present ? null : el('span', { class: 'missing' }, d.key === 'seed' ? 'none' : 'generate'),
+        present ? null : el('span', { class: 'missing' }, 'generate'),
       )
     );
   }
@@ -189,16 +190,13 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
       content = el('div', { class: 'md' });
       content.innerHTML = renderMarkdown(f.text);
     } catch {
-      content = el('p', { class: 'hint-line' },
-        doc.key === 'seed'
-          ? 'No _audit_seed.md — this task was added without /acc audit artifacts.'
-          : `No ${doc.file} yet — generate it from the button above.`);
+      content = el('p', { class: 'hint-line' }, `No ${doc.file} yet — generate it from the button above.`);
     }
     mountView(`doc:${doc.key}`, () => content, { refresh: true });
   } else {
     mountView(`doc:${doc.key}`, () => null);
   }
-  if (doc.key !== 'seed') addRegenButton(doc);
+  addRegenButton(doc);
 }
 
 function addRegenButton(doc) {
