@@ -44,6 +44,12 @@
         <input type="file" id="folder-input" webkitdirectory multiple hidden />
         <input type="file" id="zip-input" accept=".zip" hidden />
       </div>
+      <div class="rubric-admin">
+        <span class="rubric-label">QC rubric</span>
+        <span class="mono" id="rubric-status">checking…</span>
+        <button id="rubric-upload-btn">Upload CSV</button>
+        <input type="file" id="rubric-input" accept=".csv" hidden />
+      </div>
       <details class="claim-secondary">
         <summary>…or ingest by task ID (server-side search of local delivery folders)</summary>
         <div class="claim-row">
@@ -53,6 +59,11 @@
         </div>
       </details>
     </section>
+
+    <div class="search-bar glass">
+      <input type="text" id="task-search" placeholder="Search tasks by ID or problem…" spellcheck="false" autofocus />
+      <span class="mono" id="search-count"></span>
+    </div>
 
     <div class="toolbar">
       <span class="summary" id="ws-summary"></span>

@@ -13,7 +13,7 @@ import { claimTask, releaseTask, setVerdict, getState, VERDICTS } from '../state
 import { runAgentLoop } from '../llm.js';
 import { TOOL_DEFS, makeExecutor } from '../tools.js';
 import { generateDoc, taskContext, CITATION_RULES } from '../docgen.js';
-import { QUALITY_CANON, getRubric } from '../spec.js';
+import { QUALITY_CANON, getRubric, saveRubricCsv } from '../spec.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '2mb' }));
@@ -41,13 +41,19 @@ api.get('/me', (req, res) => res.json(req.user));
 
 api.get('/spec/rubric', (req, res) => res.json({ dimensions: getRubric() }));
 
+// admin uploads the QC rubric CSV once (raw text body); everyone reads it
+api.post('/spec/rubric', requireAdmin, express.text({ type: '*/*', limit: '8mb' }), wrap(async (req, res) => {
+  const dims = saveRubricCsv(String(req.body || ''));
+  res.json({ ok: true, dimensions: dims.length });
+}));
+
 api.get('/workspace', wrap(async (req, res) => res.json(listWorkspace())));
 
 api.get('/config', (req, res) =>
   res.json({ model: config.litellm.model, deliveryRoots: config.deliveryRoots, workspaceRoot: config.workspaceRoot })
 );
 
-api.post('/ingest', wrap(async (req, res) => {
+api.post('/ingest', requireAdmin, wrap(async (req, res) => {
   const { taskId, bucket } = req.body;
   res.json(ingestTask(String(taskId || '').trim(), bucket || 'UNSORTED'));
 }));

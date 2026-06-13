@@ -155,6 +155,24 @@ select option { background: #14161c; }
 .drop-status { font-size: 12px; margin-top: 14px; min-height: 16px; color: var(--text-2); }
 .progress { height: 3px; background: var(--surface-2); border-radius: 2px; margin: 14px auto 0; max-width: 380px; overflow: hidden; }
 .progress-bar { height: 100%; width: 0%; background: var(--blue); transition: width 150ms; }
+.rubric-admin {
+  display: flex; align-items: center; gap: 10px; margin-top: 14px;
+  padding-top: 14px; border-top: 1px solid var(--edge); font-size: 12.5px; color: var(--text-2);
+}
+.rubric-admin .rubric-label { font-weight: 600; color: var(--text); }
+.rubric-admin button { font-size: 12px; padding: 4px 12px; }
+#rubric-status { color: var(--text-3); }
+
+.search-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 8px 6px 16px; margin-bottom: 18px;
+}
+.search-bar input {
+  flex: 1; border: none; background: none; font-size: 14px; padding: 8px 0;
+}
+.search-bar input:focus { border: none; }
+#search-count { color: var(--text-3); padding-right: 10px; white-space: nowrap; }
+
 .claim-secondary { margin-top: 14px; font-size: 12.5px; color: var(--text-3); }
 .claim-secondary summary { cursor: pointer; width: fit-content; margin: 0 auto; }
 .claim-secondary summary:hover { color: var(--text-2); }
@@ -451,11 +469,13 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 .traj-toolbar[hidden] { display: none; }
 .traj-tabs { display: flex; gap: 4px; background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-sm); padding: 3px; }
 .traj-tab {
-  border: none; background: transparent; color: var(--text-2);
-  font-size: 12.5px; font-weight: 550; padding: 5px 16px; border-radius: 6px;
+  border: none; background: transparent; color: var(--text-3);
+  font-size: 12.5px; font-weight: 600; padding: 5px 16px; border-radius: 6px;
 }
 .traj-tab:hover { background: var(--surface-2); border-color: transparent; }
-.traj-tab.active { background: var(--surface-2); color: var(--text); }
+/* match the left-panel launcher colors: Model A green, Model B blue */
+.traj-tab.traj-model_a.active { background: rgba(67, 209, 124, 0.14); color: var(--green); }
+.traj-tab.traj-model_b.active { background: rgba(108, 165, 255, 0.16); color: var(--blue); }
 .traj-toolbar .quiet { margin-left: auto; font-size: 12px; color: var(--text-3); }
 .traj-toolbar .quiet:hover { color: var(--text); }
 
@@ -475,30 +495,39 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 .turn-body { display: none; }
 .turn-body.open { display: block; }
 
+/* USER (annotator) turn — the thing reviewers read most, so it leads clearly:
+   brighter card, full-contrast text, a distinct purple accent (not the gray
+   that washed out, not the model green/blue). */
 .msg-user {
-  padding: 14px 18px; margin: 12px 6px 12px 6px;
-  border-left: 3px solid var(--edge-strong);
-  border-radius: 0 var(--r-sm) var(--r-sm) 0;
-  background: var(--surface);
+  padding: 13px 16px; margin: 14px 0 14px 0;
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--purple);
+  border-radius: var(--r-sm);
+  background: rgba(185, 140, 245, 0.06);
 }
-.msg-user.flash, .msg-asst.flash { border-radius: var(--r-sm); outline: 1px solid var(--yellow); }
-.msg-user-label, .step-header {
+.msg-user.flash, .msg-asst.flash { outline: 1px solid var(--yellow); outline-offset: 2px; }
+.msg-user-label {
   display: flex; align-items: center;
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em;
-  color: var(--text-3); margin-bottom: 6px; font-weight: 700;
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--purple); margin-bottom: 7px; font-weight: 700;
 }
-.step-header { padding: 8px 0 0; margin-bottom: 2px; }
-.msg-idx { font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; margin-left: 2px; }
+.step-header {
+  display: flex; align-items: center;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--text-3); padding: 8px 0 0; margin-bottom: 2px; font-weight: 700;
+}
+.msg-idx { font-family: var(--mono); font-weight: 400; letter-spacing: 0; text-transform: none; margin-left: 2px; color: var(--text-3); }
 .copy-link {
   margin-left: auto; border: none; background: none; padding: 0 2px;
   font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 0; text-transform: none;
 }
 .copy-link:hover { color: var(--text); background: none; }
-.msg-user-text { color: var(--text); font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
-.msg-asst { margin: 0 6px 14px 38px; padding: 0 0 0 16px; border-left: 1px solid var(--edge); }
+.msg-user-text { color: var(--text); font-size: 13.5px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+/* ASSISTANT turn — indented and quieter than the user, but still readable */
+.msg-asst { margin: 0 0 14px 28px; padding: 0 0 0 16px; border-left: 1px solid var(--edge); }
 .asst-text {
-  padding: 8px 12px; margin: 4px 0; color: var(--text-2); font-size: 13px; line-height: 1.7;
-  white-space: pre-wrap; word-break: break-word; border-radius: var(--r-sm); background: rgba(255, 255, 255, 0.015);
+  padding: 7px 0; margin: 2px 0; color: var(--text); font-size: 13px; line-height: 1.7;
+  white-space: pre-wrap; word-break: break-word;
 }
 .asst-text.reasoning { font-style: italic; color: var(--text-3); font-size: 12.5px; }
 .empty-resp { padding: 8px 12px; color: var(--text-3); font-size: 12px; font-style: italic; margin: 4px 0; }

@@ -336,7 +336,7 @@ async function showQcSpec(focusKey = null) {
 function buildQcSpecView(dimensions) {
   if (!dimensions.length) {
     return el('div', { class: 'callout info' },
-      'V5 rubric not found — place V5_RUBRIC.csv in the server\'s spec/ directory (see spec/README.md).');
+      'The QC rubric hasn\'t been uploaded yet. An admin can add it from the home page (QC rubric · Upload CSV).');
   }
   // category -> group -> [variants]; sibling failure modes share one header
   const byCategory = new Map();
@@ -435,7 +435,7 @@ async function showTrajectory(model, focusIndex = null) {
   document.getElementById('traj-tabs').replaceChildren(
     ...['model_a', 'model_b'].map((m) =>
       el('button', {
-        class: `traj-tab ${m === model ? 'active' : ''}`,
+        class: `traj-tab traj-${m} ${m === model ? 'active' : ''}`,
         onclick: () => showTrajectory(m),
       }, m === 'model_a' ? 'Model A' : 'Model B')
     )
@@ -771,6 +771,6 @@ if (params.get('traj')) {
   setActive(document.querySelector('#nav-docs .nav-item'));
   showTaskDef();
 } else {
-  openDoc(DOCS[0], document.querySelectorAll('#nav-docs .nav-item')[1]);
+  openDoc(DOCS[0], findDocNav('Review'));
 }
 await loadChat();

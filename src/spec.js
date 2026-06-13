@@ -47,16 +47,29 @@ function read(file) {
 // Row with a title starts a dimension; following rows carry its remaining
 // answer options. Keys R1..Rn are assigned in file order and are the citation
 // handles used by the copilot (spec://R12) and the UI anchors.
+// Source of truth: the admin-uploaded copy in DATA_DIR (writable, persists in
+// the data volume); falls back to a file dropped into SPEC_DIR.
 let rubricCache = null;
+const uploadedRubricPath = path.join(config.dataDir, 'rubric.csv');
+
+// Admin uploads the QC rubric once; stored in the writable data volume so it
+// survives restarts and is served to every reviewer.
+export function saveRubricCsv(csvText) {
+  const dims = parseCsv(csvText);
+  if (!dims.length || !dims.some((r) => r[1])) throw new Error('that does not look like a rubric CSV (no titled rows)');
+  fs.mkdirSync(config.dataDir, { recursive: true });
+  fs.writeFileSync(uploadedRubricPath, csvText);
+  rubricCache = null;
+  return getRubric();
+}
 
 export function getRubric() {
   if (rubricCache) return rubricCache;
   let raw;
-  try {
-    raw = fs.readFileSync(path.join(specDir, 'V5_RUBRIC.csv'), 'utf8');
-  } catch {
-    return (rubricCache = []);
+  for (const p of [uploadedRubricPath, path.join(specDir, 'V5_RUBRIC.csv')]) {
+    try { raw = fs.readFileSync(p, 'utf8'); break; } catch { /* try next */ }
   }
+  if (!raw) return (rubricCache = []);
   const rows = parseCsv(raw);
   const dims = [];
   let cur = null;

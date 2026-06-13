@@ -15,6 +15,8 @@ const VERDICT_LABELS = {
 };
 
 let me = null;
+let currentWs = {};
+const searchInput = document.getElementById('task-search');
 
 async function boot() {
   me = await api('/me'); // 401 redirects to login
@@ -24,24 +26,32 @@ async function boot() {
   document.getElementById('ingest-section').hidden = me.role !== 'admin';
   const cfg = await api('/config');
   document.getElementById('config-meta').textContent = cfg.model;
+  if (me.role === 'admin') refreshRubricStatus();
   await load();
   setInterval(load, 8000); // live claim/verdict status from other reviewers
 }
 
 async function load() {
-  const ws = await api('/workspace');
+  currentWs = await api('/workspace');
+  render();
+}
+
+function render() {
+  const q = searchInput.value.trim().toLowerCase();
+  const matches = (t) => !q || t.id.toLowerCase().includes(q) || (t.problem || '').toLowerCase().includes(q);
   const root = document.getElementById('buckets');
-  const total = ORDER.reduce((n, b) => n + (ws[b]?.length || 0), 0);
-  document.getElementById('ws-summary').textContent =
-    `${total} tasks · ` + ORDER.map((b) => `${b.replace('_FAIL', '').toLowerCase()} ${ws[b]?.length || 0}`).join(' · ');
+  const total = ORDER.reduce((n, b) => n + (currentWs[b]?.length || 0), 0);
+  let shown = 0;
   root.replaceChildren();
   for (const bucket of ORDER) {
-    const tasks = ws[bucket] || [];
+    const all = currentWs[bucket] || [];
+    const tasks = all.filter(matches);
+    shown += tasks.length;
     root.append(
       el('section', { class: `bucket accent-${bucket}` },
         el('div', { class: 'bucket-head' },
           el('span', { class: 'bucket-name' }, bucket.replace('_', ' ')),
-          el('span', { class: 'bucket-count' }, String(tasks.length)),
+          el('span', { class: 'bucket-count' }, q ? `${tasks.length}/${all.length}` : String(all.length)),
           el('button', {
             class: 'bucket-dl', title: 'download task_id list for this column',
             onclick: () => { location.href = `/api/export/ids/${bucket}`; },
@@ -60,11 +70,45 @@ async function load() {
                 ),
               )
             )
-          : el('div', { class: 'bucket-empty' }, EMPTY_HINTS[bucket]),
+          : el('div', { class: 'bucket-empty' }, q ? 'No match.' : EMPTY_HINTS[bucket]),
       )
     );
   }
+  document.getElementById('ws-summary').textContent =
+    `${total} tasks · ` + ORDER.map((b) => `${b.replace('_FAIL', '').toLowerCase()} ${currentWs[b]?.length || 0}`).join(' · ');
+  document.getElementById('search-count').textContent = q ? `${shown} match${shown === 1 ? '' : 'es'}` : '';
 }
+
+searchInput.addEventListener('input', render);
+
+// ---------- admin: QC rubric upload ----------
+async function refreshRubricStatus() {
+  try {
+    const { dimensions } = await api('/spec/rubric');
+    const n = dimensions.length;
+    document.getElementById('rubric-status').textContent = n ? `${n} dimensions loaded` : 'not uploaded yet';
+  } catch {
+    document.getElementById('rubric-status').textContent = 'unavailable';
+  }
+}
+
+document.getElementById('rubric-upload-btn')?.addEventListener('click', () => document.getElementById('rubric-input').click());
+document.getElementById('rubric-input')?.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const status = document.getElementById('rubric-status');
+  status.textContent = 'uploading…';
+  try {
+    const text = await file.text();
+    const res = await fetch('/api/spec/rubric', { method: 'POST', headers: { 'content-type': 'text/csv' }, body: text });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'upload failed');
+    status.textContent = `${data.dimensions} dimensions loaded`;
+  } catch (err) {
+    status.textContent = err.message;
+  }
+  e.target.value = '';
+});
 
 function docmark(label, on) {
   return el('span', { class: `docmark ${on ? 'on' : ''}`, title: on ? `${label}.md generated` : `no ${label}.md yet` }, label);
