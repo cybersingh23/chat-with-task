@@ -338,37 +338,44 @@ function buildQcSpecView(dimensions) {
     return el('div', { class: 'callout info' },
       'V5 rubric not found — place V5_RUBRIC.csv in the server\'s spec/ directory (see spec/README.md).');
   }
+  // category -> group -> [variants]; sibling failure modes share one header
   const byCategory = new Map();
   for (const d of dimensions) {
-    if (!byCategory.has(d.category)) byCategory.set(d.category, []);
-    byCategory.get(d.category).push(d);
+    if (!byCategory.has(d.category)) byCategory.set(d.category, new Map());
+    const groups = byCategory.get(d.category);
+    if (!groups.has(d.group)) groups.set(d.group, []);
+    groups.get(d.group).push(d);
   }
   const SCORE_LABEL = { 2: 'Fail', 3: 'Non-Fail', 5: 'Pass' };
-  return el('div', { class: 'qcspec' },
-    el('h1', {}, 'QC spec — V5 rubric'),
-    el('p', { class: 'hint-line' },
-      `${dimensions.length} dimensions. Scores: 2 = Fail, 3 = Non-Fail, 5 = Pass. `,
-      'The copilot and docs cite these as R-keys; clicking a citation lands here.'),
-    ...[...byCategory.entries()].flatMap(([category, dims]) => [
-      el('h2', {}, category),
-      dims.map((d) =>
-        el('div', { class: 'spec-dim', id: `spec-${d.key}` },
-          el('div', { class: 'spec-dim-head' },
-            el('span', { class: 'chip milestone-id' }, d.key),
-            el('span', { class: 'spec-dim-name' }, d.name),
-          ),
-          d.description ? el('div', { class: 'spec-dim-desc' }, d.description) : null,
-          el('div', { class: 'spec-options' },
-            d.options.map((o) =>
-              el('div', { class: `spec-opt sev-band-${o.score}` },
-                el('span', { class: `sev ${o.score === 2 ? 'sev-HARD' : o.score === 3 ? 'sev-SOFT' : 'sev-PASS'}` },
-                  `${o.score} ${SCORE_LABEL[o.score] || ''}`),
-                el('span', { class: 'spec-opt-text' }, o.text),
-              )
-            ),
-          ),
+
+  const renderDim = (d, showName) =>
+    el('div', { class: 'spec-dim', id: `spec-${d.key}` },
+      el('div', { class: 'spec-dim-head' },
+        el('span', { class: 'spec-key' }, d.key),
+        showName ? el('span', { class: 'spec-dim-name' }, d.variant || d.group) : null,
+      ),
+      d.options.map((o) =>
+        el('div', { class: `spec-opt ${o.score === 5 ? 'pass' : ''}` },
+          el('span', { class: `spec-band band-${o.score}` }, SCORE_LABEL[o.score] || String(o.score)),
+          el('span', { class: 'spec-opt-text' }, o.text),
         )
       ),
+    );
+
+  return el('div', { class: 'qcspec' },
+    el('h1', {}, 'QC spec'),
+    el('p', { class: 'hint-line' },
+      `V5 rubric · ${dimensions.length} failure modes. The copilot and docs cite these as R-keys; clicking a citation lands here.`),
+    ...[...byCategory.entries()].flatMap(([category, groups]) => [
+      el('h2', {}, category),
+      [...groups.entries()].map(([group, dims]) => {
+        const desc = dims.find((d) => d.description)?.description || '';
+        return el('section', { class: 'spec-group' },
+          el('h3', { class: 'spec-group-name' }, group),
+          desc ? el('p', { class: 'spec-group-desc' }, desc) : null,
+          dims.map((d) => renderDim(d, dims.length > 1 || d.variant)),
+        );
+      }),
     ]),
   );
 }

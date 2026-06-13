@@ -339,29 +339,35 @@ a.traj-link {
 a.traj-link::after { content: '→'; }
 a.traj-link:hover { background: rgba(108, 165, 255, 0.2); text-decoration: none; }
 
-/* QC spec (V5 rubric) */
-.qcspec { max-width: 860px; }
+/* QC spec (V5 rubric) — light: whitespace + hairlines, no card chrome */
+.qcspec { max-width: 760px; }
 .qcspec h1 { font-size: 19px; margin-top: 0; }
 .qcspec h2 {
-  font-size: 12px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase;
-  color: var(--text-3); margin: 32px 0 12px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-3); margin: 40px 0 6px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--edge);
 }
-.spec-dim {
-  background: var(--surface); border: 1px solid var(--edge);
-  border-radius: var(--r-md); margin-bottom: 12px; padding: 12px 16px 8px;
-}
-.spec-dim.flash { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow); }
-.spec-dim-head { display: flex; align-items: center; gap: 10px; }
-.spec-dim-name { font-weight: 600; font-size: 13.5px; }
-.spec-dim-desc { font-size: 12.5px; color: var(--text-2); line-height: 1.55; margin: 8px 0 2px; }
-.spec-options { margin-top: 10px; }
+.spec-group { padding: 18px 0 6px; }
+.spec-group + .spec-group { border-top: 1px solid var(--edge); }
+.spec-group-name { font-size: 14.5px; font-weight: 600; margin: 0 0 2px; }
+.spec-group-desc { font-size: 12.5px; color: var(--text-3); line-height: 1.6; margin: 4px 0 6px; max-width: 640px; }
+.spec-dim { padding: 10px 0 6px; border-radius: var(--r-sm); }
+.spec-dim.flash { outline: 1px solid var(--yellow); outline-offset: 8px; }
+.spec-dim-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+.spec-key { font-family: var(--mono); font-size: 11px; color: var(--purple); }
+.spec-dim-name { font-weight: 550; font-size: 13px; }
 .spec-opt {
-  display: flex; gap: 10px; align-items: baseline;
-  padding: 8px 0; border-top: 1px solid var(--edge);
-  font-size: 12.5px; line-height: 1.55; color: var(--text-2);
+  display: flex; gap: 12px; align-items: baseline;
+  padding: 4px 0; font-size: 12.5px; line-height: 1.6; color: var(--text-2);
 }
-.spec-opt .sev { flex-shrink: 0; min-width: 74px; text-align: center; }
-.sev-PASS { background: rgba(67, 209, 124, 0.12); color: var(--green); }
+.spec-opt.pass { color: var(--text-3); font-size: 12px; }
+.spec-band {
+  flex-shrink: 0; width: 64px; text-align: right;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em;
+}
+.band-2 { color: var(--red); }
+.band-3 { color: var(--orange); }
+.band-5 { color: var(--text-3); font-weight: 500; }
 .spec-opt-text { white-space: pre-wrap; }
 
 a.spec-link {

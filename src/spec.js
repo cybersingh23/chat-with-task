@@ -63,11 +63,16 @@ export function getRubric() {
   for (const r of rows.slice(1)) {
     const [id, title, , questionDescription, , , , , , , optText, optScore, optJustify] = r;
     if (title) {
-      const parts = title.split(' - ');
+      // Titles encode "Category - Group - Variant" (variant optional), e.g.
+      // "Ranking & Rationale - Trajectory Summaries - Accuracy". Sibling
+      // variants of one group are bundled together in the UI.
+      const parts = title.split(' - ').map((s) => s.trim());
       cur = {
         key: `R${dims.length + 1}`,
         id,
-        category: parts[0]?.trim() || 'Other',
+        category: parts[0] || 'Other',
+        group: parts.length > 2 ? parts.slice(1, -1).join(' — ') : parts[1] || title,
+        variant: parts.length > 2 ? parts[parts.length - 1] : null,
         name: parts.slice(1).join(' — ').trim() || title,
         description: (questionDescription || '').replace(/^\.\s*/, '').replace(/\s*See the spec doc for examples\.?/g, '').replace(/\s*For all options except the last, apply (an|the) error categor(y|ies)\.?/g, '').trim(),
         options: [],
