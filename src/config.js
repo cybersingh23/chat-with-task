@@ -24,6 +24,10 @@ export const config = {
   port: Number(process.env.PORT || 4100),
   projectRoot,
   workspaceRoot: path.resolve(projectRoot, expandHome(process.env.WORKSPACE_ROOT || './workspace')),
+  // spec/ (customer docs, not in git) and data/ (users.json) — overridable so
+  // containers can mount them as volumes
+  specDir: path.resolve(projectRoot, expandHome(process.env.SPEC_DIR || './spec')),
+  dataDir: path.resolve(projectRoot, expandHome(process.env.DATA_DIR || './data')),
   deliveryRoots: (process.env.DELIVERY_ROOTS || '~/Downloads')
     .split(':')
     .map((p) => path.resolve(expandHome(p.trim())))

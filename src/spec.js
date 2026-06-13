@@ -6,7 +6,7 @@ import { config } from './config.js';
 // spec/README.md). The canon is embedded in every copilot/docgen system
 // prompt; full docs are served on demand via the read_spec tool; the V5
 // rubric is parsed for the UI's QC-spec view and spec://R# citations.
-const specDir = path.join(config.projectRoot, 'spec');
+const specDir = config.specDir;
 
 export const SPEC_FILES = {
   v5_rubric: 'V5_RUBRIC.csv',

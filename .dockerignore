@@ -1,0 +1,10 @@
+node_modules
+workspace
+data
+.env
+.git
+spec/*
+!spec/README.md
+*.log
+.DS_Store
+tools/screenshot.mjs

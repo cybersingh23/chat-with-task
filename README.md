@@ -60,6 +60,34 @@ Passwords are scrypt-hashed; to reset one, replace its entry's hash fields with
 `"password": "newpass"` — it re-hashes on next login. Sessions are in-memory (a server restart
 logs everyone out).
 
+## Deploying (sandbox / VM)
+
+The app is one long-lived Node process with three stateful directories — it needs a host with a
+persistent disk (a sandbox VM or container platform with volumes), **not** a serverless platform
+(uploads are 100s of MB; docgen streams for minutes).
+
+```sh
+# on the host
+git clone <repo> && cd chat-with-task
+# 1. customer docs (NOT in git) — copy them in:           spec/   (see spec/README.md)
+# 2. cp .env.example .env  → set LITELLM_API_KEY
+docker compose up -d --build                              # serves :4100
+```
+
+Or without Docker: `npm ci && npm start` (needs Node 22+ and `unzip` on PATH).
+
+| Mount / env | Holds |
+|---|---|
+| `/app/workspace` (`WORKSPACE_ROOT`) | uploaded tasks, chats, claims/verdicts |
+| `/app/data` (`DATA_DIR`) | `users.json` (seeded on first boot) |
+| `/app/spec` (`SPEC_DIR`, read-only) | customer spec docs incl. `V5_RUBRIC.csv` |
+
+`GET /healthz` is the unauthenticated liveness probe. Change the seeded passwords in
+`data/users.json` before sharing the URL (set `"password": "newpass"` on an entry — it re-hashes
+on next login). Sessions are in-memory: a restart logs everyone out, nothing else is lost.
+Put TLS in front (sandbox ingress / reverse proxy) — the login cookie is HttpOnly but the app
+itself serves plain HTTP.
+
 ## Notes
 
 - `workspace/` and `data/` are gitignored — task data and credentials never leave the machine.

@@ -8,6 +8,10 @@ import { sessionUser } from './src/auth.js';
 ensureWorkspace();
 
 const app = express();
+
+// liveness probe for container orchestration — no auth
+app.get('/healthz', (req, res) => res.json({ ok: true }));
+
 app.use('/api', api);
 
 // Pages require a session; assets and the login page stay public.

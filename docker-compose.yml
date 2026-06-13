@@ -1,0 +1,23 @@
+# One-command run for a sandbox/VM:
+#   1. put the customer docs in ./spec/ (see spec/README.md)
+#   2. cp .env.example .env and fill in LITELLM_API_KEY
+#   3. docker compose up -d --build
+services:
+  chat-with-task:
+    build: .
+    ports:
+      - "4100:4100"
+    env_file: .env
+    environment:
+      WORKSPACE_ROOT: /app/workspace
+      DATA_DIR: /app/data
+      SPEC_DIR: /app/spec
+    volumes:
+      - workspace:/app/workspace   # uploaded tasks, chats, claims/verdicts
+      - appdata:/app/data          # users.json
+      - ./spec:/app/spec:ro        # customer spec docs (read-only mount)
+    restart: unless-stopped
+
+volumes:
+  workspace:
+  appdata:

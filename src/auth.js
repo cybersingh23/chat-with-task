@@ -4,7 +4,7 @@ import path from 'node:path';
 import { config } from './config.js';
 import { httpError } from './workspace.js';
 
-const USERS_PATH = path.join(config.projectRoot, 'data', 'users.json');
+const USERS_PATH = path.join(config.dataDir, 'users.json');
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Seeded on first boot; passwords are scrypt-hashed, change them in data/users.json
