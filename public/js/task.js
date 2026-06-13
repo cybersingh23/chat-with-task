@@ -1,4 +1,4 @@
-import { api, apiSSE, renderMarkdown, el, fmtTime } from '/js/common.js';
+import { api, apiSSE, renderMarkdown, el, fmtTime, cap } from '/js/common.js';
 
 const [, , bucket, taskId] = location.pathname.split('/');
 const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
@@ -693,7 +693,7 @@ async function refreshState() {
     claimWho.className = 'claim-who claimed';
     claimWho.replaceChildren(
       el('span', { class: 'avatar', style: `background: hsl(${avatarHue(s.claimed_by)} 52% 42%)` }, s.claimed_by[0].toUpperCase()),
-      mine ? 'Claimed by you' : `Claimed by ${s.claimed_by}`,
+      mine ? 'Claimed by you' : `Claimed by ${cap(s.claimed_by)}`,
     );
     const canRelease = mine || me.role === 'admin';
     claimBtn.hidden = !canRelease;

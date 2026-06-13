@@ -111,6 +111,10 @@ function sentenceCaseIfShouting(line) {
   return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
+export function cap(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
 export function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }

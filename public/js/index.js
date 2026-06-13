@@ -1,4 +1,4 @@
-import { api, el } from '/js/common.js';
+import { api, el, cap } from '/js/common.js';
 
 const ORDER = ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'];
 const VERDICT_LABELS = {
@@ -39,7 +39,7 @@ function assignee(name) {
   }
   return el('span', { class: 'assignee' },
     el('span', { class: 'avatar', style: `background: hsl(${avatarHue(name)} 52% 42%)` }, name[0].toUpperCase()),
-    el('span', { class: 'assignee-name' }, name),
+    el('span', { class: 'assignee-name' }, cap(name)),
   );
 }
 
