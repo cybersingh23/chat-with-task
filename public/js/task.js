@@ -144,22 +144,43 @@ async function buildSidebar() {
       .catch(() => { document.getElementById(`traj-meta-${m}`).textContent = 'unavailable'; });
   }
 
+  buildFileTree();
+}
+
+const SKIP_FILES = new Set(['review.md', 'remediation.md', '_audit_seed.md', '_chat.json', '_studio.json']);
+const FILE_GROUP_ORDER = ['Task', 'Ranking proof', 'Snapshots', 'Other'];
+
+async function buildFileTree() {
   const tree = await api(`/task/${bucket}/${taskId}/files`);
+  const files = [];
+  (function walk(entries) {
+    for (const e of entries) e.dir ? walk(e.children) : files.push(e.path);
+  })(tree);
+
+  // group by folder, with clean basenames (no front-chopped path garbage)
+  const groups = new Map();
+  for (const p of files) {
+    if (SKIP_FILES.has(p) || p.startsWith('trajectories/')) continue;
+    const seg = p.includes('/') ? p.split('/')[0] : '';
+    const label = seg === '' ? 'Task'
+      : seg === 'ranking_proof' ? 'Ranking proof'
+      : (seg === 'snapshots' || seg === 'initial_snapshots') ? 'Snapshots'
+      : 'Other';
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push({ path: p, name: p.split('/').pop() });
+  }
+
   const navFiles = document.getElementById('nav-files');
   navFiles.replaceChildren();
-  const addEntries = (entries) => {
-    for (const entry of entries) {
-      if (entry.dir) { addEntries(entry.children); continue; }
-      const name = entry.path;
-      if (['review.md', 'remediation.md', '_audit_seed.md', '_chat.json', '_studio.json'].includes(name)) continue;
-      if (/^trajectories\//.test(name)) continue;
+  const labels = [...groups.keys()].sort((a, b) => FILE_GROUP_ORDER.indexOf(a) - FILE_GROUP_ORDER.indexOf(b));
+  for (const label of labels) {
+    navFiles.append(el('div', { class: 'file-group' }, label));
+    for (const f of groups.get(label)) {
       navFiles.append(
-        el('button', { class: 'nav-item', title: name, onclick: (ev) => { setActive(ev.currentTarget); showFile(name); } },
-          name.length > 34 ? '…' + name.slice(-33) : name)
+        el('button', { class: 'nav-item file-item', title: f.path, onclick: (ev) => { setActive(ev.currentTarget); showFile(f.path); } }, f.name)
       );
     }
-  };
-  addEntries(tree);
+  }
 }
 
 function setActive(node) {
