@@ -9,29 +9,37 @@
 </head>
 <body>
   <header class="topbar">
-    <a href="/" style="text-decoration:none;color:inherit"><div class="app-name">Chat with Task</div></a>
-    <span class="chip" id="bucket-chip"></span>
-    <span class="mono" id="task-id" style="font-size:12px;color:var(--text-dim)"></span>
+    <a href="/" class="back-home" title="back to board">‹ Board</a>
+    <span class="chip sev-badge" id="sev-chip"></span>
+    <span class="mono task-id" id="task-id"></span>
     <div class="spacer"></div>
-    <div class="claim-bar">
-      <span class="chip claimed" id="claim-chip" hidden></span>
-      <button id="claim-btn" hidden>Claim task</button>
+
+    <div class="claim-state">
+      <span class="claim-who" id="claim-who"></span>
+      <button id="claim-btn"></button>
+    </div>
+
+    <label class="hdr-field">
+      <span class="hdr-field-label">Decision</span>
       <select class="verdict-select" id="verdict-select" title="reviewer decision">
-        <option value="">decision…</option>
+        <option value="">— none —</option>
         <option value="NO_ISSUES">No Issues</option>
         <option value="FIXES_MADE">Fixes made</option>
         <option value="SBQ">SBQ</option>
         <option value="SECOND_OPINION">Second Opinion Needed</option>
-        <option value="__clear">— clear decision</option>
       </select>
-      <select id="move-select" title="move between buckets">
-        <option value="">move to…</option>
-        <option value="HARD_FAIL">HARD_FAIL</option>
-        <option value="SOFT_FAIL">SOFT_FAIL</option>
-        <option value="PASS">PASS</option>
-        <option value="UNSORTED">UNSORTED</option>
+    </label>
+
+    <label class="hdr-field subtle">
+      <span class="hdr-field-label">Severity</span>
+      <select id="move-select" title="reclassify severity">
+        <option value="HARD_FAIL">Hard</option>
+        <option value="SOFT_FAIL">Soft</option>
+        <option value="PASS">Pass</option>
+        <option value="UNSORTED">Unsorted</option>
       </select>
-    </div>
+    </label>
+
     <div class="user-chip" id="user-chip" hidden>
       <span id="user-name"></span>
       <button id="logout-btn">sign out</button>

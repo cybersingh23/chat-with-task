@@ -11,9 +11,10 @@ const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // by replacing the hash with {"password": "newpass"} — it re-hashes on next login check.
 const DEFAULT_USERS = [
   { username: 'admin', password: 'admin-cwt26', role: 'admin' },
-  { username: 'qm1', password: 'qm1-cwt26', role: 'reviewer' },
-  { username: 'qm2', password: 'qm2-cwt26', role: 'reviewer' },
-  { username: 'qm3', password: 'qm3-cwt26', role: 'reviewer' },
+  { username: 'pavit', password: 'pavit-cwt26', role: 'reviewer' },
+  { username: 'ernesto', password: 'ernesto-cwt26', role: 'reviewer' },
+  { username: 'christiam', password: 'christiam-cwt26', role: 'reviewer' },
+  { username: 'gilberto', password: 'gilberto-cwt26', role: 'reviewer' },
 ];
 
 function hash(password, salt) {

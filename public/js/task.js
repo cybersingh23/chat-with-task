@@ -1,10 +1,11 @@
 import { api, apiSSE, renderMarkdown, el, fmtTime } from '/js/common.js';
 
 const [, , bucket, taskId] = location.pathname.split('/');
+const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
 document.getElementById('task-id').textContent = taskId;
-const chip = document.getElementById('bucket-chip');
-chip.textContent = bucket;
-chip.className = `chip ${bucket}`;
+const sevChip = document.getElementById('sev-chip');
+sevChip.textContent = SEV_LABEL[bucket] || bucket;
+sevChip.className = `chip sev-badge ${bucket}`;
 
 const viewerEl = document.getElementById('viewer');
 const viewerBody = document.getElementById('viewer-body');
@@ -657,8 +658,10 @@ document.getElementById('clear-chat').addEventListener('click', async () => {
   chatLog.replaceChildren();
 });
 
-// ---------- claim / verdict / move ----------
-document.getElementById('move-select').addEventListener('change', async (e) => {
+// ---------- claim / decision / severity ----------
+const moveSelect = document.getElementById('move-select');
+moveSelect.value = bucket; // reflects current severity
+moveSelect.addEventListener('change', async (e) => {
   const to = e.target.value;
   if (!to || to === bucket) return;
   await api(`/task/${bucket}/${taskId}/move`, { method: 'POST', body: { to } });
@@ -666,24 +669,35 @@ document.getElementById('move-select').addEventListener('change', async (e) => {
 });
 
 const claimBtn = document.getElementById('claim-btn');
-const claimChip = document.getElementById('claim-chip');
+const claimWho = document.getElementById('claim-who');
 const verdictSelect = document.getElementById('verdict-select');
+let claimedBy = null;
 
 async function refreshState() {
   const s = await api(`/task/${bucket}/${taskId}/state`);
+  claimedBy = s.claimed_by || null;
   const mine = s.claimed_by === me.username;
-  claimChip.hidden = !s.claimed_by;
-  claimChip.textContent = s.claimed_by ? (mine ? 'claimed by you' : `claimed by ${s.claimed_by}`) : '';
-  claimBtn.hidden = false;
-  claimBtn.textContent = s.claimed_by ? (mine || me.role === 'admin' ? 'Release' : 'Claimed') : 'Claim task';
-  claimBtn.disabled = Boolean(s.claimed_by) && !mine && me.role !== 'admin';
-  claimBtn.classList.toggle('primary', !s.claimed_by);
+  if (!s.claimed_by) {
+    claimWho.className = 'claim-who unclaimed';
+    claimWho.textContent = 'Unclaimed';
+    claimBtn.hidden = false;
+    claimBtn.disabled = false;
+    claimBtn.textContent = 'Claim';
+    claimBtn.className = 'primary';
+  } else {
+    claimWho.className = 'claim-who claimed';
+    claimWho.textContent = mine ? 'Claimed by you' : `Claimed by ${s.claimed_by}`;
+    const canRelease = mine || me.role === 'admin';
+    claimBtn.hidden = !canRelease;
+    claimBtn.disabled = false;
+    claimBtn.textContent = 'Release';
+    claimBtn.className = '';
+  }
   verdictSelect.value = s.verdict || '';
 }
 
 claimBtn.addEventListener('click', async () => {
-  const s = await api(`/task/${bucket}/${taskId}/state`);
-  const action = s.claimed_by ? 'release' : 'claim';
+  const action = claimedBy ? 'release' : 'claim';
   try {
     await api(`/task/${bucket}/${taskId}/${action}`, { method: 'POST' });
   } catch (e) {
@@ -692,12 +706,11 @@ claimBtn.addEventListener('click', async () => {
   refreshState();
 });
 
+// '' clears the decision; any value sets it
 verdictSelect.addEventListener('change', async () => {
-  const v = verdictSelect.value;
-  if (!v) return;
   await api(`/task/${bucket}/${taskId}/verdict`, {
     method: 'POST',
-    body: { verdict: v === '__clear' ? null : v },
+    body: { verdict: verdictSelect.value || null },
   });
   refreshState();
 });
