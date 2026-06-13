@@ -268,13 +268,12 @@ async function milestonePresence() {
   return out;
 }
 
-function presencePill(model, state) {
-  const label = model === 'model_a' ? 'A' : 'B';
-  if (state == null) return el('span', { class: 'pres-pill unknown', title: 'no trajectory to check' }, `${label} —`);
-  return el('span', {
-    class: `pres-pill ${state ? 'yes' : 'no'}`,
-    title: state ? `present in ${label} (string match)` : `not found in ${label} (string match)`,
-  }, `${label} ${state ? '✓' : '✗'}`);
+// One worded status chip summarizing presence across both trajectories.
+function presenceChip(a, b) {
+  if (a == null && b == null) return el('span', { class: 'pres-chip unknown', title: 'no trajectory to check' }, 'No trajectory');
+  if (a && b) return el('span', { class: 'pres-chip yes', title: 'string-matched in both A and B' }, 'Found in A & B');
+  if (!a && !b) return el('span', { class: 'pres-chip no', title: 'no string match in A or B' }, 'Not found');
+  return el('span', { class: 'pres-chip partial', title: 'string-matched in only one side' }, a ? 'In A only' : 'In B only');
 }
 
 function buildTaskDefView(presence) {
@@ -301,7 +300,7 @@ function buildTaskDefView(presence) {
           el('span', { class: 'chip milestone-id' }, m.id),
           el('span', { class: 'milestone-title' }, m.title || `Milestone ${i + 1}`),
           el('span', { class: 'spacer' }),
-          presence ? el('span', { class: 'pres-group' }, presencePill('model_a', presence[m.id]?.model_a), presencePill('model_b', presence[m.id]?.model_b)) : null,
+          presence ? presenceChip(presence[m.id]?.model_a, presence[m.id]?.model_b) : null,
           el('button', { onclick: () => locateMilestone('model_a', m) }, 'Locate in A'),
           el('button', { onclick: () => locateMilestone('model_b', m) }, 'Locate in B'),
           el('button', { onclick: () => askCopilotAboutMilestone(m) }, 'Ask copilot'),
