@@ -13,7 +13,7 @@ const DEFAULT_USERS = [
   { username: 'admin', password: 'admin-cwt26', role: 'admin' },
   { username: 'pavit', password: 'pavit-cwt26', role: 'reviewer' },
   { username: 'ernesto', password: 'ernesto-cwt26', role: 'reviewer' },
-  { username: 'christiam', password: 'christiam-cwt26', role: 'reviewer' },
+  { username: 'christian', password: 'christian-cwt26', role: 'reviewer' },
   { username: 'gilberto', password: 'gilberto-cwt26', role: 'reviewer' },
 ];
 
