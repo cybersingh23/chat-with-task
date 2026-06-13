@@ -3,7 +3,7 @@ import path from 'node:path';
 import { taskDir, httpError } from './workspace.js';
 
 // Per-task review state, shared across users: _studio.json in the task folder.
-export const VERDICTS = ['NO_ISSUES', 'SBQ', 'FIXES_IN_PROGRESS', 'SECOND_OPINION'];
+export const VERDICTS = ['NO_ISSUES', 'FIXES_MADE', 'SBQ', 'SECOND_OPINION'];
 
 export function getState(bucket, id) {
   try {

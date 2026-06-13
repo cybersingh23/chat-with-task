@@ -1,21 +1,33 @@
 import { api, el } from '/js/common.js';
 
 const ORDER = ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'];
-const EMPTY_HINTS = {
-  HARD_FAIL: 'No hard fails.',
-  SOFT_FAIL: 'No soft fails.',
-  PASS: 'Nothing in pass.',
-  UNSORTED: 'Nothing unsorted.',
-};
 const VERDICT_LABELS = {
-  NO_ISSUES: 'No issues',
+  NO_ISSUES: 'No Issues',
+  FIXES_MADE: 'Fixes made',
   SBQ: 'SBQ',
-  FIXES_IN_PROGRESS: 'Fixes in progress',
-  SECOND_OPINION: 'Second opinion',
+  SECOND_OPINION: 'Second Opinion Needed',
 };
+const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
+// Workflow lanes — derived from claim + decision state. A decision marks a
+// ticket "seen" (Resolved), except Second Opinion which stays in its own lane.
+const RESOLVED_VERDICTS = new Set(['NO_ISSUES', 'FIXES_MADE', 'SBQ']);
+const LANES = [
+  { key: 'OPEN', name: 'Open', hint: 'Unclaimed, no decision yet.' },
+  { key: 'REVIEW', name: 'In review', hint: 'Claimed and being audited.' },
+  { key: 'SECOND_OPINION', name: 'Needs 2nd opinion', hint: 'Flagged for another reviewer.' },
+  { key: 'RESOLVED', name: 'Resolved', hint: 'A decision has been recorded.' },
+];
+
+function laneOf(t) {
+  if (t.verdict === 'SECOND_OPINION') return 'SECOND_OPINION';
+  if (t.verdict && RESOLVED_VERDICTS.has(t.verdict)) return 'RESOLVED';
+  if (t.claimedBy) return 'REVIEW';
+  return 'OPEN';
+}
 
 let me = null;
 let currentWs = {};
+let sevFilter = 'ALL';
 const searchInput = document.getElementById('task-search');
 
 async function boot() {
@@ -36,50 +48,75 @@ async function load() {
   render();
 }
 
+// Flatten the workspace into tickets carrying their bucket (= severity).
+function allTickets() {
+  const out = [];
+  for (const bucket of ORDER) for (const t of currentWs[bucket] || []) out.push({ ...t, bucket });
+  return out;
+}
+
+function ticketCard(t) {
+  const lane = laneOf(t);
+  const seen = lane === 'RESOLVED';
+  return el('a', {
+    class: `ticket accent-${t.bucket}${seen ? ' seen' : ''}${lane === 'SECOND_OPINION' ? ' attention' : ''}`,
+    href: `/task/${t.bucket}/${t.id}`,
+  },
+    el('div', { class: 'ticket-top' },
+      el('span', { class: `sev-tag accent-${t.bucket}` }, SEV_LABEL[t.bucket]),
+      seen ? el('span', { class: 'seen-mark', title: 'seen' }, '✓') : null,
+      lane === 'SECOND_OPINION' ? el('span', { class: 'attention-mark', title: 'needs another reviewer' }, '⚠') : null,
+    ),
+    el('div', { class: 'tid' }, t.id),
+    t.problem ? el('div', { class: 'prob' }, t.problem) : null,
+    el('div', { class: 'ticket-foot' },
+      t.claimedBy ? el('span', { class: 'who-chip' }, `● ${t.claimedBy}`) : el('span', { class: 'who-chip none' }, 'unclaimed'),
+      t.verdict ? el('span', { class: `chip v-${t.verdict}` }, VERDICT_LABELS[t.verdict] || t.verdict) : null,
+    ),
+  );
+}
+
 function render() {
   const q = searchInput.value.trim().toLowerCase();
-  const matches = (t) => !q || t.id.toLowerCase().includes(q) || (t.problem || '').toLowerCase().includes(q);
-  const root = document.getElementById('buckets');
-  const total = ORDER.reduce((n, b) => n + (currentWs[b]?.length || 0), 0);
-  let shown = 0;
-  root.replaceChildren();
-  for (const bucket of ORDER) {
-    const all = currentWs[bucket] || [];
-    const tasks = all.filter(matches);
-    shown += tasks.length;
-    root.append(
-      el('section', { class: `bucket accent-${bucket}` },
-        el('div', { class: 'bucket-head' },
-          el('span', { class: 'bucket-name' }, bucket.replace('_', ' ')),
-          el('span', { class: 'bucket-count' }, q ? `${tasks.length}/${all.length}` : String(all.length)),
-          el('button', {
-            class: 'bucket-dl', title: 'download task_id list for this column',
-            onclick: () => { location.href = `/api/export/ids/${bucket}`; },
-          }, 'ids ↓'),
+  const tickets = allTickets().filter((t) =>
+    (sevFilter === 'ALL' || t.bucket === sevFilter) &&
+    (!q || t.id.toLowerCase().includes(q) || (t.problem || '').toLowerCase().includes(q))
+  );
+  const byLane = new Map(LANES.map((l) => [l.key, []]));
+  for (const t of tickets) byLane.get(laneOf(t)).push(t);
+
+  const root = document.getElementById('lanes');
+  root.replaceChildren(
+    ...LANES.map((lane) => {
+      const items = byLane.get(lane.key);
+      return el('section', { class: `lane lane-${lane.key}` },
+        el('div', { class: 'lane-head' },
+          el('span', { class: 'lane-name' }, lane.name),
+          el('span', { class: 'lane-count' }, String(items.length)),
         ),
-        tasks.length
-          ? tasks.map((t) =>
-              el('a', { class: `task-card accent-${bucket}`, href: `/task/${bucket}/${t.id}` },
-                el('div', { class: 'tid' }, t.id),
-                t.problem ? el('div', { class: 'prob' }, t.problem) : null,
-                el('div', { class: 'pills' },
-                  t.claimedBy ? el('span', { class: 'chip claimed' }, t.claimedBy) : null,
-                  t.verdict ? el('span', { class: `chip v-${t.verdict}` }, VERDICT_LABELS[t.verdict] || t.verdict) : null,
-                  docmark('review', t.hasReview),
-                  docmark('remediation', t.hasRemediation),
-                ),
-              )
-            )
-          : el('div', { class: 'bucket-empty' }, q ? 'No match.' : EMPTY_HINTS[bucket]),
-      )
-    );
-  }
+        items.length
+          ? el('div', { class: 'lane-body' }, items.map(ticketCard))
+          : el('div', { class: 'lane-empty' }, q || sevFilter !== 'ALL' ? 'No match.' : lane.hint),
+      );
+    })
+  );
+
+  const total = allTickets().length;
   document.getElementById('ws-summary').textContent =
-    `${total} tasks · ` + ORDER.map((b) => `${b.replace('_FAIL', '').toLowerCase()} ${currentWs[b]?.length || 0}`).join(' · ');
-  document.getElementById('search-count').textContent = q ? `${shown} match${shown === 1 ? '' : 'es'}` : '';
+    `${total} tasks · ` + LANES.map((l) => `${l.name.toLowerCase()} ${byLane.get(l.key).length}`).join(' · ');
+  document.getElementById('search-count').textContent =
+    q || sevFilter !== 'ALL' ? `${tickets.length} shown` : '';
 }
 
 searchInput.addEventListener('input', render);
+
+document.getElementById('sev-filter').addEventListener('click', (e) => {
+  const btn = e.target.closest('.sev-chip');
+  if (!btn) return;
+  sevFilter = btn.dataset.sev;
+  document.querySelectorAll('.sev-chip').forEach((b) => b.classList.toggle('active', b === btn));
+  render();
+});
 
 // ---------- admin: QC rubric upload ----------
 async function refreshRubricStatus() {
@@ -110,9 +147,6 @@ document.getElementById('rubric-input')?.addEventListener('change', async (e) =>
   e.target.value = '';
 });
 
-function docmark(label, on) {
-  return el('span', { class: `docmark ${on ? 'on' : ''}`, title: on ? `${label}.md generated` : `no ${label}.md yet` }, label);
-}
 
 document.getElementById('export-csv').addEventListener('click', () => { location.href = '/api/export/all.csv'; });
 document.getElementById('logout-btn').addEventListener('click', async () => {

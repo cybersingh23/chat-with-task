@@ -60,9 +60,17 @@
       </details>
     </section>
 
-    <div class="search-bar glass">
-      <input type="text" id="task-search" placeholder="Search tasks by ID or problem…" spellcheck="false" autofocus />
-      <span class="mono" id="search-count"></span>
+    <div class="board-controls">
+      <div class="search-bar glass">
+        <input type="text" id="task-search" placeholder="Search tasks by ID or problem…" spellcheck="false" autofocus />
+        <span class="mono" id="search-count"></span>
+      </div>
+      <div class="sev-filter" id="sev-filter">
+        <button class="sev-chip active" data-sev="ALL">All</button>
+        <button class="sev-chip" data-sev="HARD_FAIL">Hard</button>
+        <button class="sev-chip" data-sev="SOFT_FAIL">Soft</button>
+        <button class="sev-chip" data-sev="PASS">Pass</button>
+      </div>
     </div>
 
     <div class="toolbar">
@@ -71,7 +79,7 @@
         <button class="quiet" id="export-csv">Export all · CSV</button>
       </div>
     </div>
-    <div class="buckets" id="buckets"></div>
+    <div class="lanes" id="lanes"></div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
