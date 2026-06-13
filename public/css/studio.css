@@ -667,6 +667,9 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 .traj-toolbar .quiet { margin-left: auto; font-size: 12px; color: var(--text-3); }
 .traj-toolbar .quiet:hover { color: var(--text); }
 
+/* deep-link / locate targets clear the sticky viewer header when scrolled to */
+.msg-user, .msg-asst, .spec-card { scroll-margin-top: 72px; }
+
 .convo { max-width: 920px; }
 .turn-group { border-bottom: 1px solid var(--edge); }
 .turn-header {

@@ -189,8 +189,8 @@ One block per fix, in the order they must be done, separated by --- . Block form
 - **Verify:** the exact check that proves the fix landed (a search string + expected hit count,
   a field value, a message index to re-read).
 
-## Re-audit checklist
-- [ ] one checkbox per fix above, phrased as the verification, plus a final full /acc re-run line.
+(Do NOT emit a re-audit checklist section — reviewers track per-finding sign-off in the
+dedicated Checklist tab, so a duplicate checklist here is redundant.)
 
 ## Escalate instead if
 Bullet conditions under which remediation is wrong (byte-identical unremediated resubmission,
