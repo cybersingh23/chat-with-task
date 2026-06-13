@@ -444,6 +444,22 @@ pre.raw {
   padding: 16px 18px; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
 }
 
+/* Auto-QC read — scannable index of every QC dimension flagged */
+.autoqc-panel {
+  background: var(--surface); border: 1px solid var(--edge);
+  border-left: 3px solid var(--teal); border-radius: var(--r-md);
+  padding: 14px 18px 10px; margin: 20px 0 16px;
+}
+.autoqc-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--teal); padding-bottom: 8px;
+}
+.autoqc-head::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--teal); }
+.autoqc-item { display: flex; align-items: baseline; gap: 10px; padding: 6px 0; border-top: 1px solid var(--edge-soft); }
+.autoqc-item:first-of-type { border-top: none; }
+.autoqc-text { font-size: 13px; color: var(--text-2); line-height: 1.5; }
+
 /* critical-issues card */
 .alert-banner {
   background: var(--surface);
@@ -666,14 +682,6 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 .traj-tab.traj-model_b.active { background: rgba(108, 165, 255, 0.16); color: var(--blue); }
 .traj-toolbar .quiet { margin-left: auto; font-size: 12px; color: var(--text-3); }
 .traj-toolbar .quiet:hover { color: var(--text); }
-
-/* prompt click-through stepper */
-.prompt-nav { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-sm); padding: 2px; }
-.prompt-nav[hidden] { display: none; }
-.prompt-nav button { border: none; background: transparent; color: var(--text-2); font-size: 11px; padding: 4px 9px; border-radius: 6px; }
-.prompt-nav button:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
-.prompt-nav button:disabled { opacity: 0.3; }
-.prompt-nav-label { font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; min-width: 84px; text-align: center; }
 
 /* deep-link / locate targets clear the sticky viewer header when scrolled to */
 .msg-user, .msg-asst, .spec-card { scroll-margin-top: 72px; }

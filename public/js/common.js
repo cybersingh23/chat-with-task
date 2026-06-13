@@ -102,6 +102,18 @@ export function renderMarkdown(md) {
     const isToken = typeof codeOrToken === 'object' && codeOrToken !== null;
     const lang = (isToken ? codeOrToken.lang : infostring) || '';
     const body = isToken ? codeOrToken.text : codeOrToken;
+    if (lang.trim() === 'autoqc') {
+      const lines = String(body).split('\n').map((l) => l.trim()).filter((l) => l && l.toUpperCase() !== 'NONE');
+      if (!lines.length) return '';
+      const items = lines.map((line) => {
+        const m = /^(R\d{1,2})\s*[—–\-:·]\s*(.+)$/.exec(line);
+        if (m) {
+          return `<div class="autoqc-item"><a class="spec-link" href="#" data-spec-key="${m[1]}">${m[1]}</a><span class="autoqc-text">${escapeHtml(m[2])}</span></div>`;
+        }
+        return `<div class="autoqc-item"><span class="autoqc-text">${escapeHtml(line)}</span></div>`;
+      });
+      return `<div class="autoqc-panel"><div class="autoqc-head">Auto-QC read · ${lines.length} flagged</div>${items.join('')}</div>`;
+    }
     if (lang.trim() === 'alerts') {
       const lines = String(body).split('\n').map((l) => l.trim()).filter((l) => l && l.toUpperCase() !== 'NONE');
       if (!lines.length) return '';

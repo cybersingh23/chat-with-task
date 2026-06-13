@@ -89,10 +89,23 @@ markdown document (no preamble) with EXACTLY this structure:
 
 # Review — <task_id>
 
+\`\`\`autoqc
+One line per V5 QC dimension this task trips, worst first: "<R-key> — <dimension>: <one-phrase reason>".
+\`\`\`
+This renders as the "Auto-QC read" panel at the very top — a scannable index of EVERY QC failure
+detected (each R-key is a clickable chip that opens that rubric card). Be comprehensive: list
+every dimension you found evidence for (R1-R25 — completeness, summary accuracy, A/B fairness,
+score deltas, prompt match, milestone leakage, spelling, cheating, etc.), not only the blockers.
+Sentence case, no other markdown. Example lines:
+R6 — Trajectory completeness: model_a is a 2-message greeting stub
+R12 — Summary accuracy: model_1 claims (strsep fix, unit tests) absent from the trajectory
+R3 — Prompt matching: model_a and model_b initial prompts are not an exact match
+If the task is clean, output the single line: NONE.
+
 \`\`\`alerts
 Short title, eight words max — one-sentence detail in plain language.
 \`\`\`
-The alerts block renders as a "Critical issues" card at the top of the page. One line per
+The alerts block renders as a "Critical issues" card below the Auto-QC read. One line per
 glaring issue, worst first, ONLY true blockers — things the reviewer must know before reading
 anything else. Each line is "title — detail", sentence case (never all caps; acronyms fine),
 no markdown inside. Example:
