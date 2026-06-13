@@ -235,15 +235,49 @@ function addRegenButton(doc) {
 }
 
 // ---------- task definition / milestones ----------
-function showTaskDef() {
+async function showTaskDef() {
   hideTrajToolbar();
   viewerTitle.textContent = `task definition${taskDef.missing ? '' : ` (${taskDef.source})`}`;
   document.querySelector('.viewer-head .regen')?.remove();
   viewReopeners.set('taskdef', { label: 'Task definition', reopen: () => { setActive(findDocNav('Task definition')); showTaskDef(); } });
-  mountView('taskdef', buildTaskDefView);
+  const presence = taskDef.missing || !taskDef.milestones.length ? null : await milestonePresence();
+  mountView('taskdef', () => buildTaskDefView(presence), { refresh: true });
 }
 
-function buildTaskDefView() {
+// Per-milestone string-match presence in each model's user turns. Reuses the
+// token-overlap scorer the Locate buttons use; deliberately rough (a literal
+// string check that misses paraphrases — hence the caveat in the UI).
+async function milestonePresence() {
+  const turns = {};
+  for (const m of ['model_a', 'model_b']) {
+    try {
+      const t = await loadTrajectory(m);
+      turns[m] = t.messages.filter((x) => x.role === 'user')
+        .map((x) => x.parts.filter((p) => p.type === 'text').map((p) => p.text).join(' '));
+    } catch { turns[m] = null; } // missing/stub trajectory
+  }
+  const out = {};
+  for (const ms of taskDef.milestones) {
+    const toks = tokenize(ms.prompt);
+    out[ms.id] = {};
+    for (const m of ['model_a', 'model_b']) {
+      if (turns[m] == null) { out[ms.id][m] = null; continue; }
+      out[ms.id][m] = turns[m].some((tx) => score(toks, tokenize(tx)) >= 0.5);
+    }
+  }
+  return out;
+}
+
+function presencePill(model, state) {
+  const label = model === 'model_a' ? 'A' : 'B';
+  if (state == null) return el('span', { class: 'pres-pill unknown', title: 'no trajectory to check' }, `${label} —`);
+  return el('span', {
+    class: `pres-pill ${state ? 'yes' : 'no'}`,
+    title: state ? `present in ${label} (string match)` : `not found in ${label} (string match)`,
+  }, `${label} ${state ? '✓' : '✗'}`);
+}
+
+function buildTaskDefView(presence) {
   if (taskDef.missing) {
     return el('div', { class: 'callout info' },
       'No task definition shipped with this task (no embedded rank.json "task" object, no source_task/task.json). ',
@@ -256,19 +290,18 @@ function buildTaskDefView() {
       taskDef.difficulty ? el('span', { class: `chip diff-${taskDef.difficulty}` }, taskDef.difficulty) : null,
       taskDef.language ? el('span', { class: 'chip' }, taskDef.language) : null,
     ),
-    taskDef.user_persona
-      ? el('div', { class: 'callout' }, el('strong', {}, 'User persona — '), taskDef.user_persona)
-      : null,
     el('h2', {}, `Milestones (${taskDef.milestones.length})`),
     el('p', { class: 'hint-line' },
       'The annotator must enter each milestone prompt (paraphrase counts) in order, in both trajectories. ',
-      '"Locate" jumps to the closest user turn — it is navigation, not a coverage verdict.'),
+      'Present / not-present is a rough string match against the user turns (A and B) — it can miss paraphrases, so if a milestone reads "not found" but you believe it is there, ask the copilot to confirm. ',
+      '"Locate" jumps to the closest user turn — navigation, not a coverage verdict.'),
     taskDef.milestones.map((m, i) =>
       el('div', { class: 'milestone' },
         el('div', { class: 'milestone-head' },
           el('span', { class: 'chip milestone-id' }, m.id),
           el('span', { class: 'milestone-title' }, m.title || `Milestone ${i + 1}`),
           el('span', { class: 'spacer' }),
+          presence ? el('span', { class: 'pres-group' }, presencePill('model_a', presence[m.id]?.model_a), presencePill('model_b', presence[m.id]?.model_b)) : null,
           el('button', { onclick: () => locateMilestone('model_a', m) }, 'Locate in A'),
           el('button', { onclick: () => locateMilestone('model_b', m) }, 'Locate in B'),
           el('button', { onclick: () => askCopilotAboutMilestone(m) }, 'Ask copilot'),
@@ -276,6 +309,9 @@ function buildTaskDefView() {
         el('div', { class: 'milestone-prompt' }, m.prompt),
       )
     ),
+    taskDef.user_persona
+      ? [el('h2', {}, 'User persona'), el('div', { class: 'callout' }, taskDef.user_persona)]
+      : null,
     taskDef.guardrails.length
       ? [el('h2', {}, 'Guardrails'), el('ul', {}, taskDef.guardrails.map((g) => el('li', {}, g)))]
       : null,
