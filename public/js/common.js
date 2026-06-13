@@ -71,6 +71,21 @@ export async function apiSSE(path, body, onEvent) {
 // trajectory" buttons; clicks are delegated via the data-traj attributes.
 export function renderMarkdown(md) {
   const renderer = new marked.Renderer();
+
+  // Give finding headings (### [HARD] F1 — …) an id so the checklist can deep-link to them.
+  const headingBase = renderer.heading;
+  renderer.heading = function (textOrToken, level, raw) {
+    const isToken = typeof textOrToken === 'object' && textOrToken !== null;
+    const lvl = isToken ? textOrToken.depth : level;
+    const rawText = isToken ? textOrToken.text : (raw || '');
+    const m = lvl === 3 && /\b(F\d{1,3})\b/.exec(rawText);
+    if (m) {
+      const inner = isToken ? this.parser.parseInline(textOrToken.tokens) : textOrToken;
+      return `<h3 id="finding-${m[1]}">${inner}</h3>\n`;
+    }
+    return headingBase.call(this, textOrToken, level, raw);
+  };
+
   const linkBase = renderer.link;
   // marked v12 calls link(href, title, text); v13+ passes a token object.
   renderer.link = function (hrefOrToken, title, text) {
@@ -134,7 +149,7 @@ export function renderMarkdown(md) {
   let html = marked.parse(md, { renderer, gfm: true, breaks: false });
   // [HARD]/[SOFT]/[INFO] tags in finding headings -> severity badges.
   html = html.replace(/\[(HARD|SOFT|INFO)\]/g, (_, sev) => `<span class="sev sev-${sev}">${sev}</span>`);
-  return DOMPurify.sanitize(html, { ADD_ATTR: ['data-traj-model', 'data-traj-index', 'data-spec-key'] });
+  return DOMPurify.sanitize(html, { ADD_ATTR: ['data-traj-model', 'data-traj-index', 'data-spec-key', 'id'] });
 }
 
 // Legacy docs shipped all-caps alert lines; tame them to sentence case.

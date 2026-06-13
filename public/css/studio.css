@@ -496,6 +496,8 @@ pre.raw {
   color: var(--text-3); margin: 36px 0 12px;
 }
 .md h3 { font-size: 14.5px; margin: 22px 0 8px; }
+.md h3[id^="finding-"] { scroll-margin-top: 72px; }
+.md h3.flash { outline: 1px solid var(--yellow); outline-offset: 5px; border-radius: 3px; }
 .md p { margin: 10px 0; }
 .md hr { border: none; border-top: 1px solid var(--edge); margin: 24px 0; }
 .md ul, .md ol { padding-left: 22px; margin: 10px 0; }
@@ -590,7 +592,11 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 }
 .check-row:last-child { border-bottom: none; }
 .check-row .sev { flex-shrink: 0; }
-.check-title { flex: 1; font-size: 13px; line-height: 1.5; }
+.check-title {
+  flex: 1; font-size: 13px; line-height: 1.5; text-align: left;
+  border: none; background: none; padding: 0; color: var(--text); cursor: pointer;
+}
+.check-title:hover { color: var(--blue); text-decoration: underline; background: none; }
 .check-row.s-done .check-title { text-decoration: line-through; color: var(--text-3); }
 .check-row.s-overflag .check-title { text-decoration: line-through; color: var(--text-3); }
 .check-row.s-done { background: rgba(67, 209, 124, 0.05); }

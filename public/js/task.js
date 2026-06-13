@@ -412,6 +412,20 @@ function parseFindings(md) {
   return out;
 }
 
+// Jump from a checklist row to its finding in the Review doc.
+async function gotoFinding(fid) {
+  const reviewDoc = DOCS.find((d) => d.key === 'review');
+  await openDoc(reviewDoc, findDocNav('Review'));
+  setTimeout(() => {
+    const node = document.getElementById(`finding-${fid}`);
+    if (node) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      node.classList.add('flash');
+      setTimeout(() => node.classList.remove('flash'), 2500);
+    }
+  }, 60);
+}
+
 async function showChecklist() {
   hideTrajToolbar();
   viewerTitle.textContent = 'Checklist';
@@ -498,7 +512,7 @@ function buildChecklistView(findings, checks, verdict) {
 function checkRow(f, statusOf, onSet) {
   const row = el('div', {},
     el('span', { class: `sev sev-${f.sev}` }, f.sev),
-    el('span', { class: 'check-title' }, `${f.id} — ${f.title}`),
+    el('button', { class: 'check-title', title: 'view this finding in the Review', onclick: () => gotoFinding(f.id) }, `${f.id} — ${f.title}`),
     el('span', { class: 'check-actions' }),
   );
   const actions = row.querySelector('.check-actions');
