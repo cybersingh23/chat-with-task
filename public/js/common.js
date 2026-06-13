@@ -54,16 +54,22 @@ export function renderMarkdown(md) {
   renderer.link = function (hrefOrToken, title, text) {
     const isToken = typeof hrefOrToken === 'object' && hrefOrToken !== null;
     const href = isToken ? hrefOrToken.href : hrefOrToken;
-    const label = isToken ? hrefOrToken.text : text;
+    // marked <13 (the old signature) passes `text` already HTML-escaped, so it
+    // must NOT be escaped again — that double-escape is what turned "hello"
+    // into &quot;hello&quot;. marked >=13 passes a token whose `.text` is raw,
+    // so that branch DOES need escaping. The fallback labels are plain ASCII.
+    const explicit = isToken ? hrefOrToken.text : text;
+    const labelHtml = isToken ? escapeHtml(hrefOrToken.text || '') : text;
+    const hasLabel = explicit && explicit !== href;
     const m = /^traj:\/\/(model_[ab])\/(\d+)$/.exec(href || '');
     if (m) {
-      const shown = label && label !== href ? label : `${m[1]}[${m[2]}]`;
-      return `<a class="traj-link" href="#" data-traj-model="${m[1]}" data-traj-index="${m[2]}">${escapeHtml(shown)} </a>`;
+      const shown = hasLabel ? labelHtml : `${m[1]}[${m[2]}]`;
+      return `<a class="traj-link" href="#" data-traj-model="${m[1]}" data-traj-index="${m[2]}">${shown} </a>`;
     }
     const s = /^spec:\/\/(R\d{1,2})$/.exec(href || '');
     if (s) {
-      const shown = label && label !== href ? label : s[1];
-      return `<a class="spec-link" href="#" data-spec-key="${s[1]}">${escapeHtml(shown)}</a>`;
+      const shown = hasLabel ? labelHtml : escapeHtml(s[1]);
+      return `<a class="spec-link" href="#" data-spec-key="${s[1]}">${shown}</a>`;
     }
     return linkBase.call(this, hrefOrToken, title, text);
   };

@@ -112,6 +112,8 @@ Block format:
 ### [HARD|SOFT|INFO] F<n> — <short title>
 - **Claim:** "<verbatim quote>" — \`<rank.json field path>\`
 - **Evidence:** search hits / quoted trajectory text, with traj:// citations
+- **Rule:** the ONE V5 QC dimension this violates, as a spec:// link with its name —
+  e.g. [R12 Summaries · Accuracy](spec://R12). MANDATORY on every HARD and SOFT finding.
 - **Impact:** which side, whether rank/scores are affected
 Keep each block under ~8 lines. Do NOT merge multiple problems into one block — one error,
 one block. No filler sentences; every line must carry a fact.
@@ -139,12 +141,14 @@ One "title — detail" line in sentence case if the task is unsalvageable withou
 \`\`\`
 
 ## Fix list
-One block per fix, in the order they must be done, separated by --- . Block format:
-### R<n> — <imperative title> (owner: annotator | vendor | internal-QM)
+One block per fix, in the order they must be done, separated by --- . Block format
+(number fixes "Fix 1", "Fix 2" — never "R1", to avoid colliding with the QC rubric's R-keys):
+### Fix <n> — <imperative title> (owner: annotator | vendor | internal-QM)
 - **Go to:** the exact location — file + field path for rank.json edits
   (e.g. \`rank.json /results/<codename>/grading/correctness/rationale\`), or the trajectory
   point as a traj:// citation, or the exact artifact file (e.g. \`ranking_proof/a_proof_justification.txt\`)
-- **Problem:** one line.
+- **Problem:** one line, ending with the violated V5 dimension as a spec:// link —
+  e.g. [R6 Trajectory Completeness](spec://R6).
 - **Fix:** the concrete change. For text edits give before → after: quote the current wrong
   text, then give replacement text the owner can paste or adapt. For re-exports/re-runs give
   the exact artifact to produce.

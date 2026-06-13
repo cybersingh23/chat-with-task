@@ -346,34 +346,46 @@ function buildQcSpecView(dimensions) {
     if (!groups.has(d.group)) groups.set(d.group, []);
     groups.get(d.group).push(d);
   }
-  const SCORE_LABEL = { 2: 'Fail', 3: 'Non-Fail', 5: 'Pass' };
+  const SCORE = {
+    2: { label: 'Fail', cls: 'fail' },
+    3: { label: 'Non-fail', cls: 'nonfail' },
+    5: { label: 'Pass', cls: 'pass' },
+  };
 
-  const renderDim = (d, showName) =>
-    el('div', { class: 'spec-dim', id: `spec-${d.key}` },
-      el('div', { class: 'spec-dim-head' },
+  const card = (d, showVariant) =>
+    el('div', { class: 'spec-card', id: `spec-${d.key}` },
+      el('div', { class: 'spec-card-head' },
         el('span', { class: 'spec-key' }, d.key),
-        showName ? el('span', { class: 'spec-dim-name' }, d.variant || d.group) : null,
+        showVariant ? el('span', { class: 'spec-variant' }, d.variant || d.group) : null,
       ),
-      d.options.map((o) =>
-        el('div', { class: `spec-opt ${o.score === 5 ? 'pass' : ''}` },
-          el('span', { class: `spec-band band-${o.score}` }, SCORE_LABEL[o.score] || String(o.score)),
-          el('span', { class: 'spec-opt-text' }, o.text),
-        )
+      el('div', { class: 'spec-bands' },
+        d.options.map((o) => {
+          const s = SCORE[o.score] || { label: String(o.score), cls: '' };
+          return el('div', { class: `spec-band-row ${s.cls}` },
+            el('span', { class: 'spec-band-tag' }, `${o.score} · ${s.label}`),
+            el('span', { class: 'spec-band-text' }, o.text),
+          );
+        }),
       ),
     );
 
   return el('div', { class: 'qcspec' },
     el('h1', {}, 'QC spec'),
     el('p', { class: 'hint-line' },
-      `V5 rubric · ${dimensions.length} failure modes. The copilot and docs cite these as R-keys; clicking a citation lands here.`),
+      `V5 rubric · ${dimensions.length} failure modes across ${byCategory.size} categories. `,
+      'Cited as R-keys throughout reviews, remediations, and the copilot — click any citation to land on its card.'),
     ...[...byCategory.entries()].flatMap(([category, groups]) => [
-      el('h2', {}, category),
+      el('h2', { class: 'spec-cat' }, category),
       [...groups.entries()].map(([group, dims]) => {
         const desc = dims.find((d) => d.description)?.description || '';
+        const multi = dims.length > 1;
         return el('section', { class: 'spec-group' },
-          el('h3', { class: 'spec-group-name' }, group),
+          el('div', { class: 'spec-group-head' },
+            el('h3', {}, group),
+            !multi && dims[0].variant ? el('span', { class: 'spec-group-variant' }, dims[0].variant) : null,
+          ),
           desc ? el('p', { class: 'spec-group-desc' }, desc) : null,
-          dims.map((d) => renderDim(d, dims.length > 1 || d.variant)),
+          el('div', { class: 'spec-grid' }, dims.map((d) => card(d, multi))),
         );
       }),
     ]),

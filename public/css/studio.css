@@ -339,36 +339,50 @@ a.traj-link {
 a.traj-link::after { content: '→'; }
 a.traj-link:hover { background: rgba(108, 165, 255, 0.2); text-decoration: none; }
 
-/* QC spec (V5 rubric) — light: whitespace + hairlines, no card chrome */
-.qcspec { max-width: 760px; }
-.qcspec h1 { font-size: 19px; margin-top: 0; }
-.qcspec h2 {
-  font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--text-3); margin: 40px 0 6px; padding-bottom: 8px;
+/* QC spec (V5 rubric) — cards in a grid, color-coded score bands */
+.qcspec { max-width: 980px; }
+.qcspec h1 { font-size: 20px; margin-top: 0; }
+.qcspec h2.spec-cat {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--text-2); margin: 36px 0 14px; padding-bottom: 8px;
   border-bottom: 1px solid var(--edge);
 }
-.spec-group { padding: 18px 0 6px; }
-.spec-group + .spec-group { border-top: 1px solid var(--edge); }
-.spec-group-name { font-size: 14.5px; font-weight: 600; margin: 0 0 2px; }
-.spec-group-desc { font-size: 12.5px; color: var(--text-3); line-height: 1.6; margin: 4px 0 6px; max-width: 640px; }
-.spec-dim { padding: 10px 0 6px; border-radius: var(--r-sm); }
-.spec-dim.flash { outline: 1px solid var(--yellow); outline-offset: 8px; }
-.spec-dim-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
-.spec-key { font-family: var(--mono); font-size: 11px; color: var(--purple); }
-.spec-dim-name { font-weight: 550; font-size: 13px; }
-.spec-opt {
-  display: flex; gap: 12px; align-items: baseline;
-  padding: 4px 0; font-size: 12.5px; line-height: 1.6; color: var(--text-2);
+.spec-group { margin-bottom: 24px; }
+.spec-group-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 3px; }
+.spec-group-head h3 { font-size: 14.5px; font-weight: 650; }
+.spec-group-variant { font-size: 12px; color: var(--text-3); }
+.spec-group-desc { font-size: 12.5px; color: var(--text-3); line-height: 1.6; margin: 2px 0 12px; max-width: 760px; }
+
+.spec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+.spec-card {
+  background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-md);
+  padding: 13px 15px;
 }
-.spec-opt.pass { color: var(--text-3); font-size: 12px; }
-.spec-band {
-  flex-shrink: 0; width: 64px; text-align: right;
-  font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em;
+.spec-card.flash { border-color: var(--yellow); box-shadow: 0 0 0 1px var(--yellow); }
+.spec-card-head { display: flex; align-items: center; gap: 9px; margin-bottom: 11px; }
+.spec-key {
+  font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--purple);
+  background: rgba(185, 140, 245, 0.13); border-radius: 5px; padding: 1px 7px;
 }
-.band-2 { color: var(--red); }
-.band-3 { color: var(--orange); }
-.band-5 { color: var(--text-3); font-weight: 500; }
-.spec-opt-text { white-space: pre-wrap; }
+.spec-variant { font-size: 13px; font-weight: 600; }
+.spec-bands { display: flex; flex-direction: column; gap: 6px; }
+.spec-band-row {
+  display: grid; grid-template-columns: 78px 1fr; gap: 11px; align-items: start;
+  padding: 8px 11px; border-radius: var(--r-sm); border-left: 2px solid transparent;
+  font-size: 12.5px; line-height: 1.55;
+}
+.spec-band-row.fail { background: rgba(255, 97, 89, 0.07); border-left-color: var(--red); }
+.spec-band-row.nonfail { background: rgba(255, 161, 79, 0.07); border-left-color: var(--orange); }
+.spec-band-row.pass { background: rgba(67, 209, 124, 0.06); border-left-color: var(--green); }
+.spec-band-tag {
+  font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.03em;
+  text-transform: uppercase; padding-top: 1px; white-space: nowrap;
+}
+.fail .spec-band-tag { color: var(--red); }
+.nonfail .spec-band-tag { color: var(--orange); }
+.pass .spec-band-tag { color: var(--green); }
+.spec-band-text { white-space: pre-wrap; color: var(--text); }
+.pass .spec-band-text { color: var(--text-2); }
 
 a.spec-link {
   display: inline-flex; align-items: center; gap: 4px;
