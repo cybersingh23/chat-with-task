@@ -672,6 +672,11 @@ const claimBtn = document.getElementById('claim-btn');
 const claimWho = document.getElementById('claim-who');
 const verdictSelect = document.getElementById('verdict-select');
 let claimedBy = null;
+function avatarHue(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return h;
+}
 
 async function refreshState() {
   const s = await api(`/task/${bucket}/${taskId}/state`);
@@ -679,14 +684,17 @@ async function refreshState() {
   const mine = s.claimed_by === me.username;
   if (!s.claimed_by) {
     claimWho.className = 'claim-who unclaimed';
-    claimWho.textContent = 'Unclaimed';
+    claimWho.replaceChildren(el('span', { class: 'avatar ghost' }), 'Unclaimed');
     claimBtn.hidden = false;
     claimBtn.disabled = false;
     claimBtn.textContent = 'Claim';
     claimBtn.className = 'primary';
   } else {
     claimWho.className = 'claim-who claimed';
-    claimWho.textContent = mine ? 'Claimed by you' : `Claimed by ${s.claimed_by}`;
+    claimWho.replaceChildren(
+      el('span', { class: 'avatar', style: `background: hsl(${avatarHue(s.claimed_by)} 52% 42%)` }, s.claimed_by[0].toUpperCase()),
+      mine ? 'Claimed by you' : `Claimed by ${s.claimed_by}`,
+    );
     const canRelease = mine || me.role === 'admin';
     claimBtn.hidden = !canRelease;
     claimBtn.disabled = false;

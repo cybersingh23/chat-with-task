@@ -25,6 +25,24 @@ function laneOf(t) {
   return 'OPEN';
 }
 
+// Assignee avatar: a colored initial (deterministic per name) + the name.
+// Unclaimed shows a dashed placeholder.
+function avatarHue(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return h;
+}
+function assignee(name) {
+  if (!name) {
+    return el('span', { class: 'assignee none' },
+      el('span', { class: 'avatar ghost' }), 'Unassigned');
+  }
+  return el('span', { class: 'assignee' },
+    el('span', { class: 'avatar', style: `background: hsl(${avatarHue(name)} 52% 42%)` }, name[0].toUpperCase()),
+    el('span', { class: 'assignee-name' }, name),
+  );
+}
+
 // ---------- drag-and-drop between lanes = workflow transition ----------
 let dragging = null;
 
@@ -135,7 +153,7 @@ function ticketCard(t) {
     el('div', { class: 'tid' }, t.id),
     t.problem ? el('div', { class: 'prob' }, t.problem) : null,
     el('div', { class: 'ticket-foot' },
-      t.claimedBy ? el('span', { class: 'who-chip' }, `● ${t.claimedBy}`) : el('span', { class: 'who-chip none' }, 'unclaimed'),
+      assignee(t.claimedBy),
       t.verdict ? el('span', { class: `chip v-${t.verdict}` }, VERDICT_LABELS[t.verdict] || t.verdict) : null,
     ),
   );
