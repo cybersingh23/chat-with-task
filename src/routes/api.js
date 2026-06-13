@@ -14,6 +14,7 @@ import { runAgentLoop } from '../llm.js';
 import { TOOL_DEFS, makeExecutor } from '../tools.js';
 import { generateDoc, taskContext, CITATION_RULES } from '../docgen.js';
 import { QUALITY_CANON, getRubric, saveRubricCsv } from '../spec.js';
+import { recordUsage, readUsage } from '../usage.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '2mb' }));
@@ -40,6 +41,11 @@ api.use(requireAuth);
 api.get('/me', (req, res) => res.json(req.user));
 
 api.get('/spec/rubric', (req, res) => res.json({ dimensions: getRubric() }));
+
+// admin: copilot/docgen activity, token usage, and cost
+api.get('/admin/usage', requireAdmin, wrap(async (req, res) =>
+  res.json(readUsage(Math.min(2000, Number(req.query.limit) || 500)))
+));
 
 // admin uploads the QC rubric CSV once (raw text body); everyone reads it
 api.post('/spec/rubric', requireAdmin, express.text({ type: '*/*', limit: '8mb' }), wrap(async (req, res) => {
@@ -127,12 +133,16 @@ api.post('/task/:bucket/:id/move', wrap(async (req, res) => {
 api.post('/task/:bucket/:id/docgen/:which', wrap(async (req, res) => {
   const { bucket, id, which } = req.params;
   if (!['review', 'remediation'].includes(which)) return res.status(400).json({ error: 'which must be review|remediation' });
+  const acc = { prompt_tokens: 0, completion_tokens: 0 };
+  const onUsage = (u) => { acc.prompt_tokens += u.prompt_tokens || 0; acc.completion_tokens += u.completion_tokens || 0; };
   startSSE(res);
   try {
-    const doc = await generateDoc(bucket, id, which, (e) => sendSSE(res, e));
+    const doc = await generateDoc(bucket, id, which, (e) => sendSSE(res, e), onUsage);
     sendSSE(res, { type: 'done', doc });
   } catch (e) {
     sendSSE(res, { type: 'error', message: e.message });
+  } finally {
+    recordUsage({ user: req.user.username, taskId: id, kind: `docgen:${which}`, model: config.litellm.model, usage: acc, text: `Generated ${which}.md` });
   }
   res.end();
 }));
@@ -170,6 +180,8 @@ api.post('/task/:bucket/:id/chat', wrap(async (req, res) => {
   if (!userMsg.content) return res.status(400).json({ error: 'message required' });
 
   const system = [CHAT_PROMPT, QUALITY_CANON, CITATION_RULES, taskContext(bucket, id)].join('\n\n');
+  const acc = { prompt_tokens: 0, completion_tokens: 0 };
+  const onUsage = (u) => { acc.prompt_tokens += u.prompt_tokens || 0; acc.completion_tokens += u.completion_tokens || 0; };
   startSSE(res);
   try {
     const { messages } = await runAgentLoop({
@@ -178,11 +190,14 @@ api.post('/task/:bucket/:id/chat', wrap(async (req, res) => {
       executor: makeExecutor(bucket, id),
       onEvent: (e) => sendSSE(res, e),
       maxSteps: 15,
+      onUsage,
     });
     saveChat(dir, [...history, userMsg, ...messages]);
     sendSSE(res, { type: 'done' });
   } catch (e) {
     sendSSE(res, { type: 'error', message: e.message });
+  } finally {
+    recordUsage({ user: req.user.username, taskId: id, kind: 'chat', model: config.litellm.model, usage: acc, text: userMsg.content });
   }
   res.end();
 }));

@@ -126,9 +126,12 @@ async function boot() {
   document.getElementById('user-name').textContent = me.username;
   document.getElementById('user-role').textContent = me.role;
   document.getElementById('ingest-section').hidden = me.role !== 'admin';
+  document.getElementById('admin-link').hidden = me.role !== 'admin';
   const cfg = await api('/config');
   document.getElementById('config-meta').textContent = cfg.model;
   if (me.role === 'admin') refreshRubricStatus();
+  const q = new URLSearchParams(location.search).get('q');
+  if (q) searchInput.value = q;
   await load();
   setInterval(load, 8000); // live claim/verdict status from other reviewers
 }

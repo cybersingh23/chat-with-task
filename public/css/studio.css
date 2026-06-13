@@ -191,6 +191,29 @@ select option { background: #14161c; }
 .claim-row { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 12px; }
 .claim-row input { width: 300px; }
 
+/* ── admin activity dashboard ────────────────────────────────────────────── */
+.stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 8px; }
+.stat-card { padding: 18px 20px; }
+.stat-value { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.stat-label { font-size: 11.5px; color: var(--text-3); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+.admin-h2 { font-size: 12px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-3); margin: 36px 0 12px; }
+.admin-table-wrap { border: 1px solid var(--edge); border-radius: var(--r-md); overflow: hidden; }
+.admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.admin-table th {
+  text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-3); font-weight: 600; padding: 10px 14px; background: var(--surface);
+  border-bottom: 1px solid var(--edge);
+}
+.admin-table td { padding: 9px 14px; border-bottom: 1px solid var(--edge-soft); color: var(--text-2); vertical-align: top; }
+.admin-table tr:last-child td { border-bottom: none; }
+.admin-table tbody tr:hover td, .admin-table tr:hover td { background: rgba(255, 255, 255, 0.02); }
+.admin-table td:first-child, .admin-table th:first-child { padding-left: 16px; }
+.admin-table .detail {
+  color: var(--text-3); max-width: 380px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.admin-table .task-link { color: var(--teal); }
+.admin-table td.empty { text-align: center; color: var(--text-3); padding: 22px; }
+
 .toolbar { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
 .toolbar .right { margin-left: auto; }
 .toolbar .summary { font-size: 12.5px; color: var(--text-3); }

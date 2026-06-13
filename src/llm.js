@@ -2,7 +2,7 @@ import { config } from './config.js';
 
 // One non-streaming chat-completion call against the LiteLLM proxy
 // (OpenAI-compatible; same proxy + key as trajectory-viewer-v2).
-export async function chatCompletion({ messages, tools, temperature = 0.2, maxTokens = 4096 }) {
+export async function chatCompletion({ messages, tools, temperature = 0.2, maxTokens = 4096, onUsage }) {
   if (!config.litellm.apiKey) throw new Error('LITELLM_API_KEY is not set — copy .env.example to .env');
   const body = {
     model: config.litellm.model,
@@ -30,6 +30,7 @@ export async function chatCompletion({ messages, tools, temperature = 0.2, maxTo
     await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
   }
   const data = await res.json();
+  if (onUsage && data.usage) onUsage(data.usage); // {prompt_tokens, completion_tokens, total_tokens}
   const msg = data.choices?.[0]?.message;
   if (!msg) throw new Error('LiteLLM returned no message');
   return msg;
@@ -39,11 +40,11 @@ export async function chatCompletion({ messages, tools, temperature = 0.2, maxTo
 //   {type:'tool', name, args}  {type:'assistant', content}
 // Returns the full list of new messages (assistant + tool results) so the
 // caller can persist them.
-export async function runAgentLoop({ messages, tools, executor, onEvent, maxSteps = 15 }) {
+export async function runAgentLoop({ messages, tools, executor, onEvent, maxSteps = 15, onUsage }) {
   const transcript = [...messages];
   const added = [];
   for (let step = 0; step < maxSteps; step++) {
-    const msg = await chatCompletion({ messages: transcript, tools });
+    const msg = await chatCompletion({ messages: transcript, tools, onUsage });
     transcript.push(msg);
     added.push(msg);
     if (msg.content) onEvent?.({ type: 'assistant', content: msg.content });

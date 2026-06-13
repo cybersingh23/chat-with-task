@@ -163,7 +163,7 @@ Bullet conditions under which remediation is wrong (byte-identical unremediated 
 vendor stub, fabrication pattern across tasks) and who to escalate to.
 `.trim();
 
-export async function generateDoc(bucket, id, which, onEvent) {
+export async function generateDoc(bucket, id, which, onEvent, onUsage) {
   const isReview = which === 'review';
   const dir = taskDir(bucket, id);
   const system = [
@@ -192,6 +192,7 @@ export async function generateDoc(bucket, id, which, onEvent) {
     executor: makeExecutor(bucket, id),
     onEvent,
     maxSteps: 25,
+    onUsage,
   });
 
   const doc = cleanDoc(final);

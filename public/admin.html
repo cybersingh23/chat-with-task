@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Activity — Chat with Task</title>
+  <link rel="stylesheet" href="/css/studio.css" />
+  <link rel="icon" href="/scale-icon.svg" />
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="back-home" title="back to board">‹ Board</a>
+    <div class="app-name">Activity <span>/ copilot usage &amp; cost</span></div>
+    <div class="spacer"></div>
+    <span class="mono" id="rate-note" style="font-size:11px;color:var(--text-3)"></span>
+    <div class="user-chip" id="user-chip" hidden>
+      <span id="user-name"></span>
+      <button id="logout-btn">sign out</button>
+    </div>
+  </header>
+
+  <main class="index-main">
+    <div class="stat-cards" id="stat-cards"></div>
+
+    <h2 class="admin-h2">By user</h2>
+    <div class="admin-table-wrap"><table class="admin-table" id="user-table"></table></div>
+
+    <h2 class="admin-h2">Recent activity</h2>
+    <div class="board-controls">
+      <div class="search-bar glass">
+        <input type="text" id="activity-search" placeholder="Filter by user, task, or message…" spellcheck="false" />
+      </div>
+    </div>
+    <div class="admin-table-wrap"><table class="admin-table" id="event-table"></table></div>
+  </main>
+
+  <script type="module" src="/js/admin.js"></script>
+</body>
+</html>
