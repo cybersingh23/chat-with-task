@@ -55,6 +55,7 @@ export function taskMeta(bucket, id) {
     hasReview: has('review.md'),
     hasRemediation: has('remediation.md'),
     hasAuditSeed: has('_audit_seed.md'),
+    hasRankingProof: fs.existsSync(path.join(dir, 'ranking_proof')),
     hasChat: has('_chat.json'),
     models: [],
     problem: '',
@@ -76,6 +77,31 @@ export function taskMeta(bucket, id) {
     meta.verdict = null;
   }
   return meta;
+}
+
+export function deleteTask(bucket, id) {
+  const dir = taskDir(bucket, id); // validates bucket/id + existence
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+export function clearWorkspace() {
+  ensureWorkspace();
+  let n = 0;
+  for (const b of BUCKETS) {
+    const bdir = path.join(config.workspaceRoot, b);
+    for (const name of fs.readdirSync(bdir)) {
+      if (TASK_ID_RE.test(name)) { fs.rmSync(path.join(bdir, name), { recursive: true, force: true }); n++; }
+    }
+  }
+  return n;
+}
+
+// Where a task currently lives (any bucket), or null.
+export function findTaskBucket(id) {
+  for (const b of BUCKETS) {
+    if (fs.existsSync(path.join(config.workspaceRoot, b, id))) return b;
+  }
+  return null;
 }
 
 export function existingTaskIds() {

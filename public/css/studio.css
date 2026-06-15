@@ -81,6 +81,11 @@ button.primary { background: var(--blue-deep); border-color: transparent; color:
 button.primary:hover { background: #3d7cf2; }
 button.quiet { background: transparent; border-color: transparent; color: var(--text-2); }
 button.quiet:hover { background: var(--surface-2); color: var(--text); }
+button.danger { background: rgba(255, 97, 89, 0.16); border-color: rgba(255, 97, 89, 0.4); color: var(--red); }
+button.danger:hover { background: rgba(255, 97, 89, 0.28); }
+button.quiet.danger { background: transparent; border-color: transparent; color: var(--text-3); }
+button.quiet.danger:hover { background: rgba(255, 97, 89, 0.14); color: var(--red); }
+#delete-task { font-size: 12px; padding: 5px 12px; }
 button:disabled { opacity: 0.4; cursor: default; }
 
 input[type='text'], input[type='password'], textarea, select {
@@ -624,6 +629,22 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 .vbtn.active.v-FIXES_MADE { background: rgba(108, 165, 255, 0.16); color: var(--blue); border-color: transparent; }
 .vbtn.active.v-SBQ { background: rgba(255, 97, 89, 0.16); color: var(--red); border-color: transparent; }
 .vbtn.active.v-SECOND_OPINION { background: rgba(185, 140, 245, 0.16); color: var(--purple); border-color: transparent; }
+
+/* ranking proof */
+.rankproof { max-width: 860px; }
+.rankproof h1 { font-size: 19px; margin-top: 0; }
+.rp-side { margin: 22px 0; padding-bottom: 22px; border-bottom: 1px solid var(--edge); }
+.rp-side:last-child { border-bottom: none; }
+.rp-side h2 { font-size: 13px; font-weight: 700; margin: 0 0 12px; }
+.rp-side h2.traj-model_a { color: var(--green); }
+.rp-side h2.traj-model_b { color: var(--blue); }
+.rp-img { max-width: 100%; border: 1px solid var(--edge); border-radius: var(--r-md); display: block; }
+.rp-just { margin-top: 14px; }
+.rp-just-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-3); font-weight: 600; margin-bottom: 6px; }
+.rp-just-text {
+  font-size: 13.5px; line-height: 1.7; color: var(--text); white-space: pre-wrap; word-break: break-word;
+  background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-md); padding: 14px 16px;
+}
 
 /* task definition */
 .taskdef { max-width: 820px; }

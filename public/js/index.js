@@ -127,6 +127,7 @@ async function boot() {
   document.getElementById('user-role').textContent = me.role;
   document.getElementById('ingest-section').hidden = me.role !== 'admin';
   document.getElementById('admin-link').hidden = me.role !== 'admin';
+  document.getElementById('clear-board').hidden = me.role !== 'admin';
   if (me.role === 'admin') refreshRubricStatus();
   const q = new URLSearchParams(location.search).get('q');
   if (q) searchInput.value = q;
@@ -271,6 +272,13 @@ document.getElementById('rubric-input')?.addEventListener('change', async (e) =>
 
 
 document.getElementById('export-csv').addEventListener('click', () => { location.href = '/api/export/all.csv'; });
+document.getElementById('clear-board').addEventListener('click', async () => {
+  const total = ORDER.reduce((n, b) => n + (currentWs[b]?.length || 0), 0);
+  if (!confirm(`Clear all ${total} task uploads from the board? This cannot be undone (claims, decisions, and generated docs are removed). Use this to start a fresh delivery cycle.`)) return;
+  const { cleared } = await api('/admin/clear', { method: 'POST' });
+  await load();
+  document.getElementById('search-count').textContent = `cleared ${cleared}`;
+});
 document.getElementById('logout-btn').addEventListener('click', async () => {
   await api('/logout', { method: 'POST' });
   location.href = '/login.html';
@@ -317,8 +325,8 @@ async function uploadFiles(files) {
   try {
     const r = await uploadFormData(form);
     const counts = Object.entries(r.counts || {}).map(([b, n]) => `${b} ${n}`).join(', ') || 'none';
-    const skipped = r.skipped_existing?.length ? ` · skipped ${r.skipped_existing.length} already-known task(s)` : '';
-    statusEl.textContent = `done — sorted: ${counts}${skipped}`;
+    const replaced = r.replaced?.length ? ` · replaced ${r.replaced.length} existing` : '';
+    statusEl.textContent = `done — sorted: ${counts}${replaced}`;
     progressEl.hidden = true;
     if (r.ingested?.length === 1) location.href = `/task/${r.bucket}/${r.taskId}`;
     else load();

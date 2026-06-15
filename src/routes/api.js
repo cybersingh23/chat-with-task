@@ -4,7 +4,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import {
   listWorkspace, taskMeta, listFiles, readTaskFile, readTrajectory,
-  readTaskDef, moveTask, taskDir, resolveSafe,
+  readTaskDef, moveTask, taskDir, resolveSafe, deleteTask, clearWorkspace,
 } from '../workspace.js';
 import { ingestTask, findTaskSources } from '../ingest.js';
 import { handleUpload } from '../upload.js';
@@ -137,6 +137,16 @@ api.get('/task/:bucket/:id/trajectory/:model', wrap(async (req, res) =>
 api.post('/task/:bucket/:id/move', wrap(async (req, res) => {
   moveTask(req.params.bucket, req.params.id, req.body.to);
   res.json({ ok: true, bucket: req.body.to });
+}));
+
+// admin: delete one task, or clear the whole board (fresh delivery cycle)
+api.delete('/task/:bucket/:id', requireAdmin, wrap(async (req, res) => {
+  deleteTask(req.params.bucket, req.params.id);
+  res.json({ ok: true });
+}));
+
+api.post('/admin/clear', requireAdmin, wrap(async (req, res) => {
+  res.json({ cleared: clearWorkspace() });
 }));
 
 // --- doc generation (SSE so the UI can show tool activity live) ---

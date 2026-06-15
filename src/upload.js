@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { config } from './config.js';
-import { assertBucket, ensureWorkspace, existingTaskIds, httpError } from './workspace.js';
+import { assertBucket, ensureWorkspace, findTaskBucket, httpError } from './workspace.js';
 import { writeAuditSeed } from './ingest.js';
 
 const execFileP = promisify(execFile);
@@ -96,19 +96,17 @@ async function finalizeUpload(tmp, fields) {
   if (!taskId) {
     throw httpError(400, 'could not derive a 24-char task id from the folder name — name the folder after the task id or fill the task id field');
   }
-  const r = bulkIngest([taskRoot], fields, taskId);
-  if (r.skipped_existing.length) throw httpError(409, `task ${taskId} already in workspace`);
-  return r;
+  return bulkIngest([taskRoot], fields, taskId);
 }
 
 // Sort every uploaded task into HARD_FAIL/SOFT_FAIL/PASS via the delivery's
-// _audit/final_verdicts.json (fallback: the requested bucket). Tasks already
-// in the workspace — i.e. anything from a previous delivery — are skipped.
+// _audit/final_verdicts.json (fallback: the requested bucket). Uploads are
+// additive (other tasks are untouched); a re-uploaded task_id OVERRIDES the
+// previous copy (latest wins), preserving the reviewer's claim/verdict state.
 function bulkIngest(taskRoots, fields, forcedId = null) {
   const fallbackBucket = assertBucket(fields.bucket || 'UNSORTED');
-  const existing = existingTaskIds();
   const ingested = [];
-  const skippedExisting = [];
+  const replaced = [];
   const skippedBadId = [];
 
   for (const taskRoot of taskRoots) {
@@ -117,33 +115,39 @@ function bulkIngest(taskRoots, fields, forcedId = null) {
       skippedBadId.push(path.basename(taskRoot));
       continue;
     }
-    if (existing.has(taskId)) {
-      skippedExisting.push(taskId);
-      continue;
-    }
     const deliveryDir = path.dirname(taskRoot);
     const verdicts = loadVerdicts(deliveryDir);
     const bucket = verdicts ? bucketFor(verdicts.get(taskId)) : fallbackBucket;
+
+    // override any prior copy (in whatever bucket), carrying over reviewer state
+    const priorBucket = findTaskBucket(taskId);
+    let studio = null;
+    if (priorBucket) {
+      const priorDir = path.join(config.workspaceRoot, priorBucket, taskId);
+      try { studio = fs.readFileSync(path.join(priorDir, '_studio.json')); } catch { /* none */ }
+      fs.rmSync(priorDir, { recursive: true, force: true });
+    }
     const dest = path.join(config.workspaceRoot, bucket, taskId);
     fs.cpSync(taskRoot, dest, { recursive: true });
+    if (studio) fs.writeFileSync(path.join(dest, '_studio.json'), studio); // keep claim/verdict/checklist
     let seeded = false;
     if (fs.existsSync(path.join(deliveryDir, '_audit'))) {
       seeded = writeAuditSeed(deliveryDir, taskId, dest);
     }
-    existing.add(taskId);
-    ingested.push({ taskId, bucket, seeded });
+    (priorBucket ? replaced : ingested).push({ taskId, bucket, seeded });
   }
 
-  const first = ingested[0];
+  const all = [...ingested, ...replaced];
+  const first = all[0];
   return {
     taskId: first?.taskId || null,
     bucket: first?.bucket || null,
     ingested,
-    counts: countBy(ingested, (t) => t.bucket),
-    skipped_existing: skippedExisting,
+    replaced,
+    counts: countBy(all, (t) => t.bucket),
     skipped_bad_id: skippedBadId,
-    seeded: ingested.some((t) => t.seeded),
-    files: ingested.length === 1 ? countFiles(path.join(config.workspaceRoot, first.bucket, first.taskId)) : undefined,
+    seeded: all.some((t) => t.seeded),
+    files: all.length === 1 ? countFiles(path.join(config.workspaceRoot, first.bucket, first.taskId)) : undefined,
   };
 }
 

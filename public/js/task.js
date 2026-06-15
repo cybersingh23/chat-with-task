@@ -150,6 +150,13 @@ async function buildSidebar() {
       el('span', {}, 'Checklist'),
     )
   );
+  if (meta.hasRankingProof) {
+    navDocs.append(
+      el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showRankingProof(); } },
+        el('span', {}, 'Ranking proof'),
+      )
+    );
+  }
 
   const navTrajs = document.getElementById('nav-trajs');
   navTrajs.replaceChildren(
@@ -177,7 +184,7 @@ async function buildSidebar() {
 }
 
 const SKIP_FILES = new Set(['review.md', 'remediation.md', '_audit_seed.md', '_chat.json', '_studio.json']);
-const FILE_GROUP_ORDER = ['Task', 'Ranking proof', 'Snapshots', 'Other'];
+const FILE_GROUP_ORDER = ['Task', 'Other'];
 
 async function buildFileTree() {
   const tree = await api(`/task/${bucket}/${taskId}/files`);
@@ -191,10 +198,9 @@ async function buildFileTree() {
   for (const p of files) {
     if (SKIP_FILES.has(p) || p.startsWith('trajectories/')) continue;
     const seg = p.includes('/') ? p.split('/')[0] : '';
-    const label = seg === '' ? 'Task'
-      : seg === 'ranking_proof' ? 'Ranking proof'
-      : (seg === 'snapshots' || seg === 'initial_snapshots') ? 'Snapshots'
-      : 'Other';
+    // snapshots are noise; ranking_proof has its own dedicated view
+    if (seg === 'snapshots' || seg === 'initial_snapshots' || seg === 'ranking_proof') continue;
+    const label = seg === '' ? 'Task' : 'Other';
     if (!groups.has(label)) groups.set(label, []);
     groups.get(label).push({ path: p, name: p.split('/').pop() });
   }
@@ -478,6 +484,41 @@ function buildQcSpecView(dimensions) {
       }),
     ]),
   );
+}
+
+// ---------- ranking proof (image + justification per side) ----------
+async function showRankingProof() {
+  hideTrajToolbar();
+  viewerTitle.textContent = 'Ranking proof';
+  document.querySelector('.viewer-head .regen')?.remove();
+  viewReopeners.set('rankproof', { label: 'Ranking proof', reopen: () => { setActive(findDocNav('Ranking proof')); showRankingProof(); } });
+  const tree = await api(`/task/${bucket}/${taskId}/files`);
+  const proof = [];
+  (function walk(es) { for (const e of es) { if (e.dir) walk(e.children); else if (e.path.startsWith('ranking_proof/')) proof.push(e.path); } })(tree);
+  mountView('rankproof', () => buildRankingProof(proof), { refresh: true });
+}
+
+function buildRankingProof(files) {
+  if (!files.length) return el('div', { class: 'callout info' }, 'No ranking proof shipped with this task.');
+  const container = el('div', { class: 'rankproof' }, el('h1', {}, 'Ranking proof'));
+  for (const [k, label, cls] of [['a', 'Model A', 'traj-model_a'], ['b', 'Model B', 'traj-model_b']]) {
+    const base = (f) => f.split('/').pop();
+    const img = files.find((f) => /\.(png|jpe?g|webp)$/i.test(f) && base(f).startsWith(`${k}_`));
+    const just = files.find((f) => f.endsWith('_justification.txt') && base(f).startsWith(`${k}_`));
+    if (!img && !just) continue;
+    const section = el('section', { class: 'rp-side' }, el('h2', { class: cls }, label));
+    if (img) {
+      const src = `/api/task/${bucket}/${taskId}/file?path=${encodeURIComponent(img)}`;
+      section.append(el('a', { href: src, target: '_blank', title: 'open full size' }, el('img', { class: 'rp-img', src })));
+    }
+    if (just) {
+      const text = el('div', { class: 'rp-just-text' }, 'loading…');
+      section.append(el('div', { class: 'rp-just' }, el('div', { class: 'rp-just-label' }, 'Justification'), text));
+      api(`/task/${bucket}/${taskId}/file?path=${encodeURIComponent(just)}`).then((f) => { text.textContent = f.text || '(empty)'; }).catch(() => { text.textContent = '(could not load)'; });
+    }
+    container.append(section);
+  }
+  return container;
 }
 
 // ---------- checklist (adjudicate review findings → decision) ----------
@@ -1119,6 +1160,15 @@ expandChatBtn.addEventListener('click', () => setChatCollapsed(false));
 const me = await api('/me'); // 401 redirects to login
 document.getElementById('user-chip').hidden = false;
 document.getElementById('user-name').textContent = me.username;
+if (me.role === 'admin') {
+  const del = document.getElementById('delete-task');
+  del.hidden = false;
+  del.addEventListener('click', async () => {
+    if (!confirm(`Delete task ${taskId} from the board? This removes its files, claim, decision, and generated docs.`)) return;
+    await api(`/task/${bucket}/${taskId}`, { method: 'DELETE' });
+    location.href = '/';
+  });
+}
 await refreshState();
 setInterval(refreshState, 10_000);
 await buildSidebar();
