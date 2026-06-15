@@ -133,7 +133,11 @@ async function buildSidebar() {
         el('span', { class: `traj-launch-name traj-${m}` }, m === 'model_a' ? 'Model A' : 'Model B'),
         el('span', { class: 'traj-launch-meta', id: `traj-meta-${m}` }, '· · ·'),
       )
-    )
+    ),
+    el('button', { class: 'traj-launch sbs', id: 'traj-launch-sbs', onclick: () => { setActive(null); showSideBySide(); } },
+      el('span', { class: 'traj-launch-name' }, 'Compare A ↔ B'),
+      el('span', { class: 'traj-launch-meta' }, 'side by side'),
+    ),
   );
   for (const m of ['model_a', 'model_b']) {
     loadTrajectory(m)
@@ -200,8 +204,7 @@ function loadTrajectory(model) {
 
 function hideTrajToolbar() {
   trajToolbar.hidden = true;
-  document.getElementById('traj-launch-model_a')?.classList.remove('active');
-  document.getElementById('traj-launch-model_b')?.classList.remove('active');
+  setTrajLauncherActive(null);
 }
 
 // ---------- documents ----------
@@ -623,18 +626,8 @@ async function showTrajectory(model, focusIndex = null) {
     reopen: () => showTrajectory(model),
   });
   const traj = await loadTrajectory(model);
-
-  document.getElementById('traj-launch-model_a')?.classList.toggle('active', model === 'model_a');
-  document.getElementById('traj-launch-model_b')?.classList.toggle('active', model === 'model_b');
-  trajToolbar.hidden = false;
-  document.getElementById('traj-tabs').replaceChildren(
-    ...['model_a', 'model_b'].map((m) =>
-      el('button', {
-        class: `traj-tab traj-${m} ${m === model ? 'active' : ''}`,
-        onclick: () => showTrajectory(m),
-      }, m === 'model_a' ? 'Model A' : 'Model B')
-    )
-  );
+  setTrajLauncherActive(model);
+  renderTrajTabs(model);
 
   mountView(`traj:${model}`, () =>
     el('div', { class: 'convo' }, ...groupTurns(traj.messages).map((g, gi) => renderTurnGroup(model, g, gi)))
@@ -642,6 +635,110 @@ async function showTrajectory(model, focusIndex = null) {
 
   // An explicit citation jump overrides the remembered scroll position.
   if (focusIndex != null) jumpToMessage(model, focusIndex);
+}
+
+function setTrajLauncherActive(which) {
+  for (const k of ['model_a', 'model_b', 'sbs']) {
+    document.getElementById(`traj-launch-${k}`)?.classList.toggle('active', k === which);
+  }
+}
+
+function renderTrajTabs(active) {
+  trajToolbar.hidden = false;
+  document.getElementById('collapse-all').style.display = active === 'sbs' ? 'none' : '';
+  document.getElementById('traj-tabs').replaceChildren(
+    el('button', { class: `traj-tab traj-model_a ${active === 'model_a' ? 'active' : ''}`, onclick: () => showTrajectory('model_a') }, 'Model A'),
+    el('button', { class: `traj-tab traj-model_b ${active === 'model_b' ? 'active' : ''}`, onclick: () => showTrajectory('model_b') }, 'Model B'),
+    el('button', { class: `traj-tab traj-sbs ${active === 'sbs' ? 'active' : ''}`, onclick: () => showSideBySide() }, 'A ↔ B'),
+  );
+}
+
+// ---------- side-by-side compare ----------
+// Align A and B by matched user prompts (anchors); each model's response to a
+// shared prompt sits in its own column beneath it. Reactive/extra turns on one
+// side render as a one-sided row.
+async function showSideBySide() {
+  viewerTitle.textContent = 'Trajectory viewer — A ↔ B';
+  document.querySelector('.viewer-head .regen')?.remove();
+  setActive(null);
+  viewReopeners.set('sbs', { label: 'A ↔ B', reopen: () => showSideBySide() });
+  let A, B;
+  try { A = await loadTrajectory('model_a'); } catch { A = null; }
+  try { B = await loadTrajectory('model_b'); } catch { B = null; }
+  setTrajLauncherActive('sbs');
+  renderTrajTabs('sbs');
+  mountView('sbs', () => buildSideBySide(A, B), { refresh: true });
+}
+
+function buildSideBySide(A, B) {
+  if (!A || !B) {
+    return el('div', { class: 'callout info' }, 'Side-by-side needs both trajectories; one is missing or a stub.');
+  }
+  const ga = groupTurns(A.messages), gb = groupTurns(B.messages);
+  const rows = alignPrompts(ga, gb);
+  const grid = el('div', { class: 'sbs-grid' });
+  let n = 0;
+  for (const r of rows) {
+    if (r.type === 'anchor') {
+      n++;
+      grid.append(
+        el('div', { class: 'sbs-anchor' },
+          el('div', { class: 'sbs-anchor-head' },
+            el('span', { class: 'turn-num' }, `Prompt ${n}`),
+            el('span', { class: 'sbs-idx' }, `A[${r.a.user.index}] · B[${r.b.user.index}]`),
+            el('span', { class: 'spacer' }),
+            el('span', { class: 'sbs-count' }, `${r.a.assistants.length} vs ${r.b.assistants.length} turns`),
+          ),
+          el('div', { class: 'msg-user-text' }, userText(r.a.user)),
+        ),
+        el('div', { class: 'sbs-cell' }, ...r.a.assistants.map((a) => assistantBlock('model_a', a))),
+        el('div', { class: 'sbs-cell' }, ...r.b.assistants.map((a) => assistantBlock('model_b', a))),
+      );
+    } else {
+      // one-sided (extra/reactive turn on A or B)
+      const side = r.a ? 'a' : 'b';
+      const g = r.a || r.b;
+      const model = r.a ? 'model_a' : 'model_b';
+      const cell = el('div', { class: 'sbs-cell oneside' },
+        el('div', { class: 'sbs-oneside-tag' }, `${side === 'a' ? 'Model A' : 'Model B'} only`),
+        g.user ? userBlock(model, g.user) : null,
+        ...g.assistants.map((a) => assistantBlock(model, a)),
+      );
+      const empty = el('div', { class: 'sbs-cell empty' }, '— no matching turn —');
+      grid.append(side === 'a' ? cell : empty, side === 'a' ? empty : cell);
+    }
+  }
+  return el('div', { class: 'sbs' },
+    el('div', { class: 'sbs-colhead' },
+      el('span', { class: 'traj-model_a' }, `Model A · ${A.count} msgs`),
+      el('span', { class: 'traj-model_b' }, `Model B · ${B.count} msgs`),
+    ),
+    grid,
+  );
+}
+
+// Greedy prompt alignment with small lookahead — pairs matching user prompts,
+// emits one-sided rows for extra turns.
+function alignPrompts(A, B) {
+  const sim = (ga, gb) => (ga?.user && gb?.user) ? score(tokenize(userText(ga.user)), tokenize(userText(gb.user))) : 0;
+  const T = 0.5, LOOK = 3;
+  const rows = [];
+  let i = 0, j = 0;
+  while (i < A.length || j < B.length) {
+    if (i < A.length && j < B.length && sim(A[i], B[j]) >= T) {
+      rows.push({ type: 'anchor', a: A[i], b: B[j] }); i++; j++; continue;
+    }
+    let mB = -1;
+    for (let k = j + 1; k < Math.min(B.length, j + 1 + LOOK); k++) if (i < A.length && sim(A[i], B[k]) >= T) { mB = k; break; }
+    let mA = -1;
+    for (let k = i + 1; k < Math.min(A.length, i + 1 + LOOK); k++) if (j < B.length && sim(A[k], B[j]) >= T) { mA = k; break; }
+    if (j < B.length && mB !== -1 && (mA === -1 || (mB - j) <= (mA - i))) { rows.push({ type: 'one', b: B[j] }); j++; }
+    else if (i < A.length && mA !== -1) { rows.push({ type: 'one', a: A[i] }); i++; }
+    else if (i < A.length && j < B.length) { rows.push({ type: 'anchor', a: A[i], b: B[j] }); i++; j++; } // divergent but pair anyway
+    else if (i < A.length) { rows.push({ type: 'one', a: A[i] }); i++; }
+    else { rows.push({ type: 'one', b: B[j] }); j++; }
+  }
+  return rows;
 }
 
 function jumpToMessage(model, index) {
@@ -654,41 +751,40 @@ function jumpToMessage(model, index) {
   setTimeout(() => node.classList.remove('flash'), 2500);
 }
 
+function userBlock(model, m) {
+  return el('div', { class: 'msg-user', id: `msg-${model}-${m.index}` },
+    el('div', { class: 'msg-user-label' },
+      'User',
+      el('span', { class: 'msg-idx' }, ` · ${model}[${m.index}] · ${fmtTime(m.created)}`),
+      copyLinkBtn(model, m.index),
+    ),
+    el('div', { class: 'msg-user-text' }, userText(m)),
+  );
+}
+
+function assistantBlock(model, a) {
+  const blocks = [];
+  for (const p of a.parts) {
+    if (p.type === 'text' && p.text.trim()) blocks.push(el('div', { class: 'asst-text' }, p.text));
+    else if (p.type === 'reasoning' && p.text.trim()) blocks.push(el('div', { class: 'asst-text reasoning' }, p.text));
+    else if (p.type === 'tool') blocks.push(renderToolBlock(p));
+  }
+  if (!blocks.length) blocks.push(el('div', { class: 'empty-resp' }, '(no response content)'));
+  return el('div', { class: 'msg-asst', id: `msg-${model}-${a.index}` },
+    el('div', { class: 'step-header' },
+      'Assistant',
+      el('span', { class: 'msg-idx' }, ` · ${model}[${a.index}]`),
+      copyLinkBtn(model, a.index),
+    ),
+    blocks,
+  );
+}
+
 function renderTurnGroup(model, g, gi) {
   const preview = g.user ? userText(g.user).slice(0, 130) : '(assistant continues)';
   const body = el('div', { class: 'turn-body open' });
-
-  if (g.user) {
-    body.append(
-      el('div', { class: 'msg-user', id: `msg-${model}-${g.user.index}` },
-        el('div', { class: 'msg-user-label' },
-          'User',
-          el('span', { class: 'msg-idx' }, ` · ${model}[${g.user.index}] · ${fmtTime(g.user.created)}`),
-          copyLinkBtn(model, g.user.index),
-        ),
-        el('div', { class: 'msg-user-text' }, userText(g.user)),
-      )
-    );
-  }
-  for (const a of g.assistants) {
-    const blocks = [];
-    for (const p of a.parts) {
-      if (p.type === 'text' && p.text.trim()) blocks.push(el('div', { class: 'asst-text' }, p.text));
-      else if (p.type === 'reasoning' && p.text.trim()) blocks.push(el('div', { class: 'asst-text reasoning' }, p.text));
-      else if (p.type === 'tool') blocks.push(renderToolBlock(p));
-    }
-    if (!blocks.length) blocks.push(el('div', { class: 'empty-resp' }, '(no response content)'));
-    body.append(
-      el('div', { class: 'msg-asst', id: `msg-${model}-${a.index}` },
-        el('div', { class: 'step-header' },
-          'Assistant',
-          el('span', { class: 'msg-idx' }, ` · ${model}[${a.index}]`),
-          copyLinkBtn(model, a.index),
-        ),
-        blocks,
-      )
-    );
-  }
+  if (g.user) body.append(userBlock(model, g.user));
+  for (const a of g.assistants) body.append(assistantBlock(model, a));
 
   const arrow = el('span', { class: 'arrow open' }, '▶');
   const header = el('div', {
