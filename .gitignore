@@ -4,5 +4,3 @@ workspace/
 data/
 .DS_Store
 *.log
-spec/*
-!spec/README.md

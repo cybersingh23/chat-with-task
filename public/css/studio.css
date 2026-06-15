@@ -682,6 +682,8 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 .pres-chip.no { color: var(--red); background: rgba(255, 97, 89, 0.1); border-color: rgba(255, 97, 89, 0.35); }
 .pres-chip.partial { color: var(--orange); background: rgba(255, 161, 79, 0.1); border-color: rgba(255, 161, 79, 0.35); }
 .pres-chip.unknown { color: var(--text-3); }
+.pres-chip.clickable { cursor: pointer; }
+.pres-chip.clickable:hover { filter: brightness(1.25); text-decoration: underline; }
 .milestone-head button { font-size: 11.5px; padding: 3px 11px; color: var(--text-2); }
 .milestone-head button:hover { color: var(--text); }
 .chip.milestone-id { color: var(--green); font-family: var(--mono); }

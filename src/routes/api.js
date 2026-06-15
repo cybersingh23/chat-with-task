@@ -150,7 +150,7 @@ api.post('/admin/clear', requireAdmin, wrap(async (req, res) => {
 }));
 
 // --- doc generation (SSE so the UI can show tool activity live) ---
-api.post('/task/:bucket/:id/docgen/:which', wrap(async (req, res) => {
+api.post('/task/:bucket/:id/docgen/:which', requireAdmin, wrap(async (req, res) => {
   const { bucket, id, which } = req.params;
   if (!['review', 'remediation'].includes(which)) return res.status(400).json({ error: 'which must be review|remediation' });
   const acc = { prompt_tokens: 0, completion_tokens: 0 };

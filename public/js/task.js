@@ -141,7 +141,7 @@ async function buildSidebar() {
     navDocs.append(
       el('button', { class: 'nav-item', onclick: (ev) => openDoc(d, ev.currentTarget) },
         el('span', {}, d.label),
-        present ? null : el('span', { class: 'missing' }, 'generate'),
+        present ? null : el('span', { class: 'missing' }, me.role === 'admin' ? 'generate' : 'pending'),
       )
     );
   }
@@ -251,7 +251,8 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
       content = el('div', { class: 'md' });
       content.innerHTML = renderMarkdown(f.text);
     } catch {
-      content = el('p', { class: 'hint-line' }, `No ${doc.file} yet — generate it from the button above.`);
+      content = el('p', { class: 'hint-line' },
+        me.role === 'admin' ? `No ${doc.file} yet — generate it from the button above.` : `${doc.label} hasn't been generated for this task yet.`);
     }
     mountView(`doc:${doc.key}`, () => content, { refresh: true });
   } else {
@@ -263,6 +264,7 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
 function addRegenButton(doc) {
   const head = document.querySelector('.viewer-head');
   head.querySelector('.regen')?.remove();
+  if (me.role !== 'admin') return; // reviewers view docs; only admin generates
   head.append(
     el('button', {
       class: 'regen',
@@ -324,11 +326,31 @@ async function milestonePresence() {
 }
 
 // One worded status chip summarizing presence across both trajectories.
-function presenceChip(a, b) {
+// Clickable → opens the A↔B side-by-side viewer at this milestone's prompt.
+function presenceChip(milestone, a, b) {
   if (a == null && b == null) return el('span', { class: 'pres-chip unknown', title: 'no trajectory to check' }, 'No trajectory');
-  if (a && b) return el('span', { class: 'pres-chip yes', title: 'string-matched in both A and B' }, 'Found in A & B');
-  if (!a && !b) return el('span', { class: 'pres-chip no', title: 'no string match in A or B' }, 'Not found');
-  return el('span', { class: 'pres-chip partial', title: 'string-matched in only one side' }, a ? 'In A only' : 'In B only');
+  const onclick = () => openMilestoneInSbs(milestone, a, b);
+  const mk = (cls, title, text) => el('span', { class: `pres-chip clickable ${cls}`, title: `${title} · click to view in A ↔ B`, onclick }, text);
+  if (a && b) return mk('yes', 'string-matched in both A and B', 'Found in A & B');
+  if (!a && !b) return mk('no', 'no string match in A or B', 'Not found');
+  return mk('partial', 'string-matched in only one side', a ? 'In A only' : 'In B only');
+}
+
+// Find a milestone's prompt in whichever side has it and open A↔B there.
+async function openMilestoneInSbs(milestone, a, b) {
+  const model = (b && !a) ? 'model_b' : 'model_a'; // prefer A, fall back to B
+  let best = null;
+  try {
+    const traj = await loadTrajectory(model);
+    const toks = tokenize(milestone.prompt);
+    for (const m of traj.messages) {
+      if (m.role !== 'user') continue;
+      const ov = score(toks, tokenize(m.parts.filter((p) => p.type === 'text').map((p) => p.text).join(' ')));
+      if (!best || ov > best.ov) best = { index: m.index, ov };
+    }
+  } catch { /* no trajectory; open SBS unfocused */ }
+  setActive(null);
+  showSideBySide(best ? { model, index: best.index } : null);
 }
 
 function buildTaskDefView(presence) {
@@ -355,7 +377,7 @@ function buildTaskDefView(presence) {
           el('span', { class: 'chip milestone-id' }, m.id),
           el('span', { class: 'milestone-title' }, m.title || `Milestone ${i + 1}`),
           el('span', { class: 'spacer' }),
-          presence ? presenceChip(presence[m.id]?.model_a, presence[m.id]?.model_b) : null,
+          presence ? presenceChip(m, presence[m.id]?.model_a, presence[m.id]?.model_b) : null,
           el('button', { onclick: () => locateMilestone('model_a', m) }, 'Locate in A'),
           el('button', { onclick: () => locateMilestone('model_b', m) }, 'Locate in B'),
           el('button', { onclick: () => askCopilotAboutMilestone(m) }, 'Ask copilot'),

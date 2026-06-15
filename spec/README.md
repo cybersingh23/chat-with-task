@@ -1,8 +1,9 @@
-# spec/ — customer program documents (not committed)
+# spec/ — customer program documents (committed)
 
-Everything in this directory except this README is **gitignored** — customer spec material
-must not land on GitHub. The app reads these files from disk at runtime (`src/spec.js`); to
-deploy, copy them onto the server host alongside the repo.
+These program docs are **committed to this private repo** so the app is self-contained on
+deploy — no manual file placement and no admin upload needed for the QC spec. The app reads
+them at runtime (`src/spec.js`). An admin can still upload a newer QC rubric in-app (stored in
+`DATA_DIR/rubric.csv`), which overrides `V5_RUBRIC.csv` here without a redeploy.
 
 Required files:
 
