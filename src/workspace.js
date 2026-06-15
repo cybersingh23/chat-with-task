@@ -115,8 +115,8 @@ export function existingTaskIds() {
   return ids;
 }
 
-export function listFiles(bucket, id) {
-  const dir = taskDir(bucket, id);
+// Dir-scoped cores (also used by the offline doc generator) + (bucket,id) wrappers.
+export function listFilesIn(dir) {
   const walk = (d, rel) => {
     const entries = [];
     for (const name of fs.readdirSync(d).sort()) {
@@ -131,9 +131,10 @@ export function listFiles(bucket, id) {
   };
   return walk(dir, '');
 }
+export function listFiles(bucket, id) { return listFilesIn(taskDir(bucket, id)); }
 
-export function readTaskFile(bucket, id, rel) {
-  const abs = resolveSafe(taskDir(bucket, id), rel);
+export function readFileIn(dir, rel) {
+  const abs = resolveSafe(dir, rel);
   if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw httpError(404, `file not found: ${rel}`);
   if (/\.(png|jpg|jpeg|gif|webp)$/i.test(abs)) return { kind: 'image', abs };
   const buf = fs.readFileSync(abs);
@@ -145,11 +146,11 @@ export function readTaskFile(bucket, id, rel) {
     size: buf.length,
   };
 }
+export function readTaskFile(bucket, id, rel) { return readFileIn(taskDir(bucket, id), rel); }
 
-export function writeTaskFile(bucket, id, rel, content) {
-  const abs = resolveSafe(taskDir(bucket, id), rel);
-  fs.writeFileSync(abs, content);
-}
+export function writeFileIn(dir, rel, content) { fs.writeFileSync(resolveSafe(dir, rel), content); }
+
+export function writeTaskFile(bucket, id, rel, content) { writeFileIn(taskDir(bucket, id), rel, content); }
 
 export function moveTask(bucket, id, toBucket) {
   assertBucket(toBucket);
@@ -163,9 +164,11 @@ export function moveTask(bucket, id, toBucket) {
 // -> flat [{index, role, created, parts:[{type, ...}]}], skipping step-start/step-finish noise.
 const PART_TEXT_CAP = 30_000;
 
-export function readTrajectory(bucket, id, model) {
+export function readTrajectory(bucket, id, model) { return readTrajectoryIn(taskDir(bucket, id), model); }
+
+export function readTrajectoryIn(dir, model) {
   if (!/^model_[ab]$/.test(model)) throw httpError(400, `model must be model_a or model_b`);
-  const abs = path.join(taskDir(bucket, id), 'trajectories', `trajectory_${model}.json`);
+  const abs = path.join(dir, 'trajectories', `trajectory_${model}.json`);
   if (!fs.existsSync(abs)) throw httpError(404, `no trajectory for ${model}`);
   const raw = JSON.parse(fs.readFileSync(abs, 'utf8'));
   const messages = (raw.messages || []).map((m, index) => ({
@@ -199,8 +202,9 @@ function clip(s) {
 // Task definition: v2 schema embeds it in rank.json under "task" (object);
 // legacy batches carry a CDS URL string there, with source_task/task.json as
 // the only local fallback. Missing is INFORMATIONAL per customer policy.
-export function readTaskDef(bucket, id) {
-  const dir = taskDir(bucket, id);
+export function readTaskDef(bucket, id) { return readTaskDefIn(taskDir(bucket, id)); }
+
+export function readTaskDefIn(dir) {
   let task = null;
   let source = null;
   try {

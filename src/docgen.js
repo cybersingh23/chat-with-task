@@ -1,14 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { runAgentLoop } from './llm.js';
-import { TOOL_DEFS, makeExecutor } from './tools.js';
-import { readTaskDef, taskDir, writeTaskFile } from './workspace.js';
+import { TOOL_DEFS, makeExecutor, makeExecutorForDir } from './tools.js';
+import { readTaskDef, readTaskDefIn, taskDir, writeTaskFile, writeFileIn } from './workspace.js';
 import { QUALITY_CANON } from './spec.js';
 
 // Shared context block: rank.json digest + audit seed, prepended to every
 // system prompt (chat copilot and doc generation).
 export function taskContext(bucket, id) {
-  const dir = taskDir(bucket, id);
+  return taskContextForDir(taskDir(bucket, id), { id, bucket });
+}
+
+export function taskContextForDir(dir, { id = path.basename(dir), bucket = '?' } = {}) {
   const parts = [`Task ID: ${id} (bucket: ${bucket})`];
   try {
     const rank = JSON.parse(fs.readFileSync(path.join(dir, 'rank.json'), 'utf8'));
@@ -34,7 +37,7 @@ export function taskContext(bucket, id) {
   } catch {
     parts.push('(rank.json missing or unparseable — flag this immediately, it is a packaging defect)');
   }
-  const def = readTaskDef(bucket, id);
+  const def = readTaskDefIn(dir);
   if (def.missing) {
     parts.push('Task definition: MISSING (informational only per customer policy 2026-06-09 — never a finding).');
   } else {
@@ -211,13 +214,19 @@ vendor stub, fabrication pattern across tasks) and who to escalate to.
 `.trim();
 
 export async function generateDoc(bucket, id, which, onEvent, onUsage) {
+  return generateDocForDir(taskDir(bucket, id), which, { onEvent, onUsage, id });
+}
+
+// Generate review.md / remediation.md against an absolute task directory.
+// Used by the app (via generateDoc) and by tools/gen_docs.mjs to pre-bake docs
+// into a delivery folder before it's zipped for upload.
+export async function generateDocForDir(dir, which, { onEvent, onUsage, id = path.basename(dir) } = {}) {
   const isReview = which === 'review';
-  const dir = taskDir(bucket, id);
   const system = [
     isReview ? REVIEW_PROMPT : REMEDIATION_PROMPT,
     QUALITY_CANON,
     CITATION_RULES,
-    taskContext(bucket, id),
+    taskContextForDir(dir, { id }),
   ].join('\n\n');
 
   const userParts = [`Generate ${which}.md for task ${id}. Use complete IDs.`];
@@ -236,14 +245,14 @@ export async function generateDoc(bucket, id, which, onEvent, onUsage) {
       { role: 'user', content: userParts.join('\n\n') },
     ],
     tools: TOOL_DEFS,
-    executor: makeExecutor(bucket, id),
+    executor: makeExecutorForDir(dir),
     onEvent,
     maxSteps: 25,
     onUsage,
   });
 
   const doc = cleanDoc(final);
-  writeTaskFile(bucket, id, `${which}.md`, doc);
+  writeFileIn(dir, `${which}.md`, doc);
   return doc;
 }
 

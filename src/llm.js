@@ -26,8 +26,16 @@ export async function chatCompletion({ messages, tools, temperature = 0.2, maxTo
     if (res.ok) break;
     const retryable = res.status === 429 || res.status >= 500;
     const detail = await res.text().catch(() => '');
-    if (!retryable || attempt >= 3) throw new Error(`LiteLLM ${res.status}: ${detail.slice(0, 500)}`);
-    await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt));
+    const maxAttempts = res.status === 429 ? 6 : 3; // 429 = token-bucket; wait it out
+    if (!retryable || attempt >= maxAttempts) throw new Error(`LiteLLM ${res.status}: ${detail.slice(0, 500)}`);
+    let wait = 2000 * 2 ** attempt;
+    if (res.status === 429) {
+      // honor the proxy's "resets at: <ts> UTC" when present, capped at 90s
+      const m = detail.match(/resets at:\s*([0-9-]+ [0-9:]+ UTC)/);
+      const until = m ? Date.parse(m[1]) : NaN;
+      wait = Number.isFinite(until) ? Math.min(Math.max(until - Date.now() + 1500, 2000), 90_000) : Math.min(wait, 30_000);
+    }
+    await new Promise((r) => setTimeout(r, wait));
   }
   const data = await res.json();
   if (onUsage && data.usage) onUsage(data.usage); // {prompt_tokens, completion_tokens, total_tokens}

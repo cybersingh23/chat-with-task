@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { listFiles, readTaskFile, readTrajectory, resolveSafe, taskDir } from './workspace.js';
+import { listFilesIn, readFileIn, readTrajectoryIn, resolveSafe, taskDir } from './workspace.js';
 import { readSpec, SPEC_FILES } from './spec.js';
 
 // Tools the audit copilot can call against the claimed task's folder.
@@ -83,13 +83,18 @@ export const TOOL_DEFS = [
 ];
 
 export function makeExecutor(bucket, id) {
-  const dir = taskDir(bucket, id);
+  return makeExecutorForDir(taskDir(bucket, id));
+}
+
+// Tool executor scoped to an absolute task directory (used by the app via
+// makeExecutor, and by the offline doc generator over a delivery folder).
+export function makeExecutorForDir(dir) {
   return async (name, args) => {
     switch (name) {
       case 'list_files':
-        return renderTree(listFiles(bucket, id));
+        return renderTree(listFilesIn(dir));
       case 'read_file': {
-        const f = readTaskFile(bucket, id, args.path);
+        const f = readFileIn(dir, args.path);
         if (f.kind === 'image') return `[binary image: ${args.path} — view it in the Files panel]`;
         const lines = f.text.split('\n');
         const offset = Math.max(0, args.offset || 0);
@@ -103,7 +108,7 @@ export function makeExecutor(bucket, id) {
       case 'read_spec':
         return readSpec(args.name);
       case 'read_trajectory': {
-        const traj = readTrajectory(bucket, id, args.model);
+        const traj = readTrajectoryIn(dir, args.model);
         let msgs = traj.messages;
         if (args.user_turns_only) msgs = msgs.filter((m) => m.role === 'user');
         const start = Math.max(0, args.start || 0);
