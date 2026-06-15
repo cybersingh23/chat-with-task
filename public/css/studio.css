@@ -720,7 +720,14 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 .sbs-anchor {
   grid-column: 1 / -1; background: var(--surface);
   border-top: 1px solid var(--edge-strong); padding: 12px 16px;
+  scroll-margin-top: 76px;
 }
+.sbs-anchor.flash { outline: 1px solid var(--yellow); outline-offset: -1px; }
+
+/* right-click context menu on traj citations */
+.ctx-menu { position: fixed; z-index: 250; min-width: 180px; padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.ctx-menu button { text-align: left; border: none; background: transparent; padding: 8px 10px; border-radius: var(--r-sm); font-size: 13px; color: var(--text); }
+.ctx-menu button:hover { background: var(--surface-2); }
 .sbs-anchor-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .sbs-anchor-head .turn-num { color: var(--blue); }
 .sbs-idx { font-family: var(--mono); font-size: 11px; color: var(--text-3); }

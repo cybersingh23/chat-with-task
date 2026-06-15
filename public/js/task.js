@@ -82,6 +82,31 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// right-click a traj:// citation → context menu (open in single view or A↔B)
+document.addEventListener('contextmenu', (e) => {
+  const t = e.target.closest('[data-traj-model]');
+  if (!t) return;
+  e.preventDefault();
+  const model = t.dataset.trajModel;
+  const index = Number(t.dataset.trajIndex);
+  openContextMenu(e.clientX, e.clientY, [
+    { label: `Show in ${model === 'model_a' ? 'Model A' : 'Model B'}`, onClick: () => showTrajectory(model, index) },
+    { label: 'View in A ↔ B', onClick: () => showSideBySide({ model, index }) },
+  ]);
+});
+
+function openContextMenu(x, y, items) {
+  document.querySelector('.ctx-menu')?.remove();
+  const menu = el('div', { class: 'ctx-menu glass' },
+    ...items.map((it) => el('button', { onclick: () => { menu.remove(); it.onClick(); } }, it.label)),
+  );
+  menu.style.left = `${Math.min(x, window.innerWidth - 200)}px`;
+  menu.style.top = `${Math.min(y, window.innerHeight - 90)}px`;
+  document.body.append(menu);
+  const away = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', away); } };
+  setTimeout(() => document.addEventListener('mousedown', away), 0);
+}
+
 // ---------- sidebar ----------
 // _audit_seed.md is intentionally NOT listed here: it stays on disk and is fed
 // to the copilot/docgen as grounding, but is not surfaced as a reviewer tab.
@@ -657,7 +682,7 @@ function renderTrajTabs(active) {
 // Align A and B by matched user prompts (anchors); each model's response to a
 // shared prompt sits in its own column beneath it. Reactive/extra turns on one
 // side render as a one-sided row.
-async function showSideBySide() {
+async function showSideBySide(focus = null) {
   viewerTitle.textContent = 'Trajectory viewer — A ↔ B';
   document.querySelector('.viewer-head .regen')?.remove();
   setActive(null);
@@ -668,6 +693,7 @@ async function showSideBySide() {
   setTrajLauncherActive('sbs');
   renderTrajTabs('sbs');
   mountView('sbs', () => buildSideBySide(A, B), { refresh: true });
+  if (focus) jumpToMessage(focus.model, focus.index);
 }
 
 function buildSideBySide(A, B) {
@@ -682,7 +708,7 @@ function buildSideBySide(A, B) {
     if (r.type === 'anchor') {
       n++;
       grid.append(
-        el('div', { class: 'sbs-anchor' },
+        el('div', { class: 'sbs-anchor', 'data-a-user': String(r.a.user.index), 'data-b-user': String(r.b.user.index) },
           el('div', { class: 'sbs-anchor-head' },
             el('span', { class: 'turn-num' }, `Prompt ${n}`),
             el('span', { class: 'sbs-idx' }, `A[${r.a.user.index}] · B[${r.b.user.index}]`),
@@ -742,7 +768,9 @@ function alignPrompts(A, B) {
 }
 
 function jumpToMessage(model, index) {
-  const node = document.getElementById(`msg-${model}-${index}`);
+  // exact message node, or (in A↔B) the shared anchor that folds this user prompt
+  let node = document.getElementById(`msg-${model}-${index}`);
+  if (!node) node = document.querySelector(`.sbs-anchor[data-${model === 'model_a' ? 'a' : 'b'}-user="${index}"]`);
   if (!node) return;
   node.closest('.turn-body')?.classList.add('open');
   node.closest('.turn-group')?.querySelector('.turn-header .arrow')?.classList.add('open');
