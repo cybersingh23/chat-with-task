@@ -128,6 +128,8 @@ async function boot() {
   document.getElementById('ingest-section').hidden = me.role !== 'admin';
   document.getElementById('admin-link').hidden = me.role !== 'admin';
   document.getElementById('clear-board').hidden = me.role !== 'admin';
+  document.getElementById('gen-all').hidden = me.role !== 'admin';
+  if (me.role === 'admin') pollGenStatus(); // reflect any in-flight batch on load
   if (me.role === 'admin') refreshRubricStatus();
   const q = new URLSearchParams(location.search).get('q');
   if (q) searchInput.value = q;
@@ -272,6 +274,32 @@ document.getElementById('rubric-input')?.addEventListener('change', async (e) =>
 
 
 document.getElementById('export-csv').addEventListener('click', () => { location.href = '/api/export/all.csv'; });
+// generate review+remediation for every task missing them, as background jobs
+let genPoll = null;
+document.getElementById('gen-all').addEventListener('click', async () => {
+  if (!confirm('Generate review + remediation for every task that is missing them? This runs in the background and can take a while / use significant tokens on large batches.')) return;
+  const r = await api('/admin/gendocs', { method: 'POST', body: { onlyMissing: true } });
+  document.getElementById('search-count').textContent = `queued ${r.queued} task(s) for doc generation…`;
+  pollGenStatus();
+});
+async function pollGenStatus() {
+  clearInterval(genPoll); genPoll = null;
+  const sc = document.getElementById('search-count');
+  const tick = async () => {
+    let s;
+    try { s = await api('/admin/gendocs/status'); } catch { return; }
+    if (!s.busy) {
+      clearInterval(genPoll); genPoll = null;
+      const done = s.counts.done || 0, err = s.counts.error || 0;
+      if (done || err) { sc.textContent = `doc generation done · ${done} ok${err ? ` · ${err} failed` : ''}`; await load(); }
+      return;
+    }
+    sc.textContent = `generating docs · running ${s.active} · queued ${s.queued}`;
+  };
+  await tick();
+  if (!genPoll) genPoll = setInterval(tick, 4000);
+}
+
 document.getElementById('clear-board').addEventListener('click', async () => {
   const total = ORDER.reduce((n, b) => n + (currentWs[b]?.length || 0), 0);
   if (!confirm(`Clear all ${total} task uploads from the board? This cannot be undone (claims, decisions, and generated docs are removed). Use this to start a fresh delivery cycle.`)) return;

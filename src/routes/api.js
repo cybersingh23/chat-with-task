@@ -15,6 +15,7 @@ import { TOOL_DEFS, makeExecutor } from '../tools.js';
 import { generateDoc, taskContext, CITATION_RULES } from '../docgen.js';
 import { QUALITY_CANON, getRubric, saveRubricCsv } from '../spec.js';
 import { recordUsage, readUsage, usageCsv } from '../usage.js';
+import { enqueueDocs, jobSummary, statusFor } from '../jobs.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '2mb' }));
@@ -150,22 +151,35 @@ api.post('/admin/clear', requireAdmin, wrap(async (req, res) => {
 }));
 
 // --- doc generation (SSE so the UI can show tool activity live) ---
+// Doc generation runs as a background job (survives the client navigating away).
 api.post('/task/:bucket/:id/docgen/:which', requireAdmin, wrap(async (req, res) => {
   const { bucket, id, which } = req.params;
   if (!['review', 'remediation'].includes(which)) return res.status(400).json({ error: 'which must be review|remediation' });
-  const acc = { prompt_tokens: 0, completion_tokens: 0 };
-  const onUsage = (u) => { acc.prompt_tokens += u.prompt_tokens || 0; acc.completion_tokens += u.completion_tokens || 0; };
-  startSSE(res);
-  try {
-    const doc = await generateDoc(bucket, id, which, (e) => sendSSE(res, e), onUsage);
-    sendSSE(res, { type: 'done', doc });
-  } catch (e) {
-    sendSSE(res, { type: 'error', message: e.message });
-  } finally {
-    recordUsage({ user: req.user.username, taskId: id, kind: `docgen:${which}`, model: config.litellm.model, usage: acc, text: `Generated ${which}.md` });
-  }
-  res.end();
+  res.json(enqueueDocs(bucket, id, [which], req.user.username));
 }));
+
+// generate docs for EVERY task at once (admin). onlyMissing (default true) skips
+// tasks that already have the doc; pass {onlyMissing:false} to regenerate all.
+api.post('/admin/gendocs', requireAdmin, wrap(async (req, res) => {
+  const onlyMissing = req.body?.onlyMissing !== false;
+  const ws = listWorkspace();
+  let queued = 0, tasks = 0;
+  for (const [bucket, list] of Object.entries(ws)) {
+    for (const t of list) {
+      const whichList = [];
+      if (!onlyMissing || !t.hasReview) whichList.push('review');
+      if (!onlyMissing || !t.hasRemediation) whichList.push('remediation');
+      if (!whichList.length) continue;
+      tasks++;
+      if (enqueueDocs(bucket, t.id, whichList, req.user.username).queued) queued++;
+    }
+  }
+  res.json({ queued, tasks });
+}));
+
+api.get('/admin/gendocs/status', requireAdmin, wrap(async (req, res) => res.json(jobSummary())));
+
+api.get('/task/:bucket/:id/docstatus', wrap(async (req, res) => res.json(statusFor(req.params.bucket, req.params.id))));
 
 // --- chat with task (SSE agent loop, history persisted in _chat.json) ---
 const CHAT_PROMPT = `

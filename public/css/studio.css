@@ -468,6 +468,13 @@ pre.raw {
 .autoqc-item:first-of-type { border-top: none; }
 .autoqc-text { font-size: 13px; color: var(--text-2); line-height: 1.5; }
 
+/* doc-generation in-progress banner */
+.gen-banner {
+  background: rgba(108, 165, 255, 0.1); border: 1px solid rgba(108, 165, 255, 0.3);
+  border-radius: var(--r-md); padding: 12px 16px; margin: 14px 0; font-size: 13px; color: var(--text-2);
+}
+.gen-banner.error-line { background: rgba(255, 97, 89, 0.1); border-color: rgba(255, 97, 89, 0.35); }
+
 /* critical-issues card */
 .alert-banner {
   background: var(--surface);

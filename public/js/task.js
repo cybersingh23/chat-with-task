@@ -244,6 +244,7 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
   hideTrajToolbar();
   viewerTitle.textContent = doc.file;
   viewReopeners.set(`doc:${doc.key}`, { label: doc.label, reopen: () => openDoc(doc, findDocNav(doc.label)) });
+  let missing = false;
   if (refresh || !viewCache.has(`doc:${doc.key}`)) {
     let content;
     try {
@@ -251,6 +252,7 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
       content = el('div', { class: 'md' });
       content.innerHTML = renderMarkdown(f.text);
     } catch {
+      missing = true;
       content = el('p', { class: 'hint-line' },
         me.role === 'admin' ? `No ${doc.file} yet — generate it from the button above.` : `${doc.label} hasn't been generated for this task yet.`);
     }
@@ -259,6 +261,10 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
     mountView(`doc:${doc.key}`, () => null);
   }
   addRegenButton(doc);
+  // if a background job is mid-flight for this task, resume watching + auto-load
+  if (missing) {
+    try { const s = await api(`/task/${bucket}/${taskId}/docstatus`); if (s.state === 'running' || s.state === 'pending') watchDoc(doc); } catch { /* ignore */ }
+  }
 }
 
 function addRegenButton(doc) {
@@ -268,27 +274,35 @@ function addRegenButton(doc) {
   head.append(
     el('button', {
       class: 'regen',
-      onclick: async (ev) => {
-        const btn = ev.currentTarget;
-        btn.disabled = true;
-        const progress = el('div', { class: 'tool-line' }, 'starting…');
-        viewerBody.prepend(progress);
-        try {
-          await apiSSE(`/task/${bucket}/${taskId}/docgen/${doc.key}`, {}, (m) => {
-            if (m.type === 'tool') progress.textContent = `⚙ ${m.name} ${JSON.stringify(m.args)}`;
-            if (m.type === 'error') progress.textContent = `error: ${m.message}`;
-            if (m.type === 'done') {
-              openDoc(doc, activeNav, { refresh: true });
-              buildSidebar();
-            }
-          });
-        } catch (e) {
-          progress.textContent = `error: ${e.message}`;
-        }
-        btn.disabled = false;
+      onclick: async () => {
+        await api(`/task/${bucket}/${taskId}/docgen/${doc.key}`, { method: 'POST' });
+        watchDoc(doc); // background job; poll + auto-reload, survives navigation
       },
     }, `Generate ${doc.key}.md`)
   );
+}
+
+// Poll the server-side job for this task; reload the doc when it lands. Safe to
+// stop (navigating away) — the job keeps running on the server regardless.
+let docWatch = null;
+async function watchDoc(doc) {
+  clearInterval(docWatch);
+  const banner = el('div', { class: 'gen-banner' }, 'Generating… this runs in the background — you can switch tasks or close this and come back.');
+  viewerBody.prepend(banner);
+  const tick = async () => {
+    let s;
+    try { s = await api(`/task/${bucket}/${taskId}/docstatus`); } catch { return; }
+    if (s.state === 'running' || s.state === 'pending') {
+      banner.textContent = s.current ? `Generating ${s.current}.md… (background — feel free to navigate away)` : 'Queued… (background)';
+      return;
+    }
+    clearInterval(docWatch); docWatch = null;
+    if (s.state === 'error') { banner.textContent = `Generation failed: ${s.error}`; banner.classList.add('error-line'); return; }
+    openDoc(doc, findDocNav(doc.label === 'Review' ? 'Review' : 'Remediation'), { refresh: true });
+    buildSidebar();
+  };
+  await tick();
+  docWatch = setInterval(tick, 3000);
 }
 
 // ---------- task definition / milestones ----------
