@@ -141,6 +141,12 @@ ranking_proof justification vs rank.json consistency.
 
 ## Informational
 Idle time, missing task definition, and other non-finding observations. One bullet each.
+
+CLEAN-PASS SHORTCUT (saves reviewer time): if the task is a clean PASS — no HARD/SOFT on any
+layer and the rank-driving claim is confirmed against the trajectory — keep the review LIGHT.
+Output: autoqc NONE, a one-sentence Verdict, the At a glance table, and a single Findings line
+"No findings — rank-driving claim read-confirmed. Flag to admin for a more detailed review if
+anything looks off." Do not pad with INFO blocks or invent findings.
 `.trim();
 
 const REMEDIATION_PROMPT = `
@@ -211,6 +217,10 @@ dedicated Checklist tab, so a duplicate checklist here is redundant.)
 ## Escalate instead if
 Bullet conditions under which remediation is wrong (byte-identical unremediated resubmission,
 vendor stub, fabrication pattern across tasks) and who to escalate to.
+
+CLEAN-PASS SHORTCUT: if the task is a clean PASS, the whole remediation is just — alerts NONE,
+one line "No fixes required — clean PASS. Flag to admin for a more detailed review if deeper
+verification is wanted.", then the "## Escalate instead if" section. No Fix list.
 `.trim();
 
 export async function generateDoc(bucket, id, which, onEvent, onUsage) {
