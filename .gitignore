@@ -4,3 +4,6 @@ workspace/
 data/
 .DS_Store
 *.log
+# fill_rank.py / pull_l10.py runtime output (pulled tasks are staged + ingested, not committed)
+tools/get_tasks/ranks/
+tools/get_tasks/_staging/

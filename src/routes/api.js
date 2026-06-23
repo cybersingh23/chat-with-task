@@ -16,6 +16,8 @@ import { generateDoc, taskContext, CITATION_RULES } from '../docgen.js';
 import { QUALITY_CANON, getRubric, saveRubricCsv } from '../spec.js';
 import { recordUsage, readUsage, usageCsv } from '../usage.js';
 import { enqueueDocs, jobSummary, statusFor } from '../jobs.js';
+import { startPull, pullStatus } from '../l10.js';
+import { getSchedule } from '../scheduler.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '2mb' }));
@@ -149,6 +151,17 @@ api.delete('/task/:bucket/:id', requireAdmin, wrap(async (req, res) => {
 api.post('/admin/clear', requireAdmin, wrap(async (req, res) => {
   res.json({ cleared: clearWorkspace() });
 }));
+
+// --- L10 pull: fetch every task at the review level into UNSORTED ---
+// Fire-and-forget (the pull downloads trajectories and can run for minutes); the
+// admin UI polls /admin/pull-l10/status. Also runs on a daily schedule.
+api.post('/admin/pull-l10', requireAdmin, wrap(async (req, res) =>
+  res.json(startPull({ trigger: 'manual', user: req.user.username }))
+));
+
+api.get('/admin/pull-l10/status', requireAdmin, wrap(async (req, res) =>
+  res.json({ ...pullStatus(), schedule: getSchedule() })
+));
 
 // --- doc generation (SSE so the UI can show tool activity live) ---
 // Doc generation runs as a background job (survives the client navigating away).

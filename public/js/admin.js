@@ -18,8 +18,59 @@ async function boot() {
   if (me.role !== 'admin') { location.href = '/'; return; }
   document.getElementById('user-chip').hidden = false;
   document.getElementById('user-name').textContent = me.username;
+  initL10();
   await load();
 }
+
+// --- L10 daily pull control ---
+let l10Polling = null;
+
+function initL10() {
+  document.getElementById('pull-l10-btn').addEventListener('click', async () => {
+    const r = await api('/admin/pull-l10', { method: 'POST' });
+    if (!r.started && r.running) setL10Text('Already running…');
+    pollL10();
+  });
+  pollL10();
+}
+
+async function pollL10() {
+  const s = await api('/admin/pull-l10/status');
+  renderL10(s);
+  clearTimeout(l10Polling);
+  // poll fast while a pull is in flight, slowly otherwise (just to refresh next-run)
+  l10Polling = setTimeout(pollL10, s.running ? 3000 : 60000);
+}
+
+function renderL10(s) {
+  const btn = document.getElementById('pull-l10-btn');
+  btn.disabled = s.running;
+  btn.textContent = s.running ? 'Pulling…' : 'Pull L10 now';
+
+  const sched = s.schedule || {};
+  const next = sched.enabled
+    ? `next auto-run ${fmtTime(sched.nextRun)}Z (daily ${sched.hour}:${String(sched.minute).padStart(2, '0')} ${sched.tz})`
+    : 'daily schedule disabled';
+  setL10Text(s.running ? 'Pulling L10 tasks…' : next);
+
+  const r = s.lastRun;
+  const detail = document.getElementById('pull-l10-detail');
+  if (!r) { detail.textContent = ''; return; }
+  if (r.error || r.ok === false) {
+    const head = r.error ? `last run FAILED: ${r.error}` : `last run finished with issues`;
+    detail.textContent = `${head}${r.errors?.length ? `\n• ${r.errors.join('\n• ')}` : ''}\nat ${fmtTime(r.finishedAt)}Z (${r.trigger})`;
+    return;
+  }
+  const parts = [
+    `last run (${r.trigger}) ${fmtTime(r.finishedAt)}Z:`,
+    `L10 had ${r.inL10} task(s) · ingested ${r.ingested} new · ${r.skippedExisting} already on board`,
+  ];
+  if (r.partial?.length) parts.push(`partial trajectories: ${r.partial.length} (${r.partial.map((x) => x.slice(0, 8)).join(', ')})`);
+  if (r.errors?.length) parts.push(`issues:\n• ${r.errors.join('\n• ')}`);
+  detail.textContent = parts.join('\n');
+}
+
+function setL10Text(t) { document.getElementById('pull-l10-status').textContent = t; }
 
 async function load() {
   const data = await api('/admin/usage?limit=2000');

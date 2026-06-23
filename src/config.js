@@ -37,4 +37,15 @@ export const config = {
     apiKey: process.env.LITELLM_API_KEY,
     model: process.env.LITELLM_MODEL || 'claude-opus-4-6',
   },
+  // Daily pull of every task at a review level (default L10) into UNSORTED.
+  // Needs REDASH_API_KEY in the environment (read by tools/get_tasks/pull_l10.py).
+  l10: {
+    enabled: process.env.L10_PULL_ENABLED !== 'false',
+    tz: process.env.L10_PULL_TZ || 'America/Los_Angeles',
+    hour: Number(process.env.L10_PULL_HOUR ?? 18),
+    minute: Number(process.env.L10_PULL_MINUTE ?? 0),
+    reviewLevel: Number(process.env.L10_REVIEW_LEVEL ?? 10),
+    status: process.env.L10_STATUS || 'pending',
+    limit: Number(process.env.L10_PULL_LIMIT ?? 0), // 0 = no cap
+  },
 };

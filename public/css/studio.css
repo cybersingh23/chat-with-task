@@ -901,3 +901,12 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 5px; border: 3px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); background-clip: content-box; border: 3px solid transparent; }
+
+/* L10 daily-pull panel (admin Activity page) */
+.l10-panel { padding: 14px 16px; margin-bottom: 22px; border-radius: 12px; }
+.l10-row { display: flex; align-items: center; gap: 14px; }
+.l10-row button { height: 34px; padding: 0 16px; }
+.l10-row button:disabled { opacity: 0.55; cursor: default; }
+.l10-status { font-size: 12px; color: var(--text-3); }
+.l10-detail { white-space: pre-wrap; font-size: 11px; color: var(--text-3); margin-top: 10px; line-height: 1.5; }
+.l10-detail:empty { display: none; }
