@@ -51,10 +51,18 @@ the background (single-flight); the page polls `GET /api/admin/pull-l10/status` 
 **download zip** link when ready (`GET /api/admin/pull-l10/download`). The zip's folder shape
 matches the upload flow, so it can be re-uploaded or fed to an eval directly.
 
-Requires `REDASH_API_KEY` in the VM's `.env` (a Redash **user** api key with data-source access —
-not a query-scoped key) and Python 3.10+. `fill_rank.py` / `latest_response.sql` are vendored
-**verbatim** — `pull_l10.py` only depends on `fill_rank.py`'s CLI, never its internals. No
-schedule: button-triggered only.
+Requires `REDASH_API_KEY` in the VM's `.env` and Python 3.10+. Both queries run as **published,
+parameterized Redash queries** (`POST /api/queries/<id>/results`), which need only **view-only**
+data-source access — so a key without ad-hoc-query permission works:
+
+- **Per-task fetch** — `fill_rank.py` uses `REDASH_QUERY_ID` (default `324062`). Works out of the
+  box, so **Pull these ids** is ready with any view-only key.
+- **L10 list** — set `L10_QUERY_ID` to a published query taking `project_id` / `review_level` /
+  `status`. Until it's set, **Pull L10** falls back to ad-hoc SQL (`l10_task_ids.sql`), which needs
+  ad-hoc-query permission.
+
+`fill_rank.py` is vendored **verbatim** — `pull_l10.py` only depends on its CLI. No schedule:
+button-triggered only.
 
 ## Delivering tasks (soft-archive + backup)
 

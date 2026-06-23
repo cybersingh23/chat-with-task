@@ -43,6 +43,12 @@ REDASH_BASE_URL = os.environ.get("REDASH_BASE_URL", "https://redash.scale.com").
 PROJECT_ID = os.environ.get("L10_PROJECT_ID", "69979ab5a4b6d80af7b7d1c8")
 REDASH_DATA_SOURCE_ID = int(os.environ.get("REDASH_DATA_SOURCE_ID", "30"))
 REDASH_API_KEY = os.environ.get("REDASH_API_KEY")
+# Published, parameterized Redash query (params: project_id, review_level, status) that
+# returns the L10 task-id list. Running a saved query needs only VIEW access to the data
+# source, so a key without ad-hoc-query permission still works (same approach fill_rank.py
+# uses for the per-task fetch). 0 = fall back to ad-hoc SQL from l10_task_ids.sql (needs
+# ad-hoc permission). Set L10_QUERY_ID once the query is published in Redash.
+REDASH_QUERY_ID = int(os.environ.get("L10_QUERY_ID", "0"))
 
 POLL_INTERVAL_SECONDS = 2.0
 POLL_TIMEOUT_SECONDS = 120.0
@@ -92,12 +98,8 @@ def _poll_job(job_id: str) -> int:
     raise TimeoutError(f"Redash job {job_id} did not finish within {POLL_TIMEOUT_SECONDS:.0f}s")
 
 
-def _run_adhoc_sql(sql: str) -> list[dict]:
-    payload = _redash_request(
-        "/api/query_results",
-        method="POST",
-        body={"query": sql, "data_source_id": REDASH_DATA_SOURCE_ID, "max_age": 0},
-    )
+def _rows_from_payload(payload: dict) -> list[dict]:
+    """Resolve a /api/query_results-style response (job-or-result) into its rows."""
     if "query_result" in payload:
         query_result = payload["query_result"]
     else:
@@ -111,13 +113,31 @@ def _run_adhoc_sql(sql: str) -> list[dict]:
 
 
 def fetch_task_ids(review_level: int, status: str, project: str) -> list[str]:
-    sql = SQL_PATH.read_text(encoding="utf-8")
-    sql = (
-        sql.replace("{{project_id}}", project)
-        .replace("{{review_level}}", str(int(review_level)))
-        .replace("{{status}}", status)
-    )
-    rows = _run_adhoc_sql(sql)
+    if REDASH_QUERY_ID:
+        # Published query: needs only view access (works for keys without ad-hoc rights).
+        payload = _redash_request(
+            f"/api/queries/{REDASH_QUERY_ID}/results",
+            method="POST",
+            body={
+                "id": REDASH_QUERY_ID,
+                "parameters": {"project_id": project, "review_level": review_level, "status": status},
+                "max_age": 0,
+            },
+        )
+    else:
+        # Ad-hoc SQL fallback (needs ad-hoc-query permission on the data source).
+        sql = SQL_PATH.read_text(encoding="utf-8")
+        sql = (
+            sql.replace("{{project_id}}", project)
+            .replace("{{review_level}}", str(int(review_level)))
+            .replace("{{status}}", status)
+        )
+        payload = _redash_request(
+            "/api/query_results",
+            method="POST",
+            body={"query": sql, "data_source_id": REDASH_DATA_SOURCE_ID, "max_age": 0},
+        )
+    rows = _rows_from_payload(payload)
     ids, seen = [], set()
     for row in rows:
         tid = str(row.get("task_id") or "").strip()

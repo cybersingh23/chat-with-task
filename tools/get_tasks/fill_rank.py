@@ -4,8 +4,11 @@
 Pulls a task's latest RESPONSE:before blob from Redash, downloads both model trajectories,
 and extracts the task metadata, real model names, trajectory + container-snapshot CDS urls,
 per-model grading, all failure-mode ratings, the numeric preference rating, and rationales.
-Writes one rank.json per task folder under ranks/<task_id>/. Self-contained: the only
-external input is latest_response.sql alongside this script.
+Writes one rank.json per task folder under ranks/<task_id>/.
+
+Fetching uses a published, parameterized Redash query (REDASH_QUERY_ID) rather than ad-hoc
+SQL, so anyone with their own REDASH_API_KEY and at least view-only access to the data source
+can run it.
 
 Usage:
     REDASH_API_KEY=... python3 fill_rank.py <task_id | task-NNN-... | NNN> [...]
@@ -26,7 +29,6 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent
 OUT_DIR = REPO_ROOT / "ranks"
 REVIEWS_DIR = REPO_ROOT / "reviews"
-SQL_PATH = REPO_ROOT / "latest_response.sql"
 TASK_PATTERN = re.compile(r"^task-(\d+)-")
 
 # Optional fallback batch (used only when no task ids are passed on the command line).
@@ -39,9 +41,13 @@ TASK_IDS: list[str] = []
 REDASH_BASE_URL = "https://redash.scale.com"
 PROJECT_ID = "69979ab5a4b6d80af7b7d1c8"
 REDASH_API_KEY = os.environ.get("REDASH_API_KEY")
-# Snowflake data source backing the ad-hoc query in latest_response.sql, which returns the
-# rubric fields AND the raw RESPONSE:before blob in a single row.
+# Snowflake data source returning the rubric fields AND the raw RESPONSE:before blob.
 REDASH_DATA_SOURCE_ID = int(os.environ.get("REDASH_DATA_SOURCE_ID", "30"))
+# Published, parameterized Redash query (params: project_id, task_id) backing the fetch.
+# Running an existing saved query needs only view-only access to the data source, so users
+# without ad-hoc-query permission can still run this script with their own REDASH_API_KEY.
+# Override the id via the REDASH_QUERY_ID env var if it ever changes.
+REDASH_QUERY_ID = int(os.environ.get("REDASH_QUERY_ID", "324062"))
 
 POLL_INTERVAL_SECONDS = 2.0
 POLL_TIMEOUT_SECONDS = 120.0
@@ -93,17 +99,11 @@ def _poll_job(job_id: str) -> int:
     raise TimeoutError(f"Redash job {job_id} did not finish within {POLL_TIMEOUT_SECONDS:.0f}s")
 
 
-def _run_adhoc_sql(sql: str) -> list[dict[str, Any]]:
-    """Run an ad-hoc Snowflake query via Redash, poll if needed, return its rows.
+def _rows_from_payload(payload: dict) -> list[dict[str, Any]]:
+    """Resolve a /api/query_results response (job-or-result) into its rows.
 
     Keys are lowercased (Snowflake uppercases unquoted aliases).
     """
-    payload = _redash_request(
-        "/api/query_results",
-        method="POST",
-        body={"query": sql, "data_source_id": REDASH_DATA_SOURCE_ID, "max_age": 0},
-    )
-
     if "query_result" in payload:
         query_result = payload["query_result"]
     else:
@@ -120,10 +120,22 @@ def _run_adhoc_sql(sql: str) -> list[dict[str, Any]]:
 
 
 def fetch_from_redash(task_id: str) -> dict[str, Any]:
-    """Run latest_response.sql for one task, returning the single matching row."""
-    sql = SQL_PATH.read_text(encoding="utf-8")
-    sql = sql.replace("{{project_id}}", PROJECT_ID).replace("{{task_id}}", task_id)
-    rows = _run_adhoc_sql(sql)
+    """Execute the published parameterized query for one task; return the single row."""
+    if not REDASH_QUERY_ID:
+        raise RuntimeError(
+            "REDASH_QUERY_ID is not set. Set the published query id as the default in "
+            "fill_rank.py, or export REDASH_QUERY_ID."
+        )
+    payload = _redash_request(
+        f"/api/queries/{REDASH_QUERY_ID}/results",
+        method="POST",
+        body={
+            "id": REDASH_QUERY_ID,
+            "parameters": {"project_id": PROJECT_ID, "task_id": task_id},
+            "max_age": 0,
+        },
+    )
+    rows = _rows_from_payload(payload)
     if not rows:
         raise RuntimeError(
             f"No annotation found in Redash for task_id={task_id} (project_id={PROJECT_ID})"
