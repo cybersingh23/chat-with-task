@@ -86,7 +86,6 @@ function renderDeliver(r, kind, quiet) {
 let l10Polling = null;
 
 function initL10() {
-  document.getElementById('pull-l10-btn').addEventListener('click', () => triggerPull({ mode: 'l10' }));
   document.getElementById('pull-ids-btn').addEventListener('click', () => {
     const raw = document.getElementById('pull-ids-input').value.trim();
     const taskIds = raw.split(/[,\s]+/).filter(Boolean);
@@ -110,8 +109,9 @@ async function pollL10() {
 }
 
 function renderL10(s) {
-  for (const id of ['pull-l10-btn', 'pull-ids-btn']) document.getElementById(id).disabled = s.running;
-  document.getElementById('pull-l10-btn').textContent = s.running ? 'Pulling…' : 'Pull L10';
+  const btn = document.getElementById('pull-ids-btn');
+  btn.disabled = s.running;
+  btn.textContent = s.running ? 'Pulling…' : 'Pull Task by ID';
 
   const r = s.lastRun;
   const dl = document.getElementById('pull-l10-download');
@@ -119,7 +119,7 @@ function renderL10(s) {
   if (r && r.zipName) dl.href = '/api/admin/pull-l10/download';
 
   if (s.running) setL10Text('Pulling tasks from Redash…');
-  else if (!r) setL10Text('Pull L10, or paste specific task ids.');
+  else if (!r) setL10Text('Paste task ids to pull.');
   else setL10Text(`done ${fmtTime(r.finishedAt)}Z`);
 
   const detail = document.getElementById('pull-l10-detail');

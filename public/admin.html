@@ -25,15 +25,14 @@
 
     <h2 class="admin-h2">Pull tasks from Redash</h2>
     <div class="l10-panel glass">
-      <div class="l10-row">
-        <button id="pull-l10-btn">Pull L10</button>
-        <span class="l10-status" id="pull-l10-status">…</span>
-        <a class="l10-download" id="pull-l10-download" hidden>⬇ download zip</a>
-      </div>
       <div class="l10-row l10-ids-row">
         <input type="text" id="pull-ids-input" class="mono"
-               placeholder="or paste task ids (24-hex, comma/space separated)" spellcheck="false" />
-        <button id="pull-ids-btn">Pull these ids</button>
+               placeholder="task ids to pull (24-hex, comma/space separated)" spellcheck="false" />
+        <button id="pull-ids-btn">Pull Task by ID</button>
+      </div>
+      <div class="l10-row">
+        <span class="l10-status" id="pull-l10-status">…</span>
+        <a class="l10-download" id="pull-l10-download" hidden>⬇ download zip</a>
       </div>
       <div class="l10-detail mono" id="pull-l10-detail"></div>
     </div>

@@ -38,13 +38,14 @@ message in the built-in trajectory viewer.
 ## Pull tasks from Redash
 
 Admins can pull tasks straight from Redash and **download them as a zip** — nothing is ingested
-into the board, so existing buckets are never touched. On the Admin Console page (`/admin.html`):
+into the board, so existing buckets are never touched. On the Admin Console page (`/admin.html`),
+**Pull Task by ID**: paste a list of 24-hex task ids (comma/space separated) and pull them.
 
-- **Pull L10** — runs `tools/get_tasks/l10_task_ids.sql` (every task at `L10_REVIEW_LEVEL` with
-  the unpaused `L10_STATUS`).
-- **Pull these ids** — paste a list of 24-hex task ids instead (skips the query).
+(Pulling a whole review layer is still supported in the backend — `pull_l10.py` with no
+`--task-ids` runs `tools/get_tasks/l10_task_ids.sql` for every task at `L10_REVIEW_LEVEL` with the
+unpaused `L10_STATUS` — but it isn't surfaced as a button; the ID list is supplied externally.)
 
-Either way, `tools/get_tasks/pull_l10.py` shells the vendored `fill_rank.py` to build each
+`tools/get_tasks/pull_l10.py` shells the vendored `fill_rank.py` to build each
 `rank.json` + both trajectories, reshapes them into `<task_id>/rank.json` +
 `<task_id>/trajectories/trajectory_model_{a,b}.json`, and the server zips them. The pull runs in
 the background (single-flight); the page polls `GET /api/admin/pull-l10/status` and shows a
