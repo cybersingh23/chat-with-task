@@ -38,7 +38,7 @@ message in the built-in trajectory viewer.
 ## Pull tasks from Redash
 
 Admins can pull tasks straight from Redash and **download them as a zip** — nothing is ingested
-into the board, so existing buckets are never touched. On the Activity page (`/admin.html`):
+into the board, so existing buckets are never touched. On the Admin Console page (`/admin.html`):
 
 - **Pull L10** — runs `tools/get_tasks/l10_task_ids.sql` (every task at `L10_REVIEW_LEVEL` with
   the unpaused `L10_STATUS`).
@@ -66,7 +66,7 @@ button-triggered only.
 
 ## Delivering tasks (soft-archive + backup)
 
-On the Activity page, admins can paste task ids and **Mark delivered**. Delivered tasks are
+On the Admin Console page, admins can paste task ids and **Mark delivered**. Delivered tasks are
 *soft-archived*: their `_studio.json` gets a `delivered` flag, so they drop off the board
 (hidden for everyone) but stay on disk — **Restore** clears the flag and they reappear. The
 board shows a **Show delivered (N)** toggle when any are hidden.

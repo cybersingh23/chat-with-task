@@ -920,7 +920,7 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 5px; border: 3px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); background-clip: content-box; border: 3px solid transparent; }
 
-/* Redash pull panel (admin Activity page) */
+/* Redash pull panel (Admin Console page) */
 .l10-panel { padding: 14px 16px; margin-bottom: 22px; border-radius: 12px; }
 .l10-hint { font-size: 12px; color: var(--text-3); margin-bottom: 12px; line-height: 1.5; }
 .l10-row { display: flex; align-items: center; gap: 14px; }
