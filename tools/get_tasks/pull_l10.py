@@ -151,15 +151,22 @@ def fetch_task_ids(review_level: int, status: str, project: str) -> list[str]:
 # fill_rank.py invocation + reshape into the app's task-folder layout
 # ---------------------------------------------------------------------------
 
-def run_fill_rank(task_ids: list[str]) -> None:
-    """Shell the vendored fill_rank.py (stable CLI) to write ranks/<id>/ folders."""
+def run_fill_rank(task_ids: list[str]) -> str:
+    """Shell the vendored fill_rank.py (same interpreter) to write ranks/<id>/ folders.
+
+    Returns fill_rank's combined stdout+stderr so the caller can surface the real
+    reason a task didn't produce a rank.json (e.g. 'No annotation found', a crash).
+    """
     if not task_ids:
-        return
-    subprocess.run(
+        return ""
+    proc = subprocess.run(
         [sys.executable, str(FILL_RANK), *task_ids],
         cwd=str(SCRIPT_DIR),
         check=False,  # fill_rank exits non-zero on partial pulls; we judge per-task below
+        capture_output=True,
+        text=True,
     )
+    return (proc.stdout or "") + (proc.stderr or "")
 
 
 def _nonempty(p: Path) -> bool:
@@ -220,6 +227,17 @@ def main(argv: list[str]) -> int:
         print(json.dumps(manifest))
         return 2
 
+    # fill_rank.py (run with this same interpreter) uses 3.10+ syntax — bail with a clear
+    # message rather than letting it crash into the generic "no rank.json from fill_rank".
+    if sys.version_info < (3, 10):
+        v = ".".join(map(str, sys.version_info[:3]))
+        manifest["errors"].append(
+            f"Python {v} is too old — fill_rank.py needs 3.10+. Re-run pull_l10.py with "
+            "python3.10+ (e.g. /opt/homebrew/bin/python3.12), or set PYTHON_BIN for the app."
+        )
+        print(json.dumps(manifest))
+        return 2
+
     if mode == "ids":
         ids, bad = [], []
         for t in explicit:
@@ -245,12 +263,18 @@ def main(argv: list[str]) -> int:
     label = (f"explicit list: {len(ids)} task(s)" if mode == "ids"
              else f"L10 pull: {len(ids)} task(s) at review_level={args.review_level} status={args.status}")
     print(label, file=sys.stderr)
-    run_fill_rank(ids)
+    fill_output = run_fill_rank(ids)
     for tid in ids:
         try:
             manifest["staged"].append(stage_task(tid, out_dir))
         except Exception as e:  # noqa: BLE001
             manifest["errors"].append(f"{tid}: stage failed: {type(e).__name__}: {e}")
+
+    # If anything failed to stage, attach fill_rank's own output so the real reason
+    # (e.g. "No annotation found", a crash) is visible instead of just "no rank.json".
+    if any(not s.get("staged") for s in manifest["staged"]) and fill_output.strip():
+        tail = [ln for ln in fill_output.strip().splitlines() if ln.strip()][-8:]
+        manifest["errors"].append("fill_rank.py output (tail):\n" + "\n".join(tail))
 
     print(json.dumps(manifest))
     return 0
