@@ -820,27 +820,36 @@ function buildSideBySide(A, B) {
   );
 }
 
-// Greedy prompt alignment with small lookahead — pairs matching user prompts,
-// emits one-sided rows for extra turns.
+// Align A and B by their user prompts via an LCS over prompt similarity. A row is
+// an "anchor" (shared step) ONLY when the two prompts genuinely match; every
+// unmatched prompt stays one-sided. We never pair non-matching prompts — doing so
+// (the previous greedy fallback) fabricated shared steps that exist on only one
+// side, which is what made the side-by-side view misleading.
 function alignPrompts(A, B) {
-  const sim = (ga, gb) => (ga?.user && gb?.user) ? score(tokenize(userText(ga.user)), tokenize(userText(gb.user))) : 0;
-  const T = 0.5, LOOK = 3;
+  const T = 0.5;
+  const tok = (groups) => groups.map((g) => (g?.user ? tokenize(userText(g.user)) : null));
+  const ta = tok(A), tb = tok(B);
+  // Symmetric overlap so a long prompt vs its shorter paraphrase still matches.
+  const match = (i, j) => !!ta[i] && !!tb[j] && Math.max(score(ta[i], tb[j]), score(tb[j], ta[i])) >= T;
+
+  const n = A.length, m = B.length;
+  // Suffix-form LCS length table, so reconstruction walks left→right in order.
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = match(i, j) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
   const rows = [];
   let i = 0, j = 0;
-  while (i < A.length || j < B.length) {
-    if (i < A.length && j < B.length && sim(A[i], B[j]) >= T) {
-      rows.push({ type: 'anchor', a: A[i], b: B[j] }); i++; j++; continue;
-    }
-    let mB = -1;
-    for (let k = j + 1; k < Math.min(B.length, j + 1 + LOOK); k++) if (i < A.length && sim(A[i], B[k]) >= T) { mB = k; break; }
-    let mA = -1;
-    for (let k = i + 1; k < Math.min(A.length, i + 1 + LOOK); k++) if (j < B.length && sim(A[k], B[j]) >= T) { mA = k; break; }
-    if (j < B.length && mB !== -1 && (mA === -1 || (mB - j) <= (mA - i))) { rows.push({ type: 'one', b: B[j] }); j++; }
-    else if (i < A.length && mA !== -1) { rows.push({ type: 'one', a: A[i] }); i++; }
-    else if (i < A.length && j < B.length) { rows.push({ type: 'anchor', a: A[i], b: B[j] }); i++; j++; } // divergent but pair anyway
-    else if (i < A.length) { rows.push({ type: 'one', a: A[i] }); i++; }
+  while (i < n && j < m) {
+    if (match(i, j)) { rows.push({ type: 'anchor', a: A[i], b: B[j] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { rows.push({ type: 'one', a: A[i] }); i++; }
     else { rows.push({ type: 'one', b: B[j] }); j++; }
   }
+  while (i < n) rows.push({ type: 'one', a: A[i++] });
+  while (j < m) rows.push({ type: 'one', b: B[j++] });
   return rows;
 }
 

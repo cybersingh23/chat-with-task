@@ -148,6 +148,18 @@ select option { background: #14161c; }
 .login-card input { width: 100%; margin-bottom: 12px; padding: 10px 14px; }
 .login-card button { width: 100%; padding: 10px; font-size: 14px; margin-top: 4px; }
 .login-error { color: var(--red); font-size: 12.5px; min-height: 18px; margin-top: 14px; }
+.pw-wrap { position: relative; margin-bottom: 12px; }
+.login-card .pw-wrap input { margin-bottom: 0; padding-right: 44px; }
+.login-card .pw-toggle {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 34px; height: 34px; margin: 0; padding: 0;
+  display: grid; place-items: center;
+  background: none; border: none; color: var(--text-3); cursor: pointer;
+}
+.login-card .pw-toggle:hover { color: var(--text); }
+.pw-toggle .off { display: none; }
+.pw-toggle.revealed .on { display: none; }
+.pw-toggle.revealed .off { display: block; }
 
 /* ── index page ─────────────────────────────────────────────────────────── */
 .index-main { max-width: 1400px; margin: 0 auto; padding: 32px 32px 64px; }
