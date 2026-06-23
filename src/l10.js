@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,7 +13,19 @@ import { ensureWorkspace } from './workspace.js';
 
 const execFileP = promisify(execFile);
 const PULL_SCRIPT = path.join(config.projectRoot, 'tools', 'get_tasks', 'pull_l10.py');
-const PYTHON = process.env.PYTHON_BIN || 'python3';
+
+// fill_rank.py needs Python 3.10+. Honor PYTHON_BIN if set; otherwise auto-pick a
+// versioned 3.10+ interpreter on PATH so no config is needed when one exists. Falls
+// back to python3 (pull_l10.py reports clearly if that turns out to be too old).
+function resolvePython() {
+  if (process.env.PYTHON_BIN) return process.env.PYTHON_BIN;
+  for (const cand of ['python3.13', 'python3.12', 'python3.11', 'python3.10']) {
+    try { execFileSync(cand, ['--version'], { stdio: 'ignore' }); return cand; }
+    catch { /* not on PATH — try the next */ }
+  }
+  return 'python3';
+}
+const PYTHON = resolvePython();
 // Persistent (workspace is a mounted volume) but outside the bucket dirs, so
 // listWorkspace() never sees it. Holds the most recent pull's zip.
 const DOWNLOAD_DIR = path.join(config.workspaceRoot, '_l10_downloads');
