@@ -19,7 +19,67 @@ async function boot() {
   document.getElementById('user-chip').hidden = false;
   document.getElementById('user-name').textContent = me.username;
   initL10();
+  initDeliver();
   await load();
+}
+
+// --- Deliver tasks (soft-archive + backup zip) ---
+function initDeliver() {
+  document.getElementById('deliver-btn').addEventListener('click', () => runDeliver('/admin/deliver'));
+  document.getElementById('undeliver-btn').addEventListener('click', () => runDeliver('/admin/undeliver'));
+  refreshDeliver();
+}
+
+function deliverIds() {
+  return document.getElementById('deliver-input').value.trim().split(/[,\s]+/).filter(Boolean);
+}
+
+async function runDeliver(endpoint) {
+  const taskIds = deliverIds();
+  const status = document.getElementById('deliver-status');
+  if (!taskIds.length) { status.textContent = 'Paste at least one task id.'; return; }
+  status.textContent = endpoint.endsWith('undeliver') ? 'Restoring…' : 'Delivering + building backup…';
+  for (const id of ['deliver-btn', 'undeliver-btn']) document.getElementById(id).disabled = true;
+  try {
+    const r = await api(endpoint, { method: 'POST', body: { taskIds } });
+    renderDeliver(r, endpoint.endsWith('undeliver') ? 'restore' : 'deliver');
+  } catch (e) {
+    status.textContent = e.message;
+  } finally {
+    for (const id of ['deliver-btn', 'undeliver-btn']) document.getElementById(id).disabled = false;
+  }
+}
+
+// On page load, surface the most recent backup (if the server still has one).
+async function refreshDeliver() {
+  try {
+    const s = await api('/admin/deliver/status');
+    if (s.lastDelivery) renderDeliver(s.lastDelivery, 'deliver', true);
+  } catch { /* none yet */ }
+}
+
+function renderDeliver(r, kind, quiet) {
+  const status = document.getElementById('deliver-status');
+  const dl = document.getElementById('deliver-download');
+  const detail = document.getElementById('deliver-detail');
+
+  if (kind === 'restore') {
+    status.textContent = `restored ${r.restored} task(s) to the board`;
+    detail.textContent = [
+      r.restoredIds?.length ? `restored: ${r.restoredIds.map((x) => x.slice(0, 8)).join(', ')}` : '',
+      r.notFound?.length ? `not found: ${r.notFound.join(', ')}` : '',
+    ].filter(Boolean).join('\n');
+    return;
+  }
+  dl.hidden = !r.zipName;
+  if (r.zipName) dl.href = '/api/admin/deliver/download';
+  status.textContent = quiet
+    ? `last backup ready${r.finishedAt ? ' · ' + fmtTime(r.finishedAt) + 'Z' : ''}`
+    : `delivered ${r.delivered} task(s)${r.zipBytes ? ' · backup ' + fmtBytes(r.zipBytes) : ''}`;
+  detail.textContent = [
+    r.deliveredIds?.length ? `delivered: ${r.deliveredIds.map((x) => x.slice(0, 8)).join(', ')}` : '',
+    r.notFound?.length ? `not found (skipped): ${r.notFound.join(', ')}` : '',
+  ].filter(Boolean).join('\n');
 }
 
 // --- Pull tasks from Redash (L10 or an explicit id list) ---

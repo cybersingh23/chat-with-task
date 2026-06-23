@@ -72,9 +72,13 @@ export function taskMeta(bucket, id) {
     const state = JSON.parse(fs.readFileSync(path.join(dir, '_studio.json'), 'utf8'));
     meta.claimedBy = state.claimed_by || null;
     meta.verdict = state.verdict || null;
+    meta.delivered = !!state.delivered;
+    meta.deliveredAt = state.delivered_at || null;
   } catch {
     meta.claimedBy = null;
     meta.verdict = null;
+    meta.delivered = false;
+    meta.deliveredAt = null;
   }
   return meta;
 }

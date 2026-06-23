@@ -38,6 +38,22 @@
       <div class="l10-detail mono" id="pull-l10-detail"></div>
     </div>
 
+    <h2 class="admin-h2">Deliver tasks</h2>
+    <div class="l10-panel glass">
+      <div class="l10-hint">Mark tasks delivered — they're hidden from the board (kept on disk, reversible) and bundled into a backup zip that restores the feed if re-uploaded.</div>
+      <div class="l10-row l10-ids-row">
+        <input type="text" id="deliver-input" class="mono"
+               placeholder="task ids to deliver (24-hex, comma/space separated)" spellcheck="false" />
+        <button id="deliver-btn">Mark delivered</button>
+        <button id="undeliver-btn" class="quiet">Restore</button>
+      </div>
+      <div class="l10-row">
+        <span class="l10-status" id="deliver-status">…</span>
+        <a class="l10-download" id="deliver-download" hidden>⬇ download backup zip</a>
+      </div>
+      <div class="l10-detail mono" id="deliver-detail"></div>
+    </div>
+
     <h2 class="admin-h2">By user</h2>
     <div class="admin-table-wrap"><table class="admin-table" id="user-table"></table></div>
 

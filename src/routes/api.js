@@ -17,6 +17,7 @@ import { QUALITY_CANON, getRubric, saveRubricCsv } from '../spec.js';
 import { recordUsage, readUsage, usageCsv } from '../usage.js';
 import { enqueueDocs, jobSummary, statusFor } from '../jobs.js';
 import { startPull, pullStatus, currentDownload } from '../l10.js';
+import { markDelivered, markUndelivered, deliverStatus, currentBackup } from '../deliver.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '2mb' }));
@@ -168,6 +169,30 @@ api.get('/admin/pull-l10/download', requireAdmin, wrap(async (req, res) => {
   const dl = currentDownload();
   if (!dl) return res.status(404).json({ error: 'no pull available to download yet' });
   res.download(dl.abs, dl.name);
+}));
+
+// --- deliver: soft-archive tasks (hide from board) + build a restorable backup ---
+const taskIdList = (body) => (Array.isArray(body?.taskIds) ? body.taskIds : [])
+  .map((s) => String(s).trim()).filter(Boolean);
+
+api.post('/admin/deliver', requireAdmin, wrap(async (req, res) => {
+  const ids = taskIdList(req.body);
+  if (!ids.length) return res.status(400).json({ error: 'taskIds required' });
+  res.json(await markDelivered(ids, req.user.username));
+}));
+
+api.post('/admin/undeliver', requireAdmin, wrap(async (req, res) => {
+  const ids = taskIdList(req.body);
+  if (!ids.length) return res.status(400).json({ error: 'taskIds required' });
+  res.json(markUndelivered(ids, req.user.username));
+}));
+
+api.get('/admin/deliver/status', requireAdmin, wrap(async (req, res) => res.json(deliverStatus())));
+
+api.get('/admin/deliver/download', requireAdmin, wrap(async (req, res) => {
+  const bk = currentBackup();
+  if (!bk) return res.status(404).json({ error: 'no delivery backup available yet' });
+  res.download(bk.abs, bk.name);
 }));
 
 // --- doc generation (SSE so the UI can show tool activity live) ---

@@ -56,6 +56,23 @@ export function setChecklistItem(bucket, id, key, status, username) {
   return state;
 }
 
+// "Delivered" is a soft archive: the task stays on disk (and in its bucket) but is
+// hidden from the board. Reversible in-app; also captured in the deliver backup.
+export function setDelivered(bucket, id, delivered, username) {
+  const state = getState(bucket, id);
+  if (delivered) {
+    state.delivered = true;
+    state.delivered_by = username;
+    state.delivered_at = new Date().toISOString();
+  } else {
+    delete state.delivered;
+    delete state.delivered_by;
+    delete state.delivered_at;
+  }
+  saveState(bucket, id, state);
+  return state;
+}
+
 export function setVerdict(bucket, id, verdict, username) {
   if (verdict !== null && !VERDICTS.includes(verdict)) {
     throw httpError(400, `verdict must be one of ${VERDICTS.join(', ')} (or null to clear)`);

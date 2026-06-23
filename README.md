@@ -56,6 +56,27 @@ not a query-scoped key) and Python 3.10+. `fill_rank.py` / `latest_response.sql`
 **verbatim** — `pull_l10.py` only depends on `fill_rank.py`'s CLI, never its internals. No
 schedule: button-triggered only.
 
+## Delivering tasks (soft-archive + backup)
+
+On the Activity page, admins can paste task ids and **Mark delivered**. Delivered tasks are
+*soft-archived*: their `_studio.json` gets a `delivered` flag, so they drop off the board
+(hidden for everyone) but stay on disk — **Restore** clears the flag and they reappear. The
+board shows a **Show delivered (N)** toggle when any are hidden.
+
+Marking delivered also builds **one backup zip** (download link on the panel) that fully
+restores the feed if re-uploaded through the normal upload flow:
+
+```
+delivered_<stamp>.csv        readable audit register (task_id, bucket, verdict, claim,
+                             annotator, problem, review.md + remediation.md text, checklist)
+_audit/final_verdicts.json   maps each task → its bucket, so re-upload re-sorts correctly
+<task_id>/…                  full folder snapshot, with a pre-delivery _studio.json
+                             (no delivered flag → restores visible)
+```
+
+Keep the CSV as your delivered-tasks register; keep the zip as the recovery point. Only the most
+recent backup is retained on disk (`workspace/_deliveries/`); download it after each delivery.
+
 ## Doc conventions
 
 - `review.md` starts with a ```` ```alerts ```` fence — one line per glaring issue — rendered as

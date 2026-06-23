@@ -118,6 +118,7 @@ function toast(msg) {
 let me = null;
 let currentWs = {};
 let sevFilter = 'ALL';
+let showDelivered = false; // delivered tasks are soft-archived: hidden from the board for everyone
 const searchInput = document.getElementById('task-search');
 
 async function boot() {
@@ -154,7 +155,7 @@ function ticketCard(t) {
   const lane = laneOf(t);
   const seen = lane === 'RESOLVED';
   return el('a', {
-    class: `ticket accent-${t.bucket}${seen ? ' seen' : ''}${lane === 'SECOND_OPINION' ? ' attention' : ''}`,
+    class: `ticket accent-${t.bucket}${seen ? ' seen' : ''}${lane === 'SECOND_OPINION' ? ' attention' : ''}${t.delivered ? ' delivered' : ''}`,
     href: `/task/${t.bucket}/${t.id}`,
     draggable: 'true',
     ondragstart: (e) => {
@@ -169,6 +170,7 @@ function ticketCard(t) {
       el('span', { class: `sev-tag accent-${t.bucket}` }, SEV_LABEL[t.bucket]),
       seen ? el('span', { class: 'seen-mark', title: 'seen' }, '✓') : null,
       lane === 'SECOND_OPINION' ? el('span', { class: 'attention-mark', title: 'needs another reviewer' }, '⚠') : null,
+      t.delivered ? el('span', { class: 'delivered-mark', title: `delivered${t.deliveredAt ? ' ' + t.deliveredAt.slice(0, 10) : ''}` }, 'delivered') : null,
     ),
     el('div', { class: 'tid' }, t.id),
     t.problem ? el('div', { class: 'prob' }, t.problem) : null,
@@ -182,9 +184,11 @@ function ticketCard(t) {
 function render() {
   const q = searchInput.value.trim().toLowerCase();
   const tickets = allTickets().filter((t) =>
+    (showDelivered || !t.delivered) &&
     (sevFilter === 'ALL' || t.bucket === sevFilter) &&
     (!q || t.id.toLowerCase().includes(q) || (t.problem || '').toLowerCase().includes(q))
   );
+  updateDeliveredToggle();
   const byLane = new Map(LANES.map((l) => [l.key, []]));
   for (const t of tickets) byLane.get(laneOf(t)).push(t);
 
@@ -217,12 +221,25 @@ function render() {
     })
   );
 
-  const total = allTickets().length;
+  const total = allTickets().filter((t) => !t.delivered).length;
   document.getElementById('ws-summary').textContent =
     `${total} tasks · ` + LANES.map((l) => `${l.name.toLowerCase()} ${byLane.get(l.key).length}`).join(' · ');
   document.getElementById('search-count').textContent =
     q || sevFilter !== 'ALL' ? `${tickets.length} shown` : '';
 }
+
+// Show/hide the delivered toggle based on how many tasks are soft-archived.
+function updateDeliveredToggle() {
+  const n = allTickets().filter((t) => t.delivered).length;
+  const btn = document.getElementById('toggle-delivered');
+  btn.hidden = n === 0;
+  btn.textContent = showDelivered ? `Hide delivered (${n})` : `Show delivered (${n})`;
+  btn.classList.toggle('on', showDelivered);
+}
+document.getElementById('toggle-delivered').addEventListener('click', () => {
+  showDelivered = !showDelivered;
+  render();
+});
 
 searchInput.addEventListener('input', render);
 
