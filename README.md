@@ -35,29 +35,26 @@ message in the built-in trajectory viewer.
    **Export all (CSV)** gives `task_id,bucket,verdict,claimed_by,has_review,has_remediation`.
    Filtered export: `/api/export/ids/HARD_FAIL?verdict=SBQ`.
 
-## L10 daily pull
+## Pull tasks from Redash
 
-The board can keep itself synced to a review layer. `tools/get_tasks/pull_l10.py` runs
-`l10_task_ids.sql` against Redash (every task currently at `review_level` with the unpaused
-`status`), shells the vendored `fill_rank.py` to build each `rank.json` + both trajectories,
-reshapes them into the on-disk task layout, and the server **ingests the new ones into
-UNSORTED** — they're un-audited, so they carry no verdict yet. The pull is **additive**: tasks
-already on the board (any bucket) are skipped, and tasks that have since left L10 are *not*
-removed.
+Admins can pull tasks straight from Redash and **download them as a zip** — nothing is ingested
+into the board, so existing buckets are never touched. On the Activity page (`/admin.html`):
 
-- **Daily**, the in-process scheduler (`src/scheduler.js`) fires at `L10_PULL_HOUR:MINUTE` in
-  `L10_PULL_TZ` (default **18:00 America/Los_Angeles**). The zone is pinned, not read from the
-  VM clock (sandbox VMs are usually UTC), and DST self-corrects because the next run is
-  recomputed each day.
-- **On demand**, admins get a **Pull L10 now** button on the Activity page (`/admin.html`), which
-  hits `POST /api/admin/pull-l10`. The pull runs in the background (single-flight: one at a time);
-  the page polls `GET /api/admin/pull-l10/status` for the live state + last-run summary
-  (`N in L10 · ingested M new · K already on board`).
+- **Pull L10** — runs `tools/get_tasks/l10_task_ids.sql` (every task at `L10_REVIEW_LEVEL` with
+  the unpaused `L10_STATUS`).
+- **Pull these ids** — paste a list of 24-hex task ids instead (skips the query).
 
-Requires `REDASH_API_KEY` in the VM's `.env` (see `.env.example`). Needs Python 3.10+ and the
-same `REDASH_DATA_SOURCE_ID` as `fill_rank.py`. Set `L10_PULL_ENABLED=false` to disable the
-schedule (the button still works). `fill_rank.py` / `latest_response.sql` are vendored
-**verbatim** — `pull_l10.py` only depends on `fill_rank.py`'s CLI, never its internals.
+Either way, `tools/get_tasks/pull_l10.py` shells the vendored `fill_rank.py` to build each
+`rank.json` + both trajectories, reshapes them into `<task_id>/rank.json` +
+`<task_id>/trajectories/trajectory_model_{a,b}.json`, and the server zips them. The pull runs in
+the background (single-flight); the page polls `GET /api/admin/pull-l10/status` and shows a
+**download zip** link when ready (`GET /api/admin/pull-l10/download`). The zip's folder shape
+matches the upload flow, so it can be re-uploaded or fed to an eval directly.
+
+Requires `REDASH_API_KEY` in the VM's `.env` (a Redash **user** api key with data-source access —
+not a query-scoped key) and Python 3.10+. `fill_rank.py` / `latest_response.sql` are vendored
+**verbatim** — `pull_l10.py` only depends on `fill_rank.py`'s CLI, never its internals. No
+schedule: button-triggered only.
 
 ## Doc conventions
 

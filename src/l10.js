@@ -1,101 +1,112 @@
 import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { config } from './config.js';
-import { ingestTask } from './ingest.js';
-import { findTaskBucket, ensureWorkspace } from './workspace.js';
+import { ensureWorkspace } from './workspace.js';
 
-// The L10 pull: shell tools/get_tasks/pull_l10.py to fetch + stage every task at
-// the review level, then ingest the new ones into UNSORTED (un-audited → no verdict
-// yet). Additive: tasks already on the board (any bucket) are left untouched, and
-// tasks that have since left L10 are NOT removed. Single-flight: a run in progress
-// blocks a second; the scheduler and the admin button share this guard.
+// Pull tasks from Redash (all of a review level, or an explicit id list) and
+// package them into a downloadable zip of <task_id>/ folders — each with
+// rank.json + trajectories/. Nothing is ingested into the board; the admin
+// downloads the zip and runs evals separately. Single-flight: one pull at a time.
 
+const execFileP = promisify(execFile);
 const PULL_SCRIPT = path.join(config.projectRoot, 'tools', 'get_tasks', 'pull_l10.py');
 const PYTHON = process.env.PYTHON_BIN || 'python3';
+// Persistent (workspace is a mounted volume) but outside the bucket dirs, so
+// listWorkspace() never sees it. Holds the most recent pull's zip.
+const DOWNLOAD_DIR = path.join(config.workspaceRoot, '_l10_downloads');
 
 let running = false;
-let lastRun = null; // summary of the most recent completed (or failed) run
+let lastRun = null; // { ok, mode, finishedAt, taskIds, staged, errors, zipName?, zipBytes? }
 
 export function pullStatus() {
   return { running, lastRun };
 }
 
-// Fire-and-forget so the HTTP request (or the timer) returns immediately; the UI
-// polls pullStatus(). Returns whether a new run was actually started.
-export function startPull({ trigger = 'manual', user = null } = {}) {
+// Resolve the current download to an absolute path, or null if none/stale.
+export function currentDownload() {
+  if (!lastRun?.zipName) return null;
+  const abs = path.join(DOWNLOAD_DIR, lastRun.zipName);
+  return fs.existsSync(abs) ? { abs, name: lastRun.zipName } : null;
+}
+
+// Fire-and-forget; the UI polls pullStatus(). mode: 'l10' | 'ids'.
+export function startPull({ mode = 'l10', taskIds = [], user = null } = {}) {
   if (running) return { started: false, running: true };
   running = true;
-  runL10Pull({ trigger, user })
+  runPull({ mode, taskIds, user })
     .then((summary) => { lastRun = summary; })
-    .catch((e) => { lastRun = { ok: false, trigger, user, error: e.message, finishedAt: new Date().toISOString() }; })
+    .catch((e) => { lastRun = { ok: false, mode, user, error: e.message, finishedAt: new Date().toISOString() }; })
     .finally(() => { running = false; });
   return { started: true, running: true };
 }
 
-async function runL10Pull({ trigger, user }) {
+async function runPull({ mode, taskIds, user }) {
   ensureWorkspace();
+  fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
   const startedAt = new Date().toISOString();
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'cwt-l10-'));
   try {
-    const manifest = await runPullScript(staging);
-    const ingested = [];
-    const skippedExisting = [];
-    const failed = [...(manifest.errors || [])];
+    const manifest = await runPullScript(staging, mode, taskIds);
+    const staged = (manifest.staged || []).filter((s) => s.staged);
+    const errors = [...(manifest.errors || [])];
+    for (const s of manifest.staged || []) if (!s.staged) errors.push(`${s.task_id}: ${s.reason || 'not staged'}`);
 
-    for (const entry of manifest.staged || []) {
-      const id = entry.task_id;
-      if (!entry.staged) { failed.push(`${id}: ${entry.reason || 'not staged'}`); continue; }
-      if (findTaskBucket(id)) { skippedExisting.push(id); continue; }
-      try {
-        ingestTask(id, 'UNSORTED', path.join(staging, id));
-        ingested.push({ id, partial: !!entry.partial });
-      } catch (e) {
-        failed.push(`${id}: ingest failed: ${e.message}`);
-      }
+    let zipName = null;
+    let zipBytes = 0;
+    if (staged.length) {
+      zipName = await makeZip(staging, mode);
+      zipBytes = fs.statSync(path.join(DOWNLOAD_DIR, zipName)).size;
     }
 
     return {
-      ok: failed.length === 0,
-      trigger,
+      ok: errors.length === 0 && staged.length > 0,
+      mode: manifest.mode || mode,
       user,
       startedAt,
       finishedAt: new Date().toISOString(),
-      reviewLevel: manifest.review_level ?? config.l10.reviewLevel,
-      status: manifest.status ?? config.l10.status,
-      inL10: (manifest.task_ids || []).length,
-      ingested: ingested.length,
-      ingestedIds: ingested.map((i) => i.id),
-      partial: ingested.filter((i) => i.partial).map((i) => i.id),
-      skippedExisting: skippedExisting.length,
-      errors: failed,
+      requested: (manifest.task_ids || []).length,
+      staged: staged.length,
+      partial: staged.filter((s) => s.partial).map((s) => s.task_id),
+      zipName,
+      zipBytes,
+      errors,
     };
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
   }
 }
 
-// Run pull_l10.py and parse the JSON manifest it prints on its last stdout line
-// (progress goes to stderr). The child inherits process.env, so REDASH_API_KEY
-// (loaded from .env by config.js) reaches it.
-function runPullScript(staging) {
-  return new Promise((resolve, reject) => {
-    const argv = [
-      PULL_SCRIPT,
-      '--out', staging,
-      '--review-level', String(config.l10.reviewLevel),
-      '--status', config.l10.status,
-    ];
-    if (config.l10.limit) argv.push('--limit', String(config.l10.limit));
+// One fresh zip per pull; drop any previous so the download dir stays small.
+async function makeZip(staging, mode) {
+  for (const f of fs.readdirSync(DOWNLOAD_DIR)) {
+    if (f.endsWith('.zip')) fs.rmSync(path.join(DOWNLOAD_DIR, f), { force: true });
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const zipName = `pull_${mode}_${stamp}.zip`;
+  // zip from inside staging so archive entries are <task_id>/… (no temp-path prefix),
+  // matching the upload flow's expected shape.
+  await execFileP('zip', ['-q', '-r', path.join(DOWNLOAD_DIR, zipName), '.'], { cwd: staging });
+  return zipName;
+}
 
-    execFile(PYTHON, argv, { env: process.env, maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60 * 1000 },
-      (err, stdout, stderr) => {
-        const manifest = parseManifest(stdout);
-        if (manifest) return resolve(manifest); // a manifest with errors[] is still a result
-        reject(new Error(`pull_l10.py produced no manifest (${err ? err.message : 'exit 0'})\n${String(stderr).slice(-800)}`));
-      });
-  });
+function runPullScript(staging, mode, taskIds) {
+  const argv = [PULL_SCRIPT, '--out', staging,
+    '--review-level', String(config.l10.reviewLevel), '--status', config.l10.status];
+  if (config.l10.limit) argv.push('--limit', String(config.l10.limit));
+  if (mode === 'ids') argv.push('--task-ids', taskIds.join(','));
+
+  return execFileP(PYTHON, argv, { env: process.env, maxBuffer: 64 * 1024 * 1024, timeout: 30 * 60 * 1000 })
+    .then(({ stdout }) => parseManifest(stdout) || Promise.reject(new Error('pull_l10.py produced no manifest')))
+    .catch((err) => {
+      // execFile rejects on non-zero exit, but the script still prints a manifest
+      // (e.g. a query-permission error) — prefer that over the raw exit error.
+      const m = err.stdout && parseManifest(err.stdout);
+      if (m) return m;
+      throw new Error(`${err.message}\n${String(err.stderr || '').slice(-800)}`);
+    });
 }
 
 function parseManifest(stdout) {

@@ -22,15 +22,23 @@ async function boot() {
   await load();
 }
 
-// --- L10 daily pull control ---
+// --- Pull tasks from Redash (L10 or an explicit id list) ---
 let l10Polling = null;
 
 function initL10() {
-  document.getElementById('pull-l10-btn').addEventListener('click', async () => {
-    const r = await api('/admin/pull-l10', { method: 'POST' });
-    if (!r.started && r.running) setL10Text('Already running…');
-    pollL10();
+  document.getElementById('pull-l10-btn').addEventListener('click', () => triggerPull({ mode: 'l10' }));
+  document.getElementById('pull-ids-btn').addEventListener('click', () => {
+    const raw = document.getElementById('pull-ids-input').value.trim();
+    const taskIds = raw.split(/[,\s]+/).filter(Boolean);
+    if (!taskIds.length) { setL10Text('Paste at least one task id.'); return; }
+    triggerPull({ mode: 'ids', taskIds });
   });
+  pollL10();
+}
+
+async function triggerPull(body) {
+  const r = await api('/admin/pull-l10', { method: 'POST', body });
+  if (!r.started && r.running) setL10Text('A pull is already running…');
   pollL10();
 }
 
@@ -38,32 +46,32 @@ async function pollL10() {
   const s = await api('/admin/pull-l10/status');
   renderL10(s);
   clearTimeout(l10Polling);
-  // poll fast while a pull is in flight, slowly otherwise (just to refresh next-run)
-  l10Polling = setTimeout(pollL10, s.running ? 3000 : 60000);
+  if (s.running) l10Polling = setTimeout(pollL10, 3000); // only poll while a pull is in flight
 }
 
 function renderL10(s) {
-  const btn = document.getElementById('pull-l10-btn');
-  btn.disabled = s.running;
-  btn.textContent = s.running ? 'Pulling…' : 'Pull L10 now';
-
-  const sched = s.schedule || {};
-  const next = sched.enabled
-    ? `next auto-run ${fmtTime(sched.nextRun)}Z (daily ${sched.hour}:${String(sched.minute).padStart(2, '0')} ${sched.tz})`
-    : 'daily schedule disabled';
-  setL10Text(s.running ? 'Pulling L10 tasks…' : next);
+  for (const id of ['pull-l10-btn', 'pull-ids-btn']) document.getElementById(id).disabled = s.running;
+  document.getElementById('pull-l10-btn').textContent = s.running ? 'Pulling…' : 'Pull L10';
 
   const r = s.lastRun;
+  const dl = document.getElementById('pull-l10-download');
+  dl.hidden = !(r && r.zipName);
+  if (r && r.zipName) dl.href = '/api/admin/pull-l10/download';
+
+  if (s.running) setL10Text('Pulling tasks from Redash…');
+  else if (!r) setL10Text('Pull L10, or paste specific task ids.');
+  else setL10Text(`done ${fmtTime(r.finishedAt)}Z`);
+
   const detail = document.getElementById('pull-l10-detail');
   if (!r) { detail.textContent = ''; return; }
   if (r.error || r.ok === false) {
-    const head = r.error ? `last run FAILED: ${r.error}` : `last run finished with issues`;
-    detail.textContent = `${head}${r.errors?.length ? `\n• ${r.errors.join('\n• ')}` : ''}\nat ${fmtTime(r.finishedAt)}Z (${r.trigger})`;
+    const head = r.error ? `last pull FAILED: ${r.error}` : 'last pull finished with issues';
+    detail.textContent = [head, r.errors?.length ? `• ${r.errors.join('\n• ')}` : '', `(${r.mode || ''} pull)`]
+      .filter(Boolean).join('\n');
     return;
   }
   const parts = [
-    `last run (${r.trigger}) ${fmtTime(r.finishedAt)}Z:`,
-    `L10 had ${r.inL10} task(s) · ingested ${r.ingested} new · ${r.skippedExisting} already on board`,
+    `last pull (${r.mode}): ${r.requested} requested · ${r.staged} packaged${r.zipBytes ? ` · ${fmtBytes(r.zipBytes)}` : ''}`,
   ];
   if (r.partial?.length) parts.push(`partial trajectories: ${r.partial.length} (${r.partial.map((x) => x.slice(0, 8)).join(', ')})`);
   if (r.errors?.length) parts.push(`issues:\n• ${r.errors.join('\n• ')}`);
@@ -71,6 +79,11 @@ function renderL10(s) {
 }
 
 function setL10Text(t) { document.getElementById('pull-l10-status').textContent = t; }
+function fmtBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
 
 async function load() {
   const data = await api('/admin/usage?limit=2000');

@@ -177,10 +177,15 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--status", default=os.environ.get("L10_STATUS", "pending"))
     ap.add_argument("--project", default=PROJECT_ID)
     ap.add_argument("--limit", type=int, default=0, help="cap the number of tasks (0 = no cap)")
+    ap.add_argument("--task-ids", default="", help="explicit task ids (comma/space separated); skips the L10 query")
     args = ap.parse_args(argv[1:])
     project = args.project
 
+    explicit = [t for t in re.split(r"[,\s]+", args.task_ids.strip()) if t]
+    mode = "ids" if explicit else "l10"
+
     manifest = {
+        "mode": mode,
         "review_level": args.review_level,
         "status": args.status,
         "project": project,
@@ -195,12 +200,19 @@ def main(argv: list[str]) -> int:
         print(json.dumps(manifest))
         return 2
 
-    try:
-        ids = fetch_task_ids(args.review_level, args.status, project)
-    except Exception as e:  # noqa: BLE001 — surface as a manifest error, not a stack trace
-        manifest["errors"].append(f"query failed: {type(e).__name__}: {e}")
-        print(json.dumps(manifest))
-        return 1
+    if mode == "ids":
+        ids, bad = [], []
+        for t in explicit:
+            (ids if TASK_ID_RE.match(t) else bad).append(t)
+        if bad:
+            manifest["errors"].append(f"ignored {len(bad)} non-24-hex id(s): {', '.join(bad[:5])}")
+    else:
+        try:
+            ids = fetch_task_ids(args.review_level, args.status, project)
+        except Exception as e:  # noqa: BLE001 — surface as a manifest error, not a stack trace
+            manifest["errors"].append(f"query failed: {type(e).__name__}: {e}")
+            print(json.dumps(manifest))
+            return 1
 
     if args.limit and len(ids) > args.limit:
         manifest["errors"].append(f"limited to {args.limit} of {len(ids)} tasks")
@@ -210,8 +222,9 @@ def main(argv: list[str]) -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"L10 pull: {len(ids)} task(s) at review_level={args.review_level} status={args.status}",
-          file=sys.stderr)
+    label = (f"explicit list: {len(ids)} task(s)" if mode == "ids"
+             else f"L10 pull: {len(ids)} task(s) at review_level={args.review_level} status={args.status}")
+    print(label, file=sys.stderr)
     run_fill_rank(ids)
     for tid in ids:
         try:

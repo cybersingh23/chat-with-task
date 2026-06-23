@@ -4,7 +4,6 @@ import { config } from './src/config.js';
 import { ensureWorkspace } from './src/workspace.js';
 import { api } from './src/routes/api.js';
 import { sessionUser } from './src/auth.js';
-import { startScheduler } from './src/scheduler.js';
 
 ensureWorkspace();
 
@@ -33,5 +32,4 @@ app.listen(config.port, () => {
   console.log(`workspace: ${config.workspaceRoot}`);
   console.log(`delivery roots: ${config.deliveryRoots.join(', ')}`);
   console.log(`model: ${config.litellm.model} via ${config.litellm.baseURL}`);
-  startScheduler();
 });

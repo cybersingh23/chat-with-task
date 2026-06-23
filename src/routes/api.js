@@ -16,8 +16,7 @@ import { generateDoc, taskContext, CITATION_RULES } from '../docgen.js';
 import { QUALITY_CANON, getRubric, saveRubricCsv } from '../spec.js';
 import { recordUsage, readUsage, usageCsv } from '../usage.js';
 import { enqueueDocs, jobSummary, statusFor } from '../jobs.js';
-import { startPull, pullStatus } from '../l10.js';
-import { getSchedule } from '../scheduler.js';
+import { startPull, pullStatus, currentDownload } from '../l10.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '2mb' }));
@@ -152,16 +151,24 @@ api.post('/admin/clear', requireAdmin, wrap(async (req, res) => {
   res.json({ cleared: clearWorkspace() });
 }));
 
-// --- L10 pull: fetch every task at the review level into UNSORTED ---
+// --- L10 pull: fetch tasks from Redash into a downloadable zip (admin only) ---
 // Fire-and-forget (the pull downloads trajectories and can run for minutes); the
-// admin UI polls /admin/pull-l10/status. Also runs on a daily schedule.
-api.post('/admin/pull-l10', requireAdmin, wrap(async (req, res) =>
-  res.json(startPull({ trigger: 'manual', user: req.user.username }))
-));
+// admin UI polls /admin/pull-l10/status, then GETs /download when a zip is ready.
+// body: { mode: 'l10' | 'ids', taskIds?: string[] }
+api.post('/admin/pull-l10', requireAdmin, wrap(async (req, res) => {
+  const mode = req.body?.mode === 'ids' ? 'ids' : 'l10';
+  const taskIds = Array.isArray(req.body?.taskIds) ? req.body.taskIds.map(String) : [];
+  if (mode === 'ids' && !taskIds.length) return res.status(400).json({ error: 'taskIds required for mode=ids' });
+  res.json(startPull({ mode, taskIds, user: req.user.username }));
+}));
 
-api.get('/admin/pull-l10/status', requireAdmin, wrap(async (req, res) =>
-  res.json({ ...pullStatus(), schedule: getSchedule() })
-));
+api.get('/admin/pull-l10/status', requireAdmin, wrap(async (req, res) => res.json(pullStatus())));
+
+api.get('/admin/pull-l10/download', requireAdmin, wrap(async (req, res) => {
+  const dl = currentDownload();
+  if (!dl) return res.status(404).json({ error: 'no pull available to download yet' });
+  res.download(dl.abs, dl.name);
+}));
 
 // --- doc generation (SSE so the UI can show tool activity live) ---
 // Doc generation runs as a background job (survives the client navigating away).
