@@ -4,12 +4,13 @@ import path from 'node:path';
 import { config } from '../config.js';
 import {
   listWorkspace, taskMeta, listFiles, readTaskFile, readTrajectory,
-  readTaskDef, moveTask, taskDir, resolveSafe, deleteTask, clearWorkspace,
+  readTaskDef, readRank, moveTask, findTaskBucket, taskDir, resolveSafe, deleteTask, clearWorkspace,
 } from '../workspace.js';
+import { BUCKETS } from '../config.js';
 import { ingestTask, findTaskSources } from '../ingest.js';
 import { handleUpload } from '../upload.js';
 import { verifyLogin, createSession, destroySession, requireAuth, requireAdmin } from '../auth.js';
-import { claimTask, releaseTask, setVerdict, setChecklistItem, getState, VERDICTS } from '../state.js';
+import { claimTask, releaseTask, setVerdict, setVerdictNote, setChecklistItem, getState, VERDICTS } from '../state.js';
 import { runAgentLoop } from '../llm.js';
 import { TOOL_DEFS, makeExecutor } from '../tools.js';
 import { generateDoc, taskContext, CITATION_RULES } from '../docgen.js';
@@ -18,6 +19,7 @@ import { recordUsage, readUsage, usageCsv } from '../usage.js';
 import { enqueueDocs, jobSummary, statusFor } from '../jobs.js';
 import { startPull, pullStatus, currentDownload } from '../l10.js';
 import { markDelivered, markUndelivered, deliverStatus, currentBackup } from '../deliver.js';
+import { createDummyTask, removeTourTasks, logTour } from '../tour.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '2mb' }));
@@ -42,6 +44,14 @@ api.post('/logout', requireAuth, wrap(async (req, res) => {
 api.use(requireAuth);
 
 api.get('/me', (req, res) => res.json(req.user));
+
+// --- guided tour sandbox: a disposable dummy task the user can act on ---
+api.post('/tour/start', wrap(async (req, res) => res.json(createDummyTask(req.user.username))));
+api.post('/tour/end', wrap(async (req, res) => res.json({ removed: removeTourTasks(req.user.username) })));
+api.post('/tour/log', wrap(async (req, res) => {
+  logTour({ user: req.user.username, at: new Date().toISOString(), step: req.body?.step, action: req.body?.action, success: !!req.body?.success });
+  res.json({ ok: true });
+}));
 
 api.get('/spec/rubric', (req, res) => res.json({ dimensions: getRubric() }));
 
@@ -80,6 +90,8 @@ api.post('/upload', requireAdmin, handleUpload);
 
 api.get('/task/:bucket/:id/taskdef', wrap(async (req, res) => res.json(readTaskDef(req.params.bucket, req.params.id))));
 
+api.get('/task/:bucket/:id/rank', wrap(async (req, res) => res.json(readRank(req.params.bucket, req.params.id))));
+
 // ---- claim / verdict / export ----
 api.post('/task/:bucket/:id/claim', wrap(async (req, res) =>
   res.json(claimTask(req.params.bucket, req.params.id, req.user.username))
@@ -93,6 +105,11 @@ api.post('/task/:bucket/:id/verdict', wrap(async (req, res) =>
   res.json(setVerdict(req.params.bucket, req.params.id, req.body.verdict ?? null, req.user.username))
 ));
 
+// the "key issue" note behind a Second Opinion verdict
+api.post('/task/:bucket/:id/verdict-note', wrap(async (req, res) =>
+  res.json(setVerdictNote(req.params.bucket, req.params.id, req.body.note ?? '', req.user.username))
+));
+
 api.get('/task/:bucket/:id/state', wrap(async (req, res) => res.json(getState(req.params.bucket, req.params.id))));
 
 api.post('/task/:bucket/:id/checklist', wrap(async (req, res) =>
@@ -104,6 +121,7 @@ api.get('/export/ids/:bucket', wrap(async (req, res) => {
   const ws = listWorkspace();
   let tasks = ws[req.params.bucket];
   if (!tasks) return res.status(400).json({ error: `unknown bucket ${req.params.bucket}` });
+  tasks = tasks.filter((t) => !t.tour);
   if (req.query.verdict) tasks = tasks.filter((t) => t.verdict === req.query.verdict);
   res.setHeader('content-type', 'text/plain');
   res.setHeader('content-disposition', `attachment; filename="${req.params.bucket}${req.query.verdict ? '_' + req.query.verdict : ''}_task_ids.txt"`);
@@ -115,6 +133,7 @@ api.get('/export/all.csv', wrap(async (req, res) => {
   const lines = ['task_id,bucket,verdict,claimed_by,has_review,has_remediation'];
   for (const [bucket, tasks] of Object.entries(ws)) {
     for (const t of tasks) {
+      if (t.tour) continue;
       lines.push([t.id, bucket, t.verdict || '', t.claimedBy || '', t.hasReview, t.hasRemediation].join(','));
     }
   }
@@ -187,6 +206,34 @@ api.post('/admin/undeliver', requireAdmin, wrap(async (req, res) => {
   res.json(markUndelivered(ids, req.user.username));
 }));
 
+// bulk-move: relocate many tasks at once. Source = an explicit taskIds list
+// AND/OR every task in fromBucket. Destination = a target bucket, or mark them
+// delivered. (admin only)
+api.post('/admin/bulk-move', requireAdmin, wrap(async (req, res) => {
+  const ids = new Set(taskIdList(req.body));
+  if (req.body?.fromBucket) {
+    const ws = listWorkspace();
+    const list = ws[req.body.fromBucket];
+    if (!list) return res.status(400).json({ error: `unknown bucket ${req.body.fromBucket}` });
+    for (const t of list) if (!t.tour) ids.add(t.id);
+  }
+  const targetIds = [...ids];
+  if (!targetIds.length) return res.status(400).json({ error: 'provide taskIds and/or fromBucket' });
+
+  if (req.body?.delivered) return res.json({ mode: 'delivered', ...(await markDelivered(targetIds, req.user.username)) });
+
+  const to = req.body?.to;
+  if (!BUCKETS.includes(to)) return res.status(400).json({ error: `to must be one of ${BUCKETS.join(', ')}` });
+  const moved = [], sameBucket = [], notFound = [];
+  for (const id of targetIds) {
+    const from = findTaskBucket(id);
+    if (!from) { notFound.push(id); continue; }
+    if (from === to) { sameBucket.push(id); continue; }
+    try { moveTask(from, id, to); moved.push(id); } catch { notFound.push(id); }
+  }
+  res.json({ mode: 'move', to, moved: moved.length, sameBucket: sameBucket.length, notFound, movedIds: moved });
+}));
+
 api.get('/admin/deliver/status', requireAdmin, wrap(async (req, res) => res.json(deliverStatus())));
 
 api.get('/admin/deliver/download', requireAdmin, wrap(async (req, res) => {
@@ -211,6 +258,7 @@ api.post('/admin/gendocs', requireAdmin, wrap(async (req, res) => {
   let queued = 0, tasks = 0;
   for (const [bucket, list] of Object.entries(ws)) {
     for (const t of list) {
+      if (t.tour) continue;
       const whichList = [];
       if (!onlyMissing || !t.hasReview) whichList.push('review');
       if (!onlyMissing || !t.hasRemediation) whichList.push('remediation');
@@ -268,7 +316,7 @@ api.post('/task/:bucket/:id/chat', wrap(async (req, res) => {
       tools: TOOL_DEFS,
       executor: makeExecutor(bucket, id),
       onEvent: (e) => sendSSE(res, e),
-      maxSteps: 15,
+      maxSteps: 50,
       onUsage,
     });
     saveChat(dir, [...history, userMsg, ...messages]);

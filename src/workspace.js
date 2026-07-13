@@ -72,13 +72,19 @@ export function taskMeta(bucket, id) {
     const state = JSON.parse(fs.readFileSync(path.join(dir, '_studio.json'), 'utf8'));
     meta.claimedBy = state.claimed_by || null;
     meta.verdict = state.verdict || null;
+    meta.verdictNote = state.verdict_note || null;
     meta.delivered = !!state.delivered;
     meta.deliveredAt = state.delivered_at || null;
+    meta.tour = !!state.tour;
+    meta.tourOwner = state.tour_owner || null;
   } catch {
     meta.claimedBy = null;
     meta.verdict = null;
+    meta.verdictNote = null;
     meta.delivered = false;
     meta.deliveredAt = null;
+    meta.tour = false;
+    meta.tourOwner = null;
   }
   return meta;
 }
@@ -267,6 +273,57 @@ function guardrailLines(g) {
   }
   return lines;
 }
+
+// rank.json behind a clean reader for the "CB responses" view. Normalizes the
+// results map (codename-keyed in v2; model_1/model_2-keyed in legacy batches)
+// into an ordered per-model list with the model_a/model_b side, grading, and
+// failure modes resolved. Missing / unparseable -> { present: false }.
+export function readRank(bucket, id) { return readRankIn(taskDir(bucket, id)); }
+
+export function readRankIn(dir) {
+  let rank;
+  try {
+    rank = JSON.parse(fs.readFileSync(path.join(dir, 'rank.json'), 'utf8'));
+  } catch { return { present: false }; }
+  const results = rank.results || {};
+  const assignments = rank.model_assignments || {}; // {model_a: codename, ...} in some batches
+  const ranks = Object.values(results).map((r) => r?.rank).filter((n) => typeof n === 'number');
+  const bestRank = ranks.length ? Math.min(...ranks) : null;
+  const models = Object.entries(results).map(([key, r]) => {
+    const side = r?.model_assignment || null; // 'model_a' | 'model_b'
+    // The results key is the codename in v2; for model_1/model_2 batches resolve
+    // the codename via the top-level model_assignments map.
+    let codename = key;
+    if (/^model_[12]$/i.test(key) && side && assignments[side]) codename = assignments[side];
+    return {
+      key,
+      codename,
+      side,
+      rank: typeof r?.rank === 'number' ? r.rank : null,
+      winner: typeof r?.rank === 'number' && r.rank === bestRank,
+      summary: String(r?.summary || ''),
+      grading: Object.entries(r?.grading || {}).map(([dim, g]) => ({
+        dim,
+        score: g && typeof g === 'object' ? (g.score ?? null) : null,
+        rationale: g && typeof g === 'object' ? String(g.rationale || '') : String(g ?? ''),
+      })),
+      failure_modes: Object.entries(r?.failure_modes || {}).map(([fkey, level]) => ({ key: fkey, level: String(level || 'none') })),
+    };
+  });
+  models.sort((a, b) => sideOrder(a.side) - sideOrder(b.side));
+  return {
+    present: true,
+    problem_statement: String(rank.problem_statement || ''),
+    test_type: rank.test_type || '',
+    annotator: rank.annotator_id || '',
+    preference_rating: typeof rank.preference_rating === 'number' ? rank.preference_rating : null,
+    ranking_rationale: String(rank.ranking_rationale || ''),
+    clarification: rank.optional_clarification_comments || '',
+    other: rank.optional_other_comments || '',
+    models,
+  };
+}
+function sideOrder(s) { return s === 'model_a' ? 0 : s === 'model_b' ? 1 : 2; }
 
 export function httpError(status, message) {
   const e = new Error(message);

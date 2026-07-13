@@ -1,4 +1,4 @@
-import { api, el, cap } from '/js/common.js';
+import { api, el, cap, startTour } from '/js/common.js';
 
 const ORDER = ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'];
 const VERDICT_LABELS = {
@@ -154,8 +154,8 @@ function allTickets() {
 function ticketCard(t) {
   const lane = laneOf(t);
   const seen = lane === 'RESOLVED';
-  return el('a', {
-    class: `ticket accent-${t.bucket}${seen ? ' seen' : ''}${lane === 'SECOND_OPINION' ? ' attention' : ''}${t.delivered ? ' delivered' : ''}`,
+  const card = el('a', {
+    class: `ticket accent-${t.bucket}${seen ? ' seen' : ''}${lane === 'SECOND_OPINION' ? ' attention' : ''}${t.delivered ? ' delivered' : ''}${t.tour ? ' tour-card' : ''}`,
     href: `/task/${t.bucket}/${t.id}`,
     draggable: 'true',
     ondragstart: (e) => {
@@ -168,22 +168,29 @@ function ticketCard(t) {
   },
     el('div', { class: 'ticket-top' },
       el('span', { class: `sev-tag accent-${t.bucket}` }, SEV_LABEL[t.bucket]),
+      t.tour ? el('span', { class: 'tour-tag', title: 'temporary tour sandbox — deleted when the tour ends' }, 'sandbox') : null,
       seen ? el('span', { class: 'seen-mark', title: 'seen' }, '✓') : null,
       lane === 'SECOND_OPINION' ? el('span', { class: 'attention-mark', title: 'needs another reviewer' }, '⚠') : null,
       t.delivered ? el('span', { class: 'delivered-mark', title: `delivered${t.deliveredAt ? ' ' + t.deliveredAt.slice(0, 10) : ''}` }, 'delivered') : null,
     ),
     el('div', { class: 'tid' }, t.id),
     t.problem ? el('div', { class: 'prob' }, t.problem) : null,
+    lane === 'SECOND_OPINION' && t.verdictNote
+      ? el('div', { class: 'card-why', title: t.verdictNote }, el('span', { class: 'card-why-tag' }, 'Why'), t.verdictNote)
+      : null,
     el('div', { class: 'ticket-foot' },
       t.claimedBy ? assignee(t.claimedBy) : claimAction(t),
       t.verdict ? el('span', { class: `chip v-${t.verdict}` }, VERDICT_LABELS[t.verdict] || t.verdict) : null,
     ),
   );
+  if (t.tour) card.id = 'tour-dummy-card';
+  return card;
 }
 
 function render() {
   const q = searchInput.value.trim().toLowerCase();
   const tickets = allTickets().filter((t) =>
+    (!t.tour || t.tourOwner === me?.username) && // sandbox tasks show only to their owner
     (showDelivered || !t.delivered) &&
     (sevFilter === 'ALL' || t.bucket === sevFilter) &&
     (!q || t.id.toLowerCase().includes(q) || (t.problem || '').toLowerCase().includes(q))
@@ -221,7 +228,7 @@ function render() {
     })
   );
 
-  const total = allTickets().filter((t) => !t.delivered).length;
+  const total = allTickets().filter((t) => !t.delivered && !t.tour).length;
   document.getElementById('ws-summary').textContent =
     `${total} tasks · ` + LANES.map((l) => `${l.name.toLowerCase()} ${byLane.get(l.key).length}`).join(' · ');
   document.getElementById('search-count').textContent =
@@ -324,6 +331,35 @@ document.getElementById('clear-board').addEventListener('click', async () => {
   await load();
   document.getElementById('search-count').textContent = `cleared ${cleared}`;
 });
+// ---------- admin: bulk move ----------
+document.getElementById('bulk-move-btn')?.addEventListener('click', async () => {
+  const ids = document.getElementById('bulk-ids').value.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+  const fromBucket = document.getElementById('bulk-from').value;
+  const toSel = document.getElementById('bulk-to').value;
+  const status = document.getElementById('bulk-status');
+  if (!ids.length && !fromBucket) { status.textContent = 'paste IDs or pick a source bucket'; return; }
+  const body = {};
+  if (ids.length) body.taskIds = ids;
+  if (fromBucket) body.fromBucket = fromBucket;
+  if (toSel === '__delivered') body.delivered = true; else body.to = toSel;
+
+  const src = [fromBucket ? `all ${SEV_LABEL[fromBucket]}` : null, ids.length ? `${ids.length} pasted ID(s)` : null].filter(Boolean).join(' + ');
+  const dest = toSel === '__delivered' ? 'delivered (hidden from board)' : SEV_LABEL[toSel];
+  if (!confirm(`Move ${src} → ${dest}?`)) return;
+
+  status.textContent = 'moving…';
+  try {
+    const r = await api('/admin/bulk-move', { method: 'POST', body });
+    if (r.mode === 'delivered') {
+      status.textContent = `delivered ${r.delivered}${r.notFound?.length ? `, ${r.notFound.length} not found` : ''}`;
+    } else {
+      status.textContent = `moved ${r.moved}${r.sameBucket ? `, ${r.sameBucket} already there` : ''}${r.notFound?.length ? `, ${r.notFound.length} not found` : ''}`;
+    }
+    document.getElementById('bulk-ids').value = '';
+    await load();
+  } catch (e) { status.textContent = e.message; }
+});
+
 document.getElementById('logout-btn').addEventListener('click', async () => {
   await api('/logout', { method: 'POST' });
   location.href = '/login.html';
@@ -371,7 +407,8 @@ async function uploadFiles(files) {
     const r = await uploadFormData(form);
     const counts = Object.entries(r.counts || {}).map(([b, n]) => `${b} ${n}`).join(', ') || 'none';
     const replaced = r.replaced?.length ? ` · replaced ${r.replaced.length} existing` : '';
-    statusEl.textContent = `done — sorted: ${counts}${replaced}`;
+    const reopened = r.reopened?.length ? ` · reopened ${r.reopened.length} for re-audit` : '';
+    statusEl.textContent = `done — sorted: ${counts}${replaced}${reopened}`;
     progressEl.hidden = true;
     if (r.ingested?.length === 1) location.href = `/task/${r.bucket}/${r.taskId}`;
     else load();
@@ -430,5 +467,57 @@ document.getElementById('claim-btn').addEventListener('click', async () => {
     status.textContent = e.message;
   }
 });
+
+// ---------- guided tour (interactive, on a disposable sandbox task) ----------
+function tourTask() { try { return JSON.parse(sessionStorage.getItem('cwt_tour_task') || 'null'); } catch { return null; } }
+function postTourLog(entry) { api('/tour/log', { method: 'POST', body: entry }).catch(() => {}); }
+function endTourCleanup() {
+  sessionStorage.removeItem('cwt_tour_task');
+  api('/tour/end', { method: 'POST' }).catch(() => {});
+  load();
+}
+// Best-effort cleanup if they close the tab mid-tour.
+window.addEventListener('beforeunload', () => {
+  if (sessionStorage.getItem('cwt_tour_task') && !sessionStorage.getItem('cwt_tour_resume')) {
+    navigator.sendBeacon?.('/api/tour/end');
+  }
+});
+
+function openTaskForTour() {
+  const d = tourTask();
+  if (!d) return false;
+  sessionStorage.setItem('cwt_tour_resume', '1'); // task page resumes the same tour
+  location.href = `/task/${d.bucket}/${d.id}`;
+  return true; // intercept: navigating (don't run onExit cleanup)
+}
+
+const BOARD_TOUR = [
+  { title: 'Welcome to ACC Audit Studio 👋', body: 'A hands-on tour — you\'ll actually try things on a private sandbox task (marked "sandbox"). Nothing you do here is real; it\'s deleted when the tour ends. Use Next / Back or ← →, Esc to leave.' },
+  { selector: '.board-controls', title: 'Find & filter tasks', body: 'Search by task ID or problem text, and filter by severity — Hard, Soft, or Pass. Invaluable when a delivery drops hundreds of tasks at once.' },
+  { selector: '.lanes', title: 'Your workflow board', body: 'Every task sits in a lane that reflects its state: Open → In review → (Needs 2nd opinion) → Resolved. It\'s the shared source of truth for who\'s doing what.' },
+  { selector: '#tour-dummy-card', pin: 'top', title: 'Try it: drag & drop 🖱️', body: 'The drag IS the action — no forms. Grab your highlighted "sandbox" card (in the Soft column) and drag it into another lane: drop in Resolved to pick a decision, "Needs 2nd opinion" to flag it, or "In review" to claim it. Go ahead — I\'ll wait.',
+    try: { action: 'drag_drop', hint: 'Waiting for you to drag the sandbox card into another lane…', verify: verifyDragged } },
+  { selector: '.lane-SECOND_OPINION', title: 'Second opinions, with the "why"', body: 'Tasks flagged for another reviewer land here — and the key issue the first reviewer wrote shows right on the card, so whoever picks it up knows the crux instantly.' },
+  { selector: '#drop-zone', title: 'Upload a delivery', body: 'Admins: drop a tasks .zip or a <task_id> folder. Tasks auto-sort into Hard / Soft / Pass, and re-uploading a task that was SBQ or Fixes-made reopens it for re-audit so nothing silently ships twice.' },
+  { selector: '#bulk-move', title: 'Bulk move', body: 'Admins: paste a list of task IDs and/or move an entire bucket in one shot — to another bucket, or straight to "delivered".' },
+  { selector: '#export-csv', title: 'Export', body: 'Pull the whole board as CSV; each lane also exports just its task IDs.' },
+  { title: 'Now the fun part — the task itself', body: 'The board is the map; the task page is where you actually audit: trajectories, the annotator\'s grading, and an AI copilot. Let me open your sandbox task and keep going.', nextLabel: 'Open the task ▸', onNext: openTaskForTour },
+];
+
+async function verifyDragged() {
+  const d = tourTask();
+  if (!d) return false;
+  try { const s = await api(`/task/${d.bucket}/${d.id}/state`); return !!(s.verdict || s.claimed_by); }
+  catch { return false; }
+}
+
+async function startBoardTour() {
+  let dummy = null;
+  try { dummy = await api('/tour/start', { method: 'POST' }); } catch { /* run read-only if sandbox fails */ }
+  if (dummy) sessionStorage.setItem('cwt_tour_task', JSON.stringify(dummy));
+  await load(); // surface the sandbox card
+  startTour(BOARD_TOUR, { onExit: endTourCleanup, onLog: postTourLog });
+}
+document.getElementById('tour-btn')?.addEventListener('click', startBoardTour);
 
 boot();

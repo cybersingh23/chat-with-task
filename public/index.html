@@ -11,6 +11,7 @@
   <header class="topbar">
     <div class="app-name">Chat with Task <span>/ ACC Audit Studio</span></div>
     <div class="spacer"></div>
+    <button class="tour-btn" id="tour-btn" title="guided walkthrough">✦ Take a tour</button>
     <a class="back-home" id="admin-link" href="/admin.html" hidden>Admin Console</a>
     <div class="user-chip" id="user-chip" hidden>
       <span id="user-name"></span><span class="role" id="user-role"></span>
@@ -56,6 +57,34 @@
           <input type="text" id="claim-input" placeholder="full 24-char task_id" maxlength="24" spellcheck="false" />
           <button id="claim-btn">Ingest</button>
           <span class="mono" id="claim-status"></span>
+        </div>
+      </details>
+      <details class="claim-secondary" id="bulk-move">
+        <summary>Bulk move tasks (paste IDs and/or move a whole bucket)</summary>
+        <div class="bulk-move-body">
+          <textarea id="bulk-ids" placeholder="Paste 24-hex task IDs (comma / space / newline separated) — optional"></textarea>
+          <div class="bulk-row">
+            <label>move all in
+              <select id="bulk-from">
+                <option value="">— none —</option>
+                <option value="HARD_FAIL">Hard</option>
+                <option value="SOFT_FAIL">Soft</option>
+                <option value="PASS">Pass</option>
+                <option value="UNSORTED">Unsorted</option>
+              </select>
+            </label>
+            <label>→ to
+              <select id="bulk-to">
+                <option value="HARD_FAIL">Hard</option>
+                <option value="SOFT_FAIL">Soft</option>
+                <option value="PASS">Pass</option>
+                <option value="UNSORTED">Unsorted</option>
+                <option value="__delivered">Mark delivered</option>
+              </select>
+            </label>
+            <button class="primary" id="bulk-move-btn">Move</button>
+            <span class="mono" id="bulk-status"></span>
+          </div>
         </div>
       </details>
     </section>
