@@ -49,7 +49,7 @@
             password: document.getElementById('password').value,
           },
         });
-        location.href = '/';
+        location.href = (window.__base__ || '') + '/';
       } catch (err) {
         error.textContent = err.message;
       }
