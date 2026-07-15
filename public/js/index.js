@@ -1,4 +1,4 @@
-import { api, el, cap, startTour } from '/js/common.js';
+import { api, el, cap, startTour } from './common.js';
 
 const ORDER = ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'];
 const VERDICT_LABELS = {
@@ -156,7 +156,7 @@ function ticketCard(t) {
   const seen = lane === 'RESOLVED';
   const card = el('a', {
     class: `ticket accent-${t.bucket}${seen ? ' seen' : ''}${lane === 'SECOND_OPINION' ? ' attention' : ''}${t.delivered ? ' delivered' : ''}${t.tour ? ' tour-card' : ''}`,
-    href: `/task/${t.bucket}/${t.id}`,
+    href: `${window.__base__ || ''}/task/${t.bucket}/${t.id}`,
     draggable: 'true',
     ondragstart: (e) => {
       dragging = t;
@@ -286,7 +286,7 @@ document.getElementById('rubric-input')?.addEventListener('change', async (e) =>
   status.textContent = 'uploading…';
   try {
     const text = await file.text();
-    const res = await fetch('/api/spec/rubric', { method: 'POST', headers: { 'content-type': 'text/csv' }, body: text });
+    const res = await fetch((window.__base__ || '') + '/api/spec/rubric', { method: 'POST', headers: { 'content-type': 'text/csv' }, body: text });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'upload failed');
     status.textContent = `${data.dimensions} dimensions loaded`;
@@ -297,7 +297,7 @@ document.getElementById('rubric-input')?.addEventListener('change', async (e) =>
 });
 
 
-document.getElementById('export-csv').addEventListener('click', () => { location.href = '/api/export/all.csv'; });
+document.getElementById('export-csv').addEventListener('click', () => { location.href = (window.__base__ || '') + '/api/export/all.csv'; });
 // generate review+remediation for every task missing them, as background jobs
 let genPoll = null;
 document.getElementById('gen-all').addEventListener('click', async () => {
@@ -362,7 +362,7 @@ document.getElementById('bulk-move-btn')?.addEventListener('click', async () => 
 
 document.getElementById('logout-btn').addEventListener('click', async () => {
   await api('/logout', { method: 'POST' });
-  location.href = '/login.html';
+  location.href = (window.__base__ || '') + '/login.html';
 });
 
 // ---------- admin: delivery upload ----------
@@ -374,7 +374,7 @@ const dropZone = document.getElementById('drop-zone');
 function uploadFormData(form) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/upload');
+    xhr.open('POST', (window.__base__ || '') + '/api/upload');
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) barEl.style.width = `${Math.round((e.loaded / e.total) * 100)}%`;
     };
@@ -410,7 +410,7 @@ async function uploadFiles(files) {
     const reopened = r.reopened?.length ? ` · reopened ${r.reopened.length} for re-audit` : '';
     statusEl.textContent = `done — sorted: ${counts}${replaced}${reopened}`;
     progressEl.hidden = true;
-    if (r.ingested?.length === 1) location.href = `/task/${r.bucket}/${r.taskId}`;
+    if (r.ingested?.length === 1) location.href = `${window.__base__ || ''}/task/${r.bucket}/${r.taskId}`;
     else load();
   } catch (e) {
     statusEl.textContent = e.message;
@@ -462,7 +462,7 @@ document.getElementById('claim-btn').addEventListener('click', async () => {
   status.textContent = 'searching…';
   try {
     const r = await api('/ingest', { method: 'POST', body: { taskId, bucket } });
-    location.href = `/task/${r.bucket}/${r.taskId}`;
+    location.href = `${window.__base__ || ''}/task/${r.bucket}/${r.taskId}`;
   } catch (e) {
     status.textContent = e.message;
   }
@@ -487,7 +487,7 @@ function openTaskForTour() {
   const d = tourTask();
   if (!d) return false;
   sessionStorage.setItem('cwt_tour_resume', '1'); // task page resumes the same tour
-  location.href = `/task/${d.bucket}/${d.id}`;
+  location.href = `${window.__base__ || ''}/task/${d.bucket}/${d.id}`;
   return true; // intercept: navigating (don't run onExit cleanup)
 }
 

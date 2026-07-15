@@ -23,13 +23,14 @@
 })();
 
 export async function api(path, opts = {}) {
-  const res = await fetch(`/api${path}`, {
+  const base = window.__base__ || '';
+  const res = await fetch(`${base}/api${path}`, {
     headers: { 'content-type': 'application/json' },
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   if (res.status === 401 && !location.pathname.endsWith('/login.html')) {
-    location.href = '/login.html';
+    location.href = `${base}/login.html`;
     throw new Error('login required');
   }
   if (!res.ok) {
@@ -41,7 +42,7 @@ export async function api(path, opts = {}) {
 
 // POST that returns SSE; calls onEvent for each data: line.
 export async function apiSSE(path, body, onEvent) {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${window.__base__ || ''}/api${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body || {}),

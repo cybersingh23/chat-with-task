@@ -1,6 +1,7 @@
-import { api, apiSSE, renderMarkdown, el, fmtTime, cap, startTour } from '/js/common.js';
+import { api, apiSSE, renderMarkdown, el, fmtTime, cap, startTour } from './common.js';
 
-const [, , bucket, taskId] = location.pathname.split('/');
+const pathRelative = location.pathname.slice((window.__base__ || '').length);
+const [, , bucket, taskId] = pathRelative.split('/');
 const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
 document.getElementById('task-id').textContent = taskId;
 const sevChip = document.getElementById('sev-chip');
@@ -1461,7 +1462,7 @@ sevChip.addEventListener('click', () => {
           menu.remove();
           if (k === bucket) return;
           await api(`/task/${bucket}/${taskId}/move`, { method: 'POST', body: { to: k } });
-          location.href = `/task/${k}/${taskId}`;
+          location.href = `${window.__base__ || ''}/task/${k}/${taskId}`;
         },
       }, label + (k === bucket ? '  ✓' : '')),
     ),
@@ -1531,7 +1532,7 @@ verdictSelect.addEventListener('change', async () => {
 
 document.getElementById('logout-btn').addEventListener('click', async () => {
   await api('/logout', { method: 'POST' });
-  location.href = '/login.html';
+  location.href = (window.__base__ || '') + '/login.html';
 });
 
 // ---------- guided tour (interactive, on the sandbox task) ----------
@@ -1540,7 +1541,7 @@ function endTaskTourCleanup() {
   const active = sessionStorage.getItem('cwt_tour_task');
   sessionStorage.removeItem('cwt_tour_task');
   api('/tour/end', { method: 'POST' }).catch(() => {});
-  if (active) location.href = '/'; // the sandbox we're viewing is gone — go back to the board
+  if (active) location.href = (window.__base__ || '') + '/'; // the sandbox we're viewing is gone — go back to the board
 }
 
 let copilotBaseline = 0;
@@ -1576,7 +1577,7 @@ async function launchTaskTour() {
   if (dummy) {
     sessionStorage.setItem('cwt_tour_task', JSON.stringify(dummy));
     sessionStorage.setItem('cwt_tour_resume', '1');
-    location.href = `/task/${dummy.bucket}/${dummy.id}`;
+    location.href = `${window.__base__ || ''}/task/${dummy.bucket}/${dummy.id}`;
   }
 }
 document.getElementById('tour-btn')?.addEventListener('click', launchTaskTour);
@@ -1643,7 +1644,7 @@ if (me.role === 'admin') {
   del.addEventListener('click', async () => {
     if (!confirm(`Delete task ${taskId} from the board? This removes its files, claim, decision, and generated docs.`)) return;
     await api(`/task/${bucket}/${taskId}`, { method: 'DELETE' });
-    location.href = '/';
+    location.href = (window.__base__ || '') + '/';
   });
 }
 await refreshState();

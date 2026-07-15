@@ -1,4 +1,4 @@
-import { api, el, cap } from '/js/common.js';
+import { api, el, cap } from './common.js';
 
 const KIND_LABEL = {
   chat: 'Copilot chat',
@@ -15,7 +15,7 @@ const searchInput = document.getElementById('activity-search');
 
 async function boot() {
   const me = await api('/me'); // 401 → login
-  if (me.role !== 'admin') { location.href = '/'; return; }
+  if (me.role !== 'admin') { location.href = (window.__base__ || '') + '/'; return; }
   document.getElementById('user-chip').hidden = false;
   document.getElementById('user-name').textContent = me.username;
   initL10();
@@ -223,7 +223,7 @@ function emptyRow(msg) {
 searchInput.addEventListener('input', renderEvents);
 document.getElementById('logout-btn').addEventListener('click', async () => {
   await api('/logout', { method: 'POST' });
-  location.href = '/login.html';
+  location.href = (window.__base__ || '') + '/login.html';
 });
 
 boot();
