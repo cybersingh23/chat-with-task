@@ -60,6 +60,10 @@
     <aside class="chat-panel glass" id="chat-panel">
       <div class="chat-head">
         <span class="title">Audit copilot</span>
+        <div class="mode-toggle" id="copilot-mode" role="group" aria-label="Copilot mode" title="Static = written answer with citation chips. Dynamic = a clickable, step-by-step guided walkthrough of the evidence.">
+          <button type="button" data-mode="static" class="active">Static</button>
+          <button type="button" data-mode="dynamic">Dynamic</button>
+        </div>
         <button id="clear-chat">clear</button>
         <button id="collapse-chat" title="hide the copilot panel (or double-click the divider)">Hide</button>
       </div>

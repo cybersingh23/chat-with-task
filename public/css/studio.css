@@ -1160,3 +1160,10 @@ a.cb-field-link:hover { background: rgba(111, 199, 232, 0.22); text-decoration: 
   font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--blue); background: rgba(108, 165, 255, 0.14); border-radius: 4px; padding: 1px 6px;
 }
+
+/* dynamic copilot: static/dynamic segmented toggle + guide verdict card */
+.mode-toggle { display: inline-flex; gap: 0; border: 1px solid var(--edge, #2a2f3a); border-radius: var(--r-sm, 7px); overflow: hidden; }
+.mode-toggle button { font-size: 11px; padding: 3px 9px !important; border: none !important; border-radius: 0 !important; color: var(--text-3, #8b93a3); background: transparent; }
+.mode-toggle button.active { color: var(--bg, #0c0e13); background: var(--teal, #4fd1c5); font-weight: 600; }
+.mode-toggle button:not(.active):hover { color: var(--text, #f3f5fa); background: var(--surface-2, #171b22); }
+.guide-verdict { font-weight: 600; margin-bottom: 8px; }

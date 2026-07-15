@@ -299,6 +299,108 @@ Answer discipline (strict):
   ordered by expected yield, not an essay.
 `.trim();
 
+// --- dynamic copilot: answer as a clickable, step-by-step guided walkthrough ---
+const GUIDE_RULES = `
+DYNAMIC GUIDE MODE. Instead of a prose answer, produce a step-by-step guided walkthrough the
+reviewer clicks through, each step pointing at an exact place in this task's data.
+
+Investigate with your tools exactly as usual (read/search the trajectories, rank.json, the spec).
+THEN finish by calling the present_guide tool EXACTLY ONCE. Do not also write a prose answer — the
+guide IS the answer.
+
+present_guide arguments:
+- answerable: true only if you can support the answer with at least one concrete anchored step.
+  If it is a general/opinion question with no specific place to point at, set answerable:false with
+  a one-line reason (the reviewer will see "not available for dynamic").
+- verdict_line: one sentence stating the verdict, phrased to open a walkthrough
+  (e.g. "Yes — this is a valid HARD failure. Let me show you why.").
+- steps: an ORDERED array of {anchor, commentary} in the sequence a reviewer should walk;
+  commentary = one or two sentences on what to notice there and why it matters.
+  Every anchor MUST be one of these EXACT forms (nothing else resolves):
+    traj://model_a/<int>  or  traj://model_b/<int>   — a specific trajectory message index
+    field://<rank.json path>   — e.g. field:///results/model_1/grading/correctness/rationale
+    spec://R<n>                — a QC rubric row, e.g. spec://R15
+  Use real indices/paths you actually observed via your tools. Invalid anchors are dropped
+  server-side; if none survive the reviewer gets "not available for dynamic".
+`.trim();
+
+const PRESENT_GUIDE_TOOL = {
+  type: 'function',
+  function: {
+    name: 'present_guide',
+    description: 'Deliver the final answer as an ordered, clickable guided walkthrough anchored to exact spots in this task. Call exactly once, at the end, instead of writing a prose answer.',
+    parameters: {
+      type: 'object',
+      properties: {
+        answerable: { type: 'boolean' },
+        reason: { type: 'string', description: 'why not answerable (only when answerable is false)' },
+        verdict_line: { type: 'string' },
+        steps: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              anchor: { type: 'string', description: 'traj://model_a/<int> | traj://model_b/<int> | field://<rank.json path> | spec://R<n>' },
+              commentary: { type: 'string' },
+            },
+            required: ['anchor', 'commentary'],
+          },
+        },
+      },
+      required: ['answerable', 'verdict_line'],
+    },
+  },
+};
+
+const resolvePath = (obj, p) => p.split('/').filter(Boolean).reduce((o, k) => (o == null ? undefined : o[k]), obj);
+
+function validateAnchor(anchor, lens, rankRaw, rubricKeys) {
+  let m;
+  if ((m = anchor.match(/^traj:\/\/(model_[ab])\/(\d+)$/))) {
+    const idx = Number(m[2]);
+    if (idx >= 0 && idx < lens[m[1]]) return { ok: true, anchor };
+    return { ok: false, why: `traj index ${idx} out of range (0..${Math.max(lens[m[1]] - 1, 0)})` };
+  }
+  if ((m = anchor.match(/^field:\/\/(\/.+)$/))) {
+    if (rankRaw && resolvePath(rankRaw, m[1]) !== undefined) return { ok: true, anchor };
+    return { ok: false, why: `rank.json path not found: ${m[1]}` };
+  }
+  if ((m = anchor.match(/^spec:\/\/(R\d+)$/))) {
+    if (!rubricKeys || rubricKeys.has(m[1])) return { ok: true, anchor };
+    return { ok: false, why: `rubric ${m[1]} not found` };
+  }
+  return { ok: false, why: 'unrecognized anchor form' };
+}
+
+// Build the guide the client will play — every anchor resolved against real task data.
+function validateGuide(bucket, id, args) {
+  const verdict_line = String(args.verdict_line || '').slice(0, 400);
+  if (args.answerable === false) {
+    return { dynamic: false, reason: String(args.reason || 'no anchored evidence'), verdict_line };
+  }
+  const trajLen = (model) => {
+    try { const t = readTrajectory(bucket, id, model); return (t.messages || t || []).length; } catch { return 0; }
+  };
+  const lens = { model_a: trajLen('model_a'), model_b: trajLen('model_b') };
+  let rankRaw = null;
+  try { rankRaw = JSON.parse(fs.readFileSync(path.join(taskDir(bucket, id), 'rank.json'), 'utf8')); } catch { /* no rank */ }
+  let rubricKeys = null;
+  try { const r = getRubric(); rubricKeys = new Set(Object.keys(r?.dimensions || r || {}).filter((k) => /^R\d+$/.test(k))); } catch { /* no rubric */ }
+  if (rubricKeys && !rubricKeys.size) rubricKeys = null; // no rubric loaded → don't hard-fail spec anchors
+
+  const kept = [];
+  const dropped = [];
+  for (const s of Array.isArray(args.steps) ? args.steps : []) {
+    const anchor = String(s?.anchor || '').trim();
+    const commentary = String(s?.commentary || '').slice(0, 600);
+    const v = validateAnchor(anchor, lens, rankRaw, rubricKeys);
+    if (v.ok) kept.push({ anchor: v.anchor, commentary });
+    else dropped.push({ anchor, why: v.why });
+  }
+  if (!kept.length) return { dynamic: false, reason: 'no resolvable anchors', verdict_line, dropped };
+  return { dynamic: true, verdict_line, steps: kept, dropped };
+}
+
 api.post('/task/:bucket/:id/chat', wrap(async (req, res) => {
   const { bucket, id } = req.params;
   const dir = taskDir(bucket, id);
@@ -306,15 +408,28 @@ api.post('/task/:bucket/:id/chat', wrap(async (req, res) => {
   const userMsg = { role: 'user', content: String(req.body.message || '').slice(0, 50_000) };
   if (!userMsg.content) return res.status(400).json({ error: 'message required' });
 
-  const system = [CHAT_PROMPT, QUALITY_CANON, CITATION_RULES, taskContext(bucket, id)].join('\n\n');
+  const dynamic = req.body.mode === 'dynamic';
+  const system = [CHAT_PROMPT, QUALITY_CANON, CITATION_RULES, dynamic ? GUIDE_RULES : '', taskContext(bucket, id)]
+    .filter(Boolean).join('\n\n');
   const acc = { prompt_tokens: 0, completion_tokens: 0 };
   const onUsage = (u) => { acc.prompt_tokens += u.prompt_tokens || 0; acc.completion_tokens += u.completion_tokens || 0; };
+  // In dynamic mode the model's final answer is a present_guide tool call: validate its anchors
+  // against real task data and push the built guide straight to the client.
+  const baseExec = makeExecutor(bucket, id);
+  const executor = !dynamic ? baseExec : async (name, args) => {
+    if (name !== 'present_guide') return baseExec(name, args);
+    const guide = validateGuide(bucket, id, args);
+    sendSSE(res, { type: 'guide', guide });
+    return guide.dynamic
+      ? `Guide delivered to the reviewer (${guide.steps.length} validated step(s)${guide.dropped?.length ? `, ${guide.dropped.length} dropped as unresolvable` : ''}). Stop now — do not add any prose.`
+      : `Guide not available for dynamic (${guide.reason}); the reviewer was told. Stop now — do not add any prose.`;
+  };
   startSSE(res);
   try {
     const { messages } = await runAgentLoop({
       messages: [{ role: 'system', content: system }, ...history, userMsg],
-      tools: TOOL_DEFS,
-      executor: makeExecutor(bucket, id),
+      tools: dynamic ? [...TOOL_DEFS, PRESENT_GUIDE_TOOL] : TOOL_DEFS,
+      executor,
       onEvent: (e) => sendSSE(res, e),
       maxSteps: 50,
       onUsage,

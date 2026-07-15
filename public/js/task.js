@@ -1325,6 +1325,63 @@ const chatLog = document.getElementById('chat-log');
 const chatText = document.getElementById('chat-text');
 const chatStatus = document.getElementById('chat-status');
 
+// ---------- dynamic copilot: static answer vs. guided walkthrough ----------
+let copilotMode = localStorage.getItem('cwt_copilot_mode') === 'dynamic' ? 'dynamic' : 'static';
+const modeToggle = document.getElementById('copilot-mode');
+function syncModeToggle() {
+  modeToggle?.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.mode === copilotMode));
+}
+modeToggle?.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-mode]');
+  if (!b) return;
+  copilotMode = b.dataset.mode;
+  localStorage.setItem('cwt_copilot_mode', copilotMode);
+  syncModeToggle();
+});
+syncModeToggle();
+
+// A guide anchor -> the existing deep-link resolver (mounts the view, scrolls, highlights).
+function resolveAnchor(anchor) {
+  let m;
+  if ((m = anchor.match(/^traj:\/\/(model_[ab])\/(\d+)$/))) return showTrajectory(m[1], Number(m[2]));
+  if ((m = anchor.match(/^field:\/\/(\/.+)$/))) return locateRankField(m[1]);
+  if ((m = anchor.match(/^spec:\/\/(R\d+)$/))) return showQcSpec(m[1]);
+}
+
+// Play a validated guide through the existing tour engine: an opening verdict card,
+// then one step per anchor — the hole exposes the viewer while onShow scrolls it there.
+function playGuide(guide) {
+  if (!guide?.dynamic || !guide.steps?.length) return;
+  const steps = [
+    { title: 'Verdict', body: guide.verdict_line || 'Guided walkthrough', nextLabel: 'Show me why ▸' },
+    ...guide.steps.map((s, i) => ({
+      selector: '#viewer',
+      title: `Step ${i + 1} of ${guide.steps.length}`,
+      body: s.commentary,
+      onShow: () => resolveAnchor(s.anchor),
+    })),
+  ];
+  startTour(steps);
+}
+
+function renderGuideBubble(guide) {
+  chatLog.querySelector('.chat-intro')?.remove();
+  const body = el('div', { class: 'bubble md' });
+  if (guide.dynamic) {
+    body.append(
+      el('div', { class: 'guide-verdict' }, '▶ ' + (guide.verdict_line || 'Guided walkthrough')),
+      el('button', { class: 'chat-suggest', onclick: () => playGuide(guide) },
+        `Replay walkthrough · ${guide.steps.length} step${guide.steps.length === 1 ? '' : 's'} ▸`),
+    );
+  } else {
+    if (guide.verdict_line) body.append(el('div', {}, guide.verdict_line));
+    body.append(el('div', { class: 'tool-line' },
+      `Not available for dynamic — ${guide.reason || 'no anchored evidence'}. Switch to Static for a written answer.`));
+  }
+  chatLog.append(el('div', { class: 'chat-msg assistant' }, el('div', { class: 'who' }, 'copilot'), body));
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
 // Empty-state greeting + clickable starter prompts (shown only when the log has
 // no messages; removed as soon as one arrives).
 const CHAT_SUGGESTIONS = [
@@ -1414,12 +1471,14 @@ async function sendMessage(message) {
   chatStatus.textContent = 'thinking…';
   chatStatus.classList.remove('error-line');
   try {
-    await apiSSE(`/task/${bucket}/${taskId}/chat`, { message }, (m) => {
-      if (m.type === 'tool') {
+    await apiSSE(`/task/${bucket}/${taskId}/chat`, { message, mode: copilotMode }, (m) => {
+      if (m.type === 'tool' && m.name !== 'present_guide') {
         appendToolLine(`⚙ ${m.name} ${JSON.stringify(m.args).slice(0, 120)}`);
         chatStatus.textContent = `running ${m.name}…`;
       }
+      if (m.type === 'tool' && m.name === 'present_guide') chatStatus.textContent = 'building walkthrough…';
       if (m.type === 'assistant') { appendChat('assistant', m.content); chatStatus.textContent = ''; }
+      if (m.type === 'guide') { chatStatus.textContent = ''; renderGuideBubble(m.guide); if (m.guide.dynamic) playGuide(m.guide); }
       if (m.type === 'truncated') { chatStatus.textContent = ''; showContinueBtn(); }
       if (m.type === 'error') { chatStatus.textContent = m.message; chatStatus.classList.add('error-line'); }
       if (m.type === 'done') chatStatus.textContent = '';
