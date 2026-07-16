@@ -1348,30 +1348,170 @@ function resolveAnchor(anchor) {
   if ((m = anchor.match(/^spec:\/\/(R\d+)$/))) return showQcSpec(m[1]);
 }
 
-// Play a validated guide through the existing tour engine: an opening verdict card,
-// then one step per anchor — the hole exposes the viewer while onShow scrolls it there.
-function playGuide(guide) {
-  if (!guide?.dynamic || !guide.steps?.length) return;
-  const steps = [
-    { title: 'Verdict', body: guide.verdict_line || 'Guided walkthrough', nextLabel: 'Show me why ▸' },
-    ...guide.steps.map((s, i) => ({
-      selector: '#viewer',
-      title: `Step ${i + 1} of ${guide.steps.length}`,
-      body: s.commentary,
-      onShow: () => resolveAnchor(s.anchor),
-    })),
-  ];
-  startTour(steps);
+// An anchor -> a human "where you're looking" label + a color-coded kind badge.
+// Model A=green / Model B=blue match the trajectory viewer; rank.json=purple; rubric=orange.
+function anchorMeta(anchor) {
+  let m;
+  if ((m = anchor.match(/^traj:\/\/(model_[ab])\/(\d+)$/))) {
+    const a = m[1] === 'model_a';
+    return { kind: a ? 'Model A' : 'Model B', accent: a ? 'var(--green)' : 'var(--blue)', title: `${a ? 'Model A' : 'Model B'} · turn ${m[2]}` };
+  }
+  if ((m = anchor.match(/^field:\/\/(\/.+)$/))) {
+    const segs = m[1].split('/').filter(Boolean);
+    return { kind: 'rank.json', accent: 'var(--purple)', title: segs.slice(-2).join(' · ') || 'rank.json field' };
+  }
+  if ((m = anchor.match(/^spec:\/\/(R\d+)$/))) {
+    return { kind: 'QC rubric', accent: 'var(--orange)', title: `Rubric ${m[1]}` };
+  }
+  return { kind: '', accent: '', title: '' };
 }
 
-function renderGuideBubble(guide) {
+// Play a validated guide through the existing tour engine: an opening verdict card,
+// then one step per anchor — the hole exposes the viewer while onShow scrolls it there.
+// The header shows WHAT you're looking at (color-coded), not a redundant step counter.
+// The floating copilot: a hovering mailbox that spotlights the evidence and talks you through it
+// in a speech bubble. Pre-mapped steps, but you can ask a follow-up at any step and it answers +
+// re-plans the steps ahead. Static copilot is untouched — this only runs in dynamic mode.
+let activeGuide = null;
+function playGuide(guide, originalQuestion = '') {
+  if (!guide?.dynamic || !guide.steps?.length) return;
+  activeGuide?.close();
+
+  let evidence = guide.steps.map((s) => ({ ...s, ...anchorMeta(s.anchor) }));
+  const threads = {};        // idx -> [{who, text}] follow-up Q&A kept per step
+  let idx = 0;               // 0 = verdict card; 1..N = evidence[idx-1]
+  let busy = false;
+
+  const overlay = el('div', { class: 'dg-overlay' });
+  const hole = el('div', { class: 'dg-hole' });
+  overlay.append(hole);
+  const mascot = el('img', { class: 'dg-mascot', src: '/copilot.png', alt: '' });
+  const bubble = el('div', { class: 'dg-bubble glass' });
+  const stage = el('div', { class: 'dg-stage' }, bubble, mascot);
+  document.body.append(overlay, stage);
+
+  const total = () => evidence.length + 1;
+  const curStep = () => (idx === 0
+    ? { kind: 'Verdict', accent: 'var(--red)', title: '', text: guide.verdict_line || 'Here’s what I found.', anchor: null }
+    : { ...evidence[idx - 1], text: evidence[idx - 1].commentary });
+
+  function place() {
+    const viewer = document.querySelector('#viewer');
+    const s = curStep();
+    if (idx === 0 || !viewer) {
+      overlay.classList.add('no-target');
+      hole.style.display = 'none';
+    } else {
+      overlay.classList.remove('no-target');
+      const r = viewer.getBoundingClientRect();
+      const pad = 6;
+      Object.assign(hole.style, {
+        display: 'block', left: `${r.left - pad}px`, top: `${r.top - pad}px`,
+        width: `${r.width + pad * 2}px`, height: `${r.height + pad * 2}px`,
+        outline: `2px solid ${s.accent || 'var(--blue)'}`,
+      });
+    }
+    const side = /model_a/.test(s.anchor || '') ? 'left' : /model_b/.test(s.anchor || '') ? 'right' : 'center';
+    stage.classList.remove('dock-left', 'dock-right', 'dock-center');
+    stage.classList.add('dock-' + side);
+  }
+
+  function close() {
+    window.removeEventListener('resize', place);
+    document.removeEventListener('keydown', onKey);
+    overlay.remove(); stage.remove(); activeGuide = null;
+  }
+  function onKey(e) {
+    if (e.target.closest('.dg-ask')) return;   // typing a follow-up
+    if (e.key === 'Escape') close();
+    else if (e.key === 'ArrowRight') go(idx + 1);
+    else if (e.key === 'ArrowLeft') go(idx - 1);
+  }
+
+  function go(n) {
+    if (n < 0) return;
+    if (n >= total()) return close();
+    idx = n;
+    render();
+    const s = curStep();
+    if (idx > 0 && s.anchor) { resolveAnchor(s.anchor); setTimeout(place, 60); setTimeout(place, 300); }
+    else place();
+  }
+
+  async function ask(q) {
+    if (!q || busy) return;
+    const t = (threads[idx] ||= []);
+    t.push({ who: 'you', text: q });
+    busy = true; render();
+    try {
+      await apiSSE(`/task/${bucket}/${taskId}/guide/followup`,
+        { question: q, originalQuestion, steps: evidence, stepIndex: Math.max(idx - 1, 0) },
+        (m) => {
+          if (m.type === 'guide_reply') {
+            t.push({ who: 'copilot', text: m.reply });
+            if (m.revisedSteps?.length) {
+              const keep = evidence.slice(0, idx);   // 0..current evidence step
+              evidence = [...keep, ...m.revisedSteps.map((s) => ({ ...s, ...anchorMeta(s.anchor) }))];
+            }
+          }
+          if (m.type === 'error') t.push({ who: 'copilot', text: `(couldn’t answer: ${m.message})` });
+        });
+    } catch (e) {
+      t.push({ who: 'copilot', text: `(couldn’t answer: ${e.message})` });
+    }
+    busy = false; render();
+  }
+
+  function render() {
+    const s = curStep();
+    stage.style.setProperty('--dg-accent', s.accent || 'var(--blue)');
+    const dots = el('div', { class: 'dg-dots' },
+      ...Array.from({ length: total() }, (_, i) =>
+        el('span', { class: `dg-dot${i === idx ? ' on' : ''}${i < idx ? ' past' : ''}` })));
+    const thread = (threads[idx] || []).map((m) =>
+      el('div', { class: `dg-turn ${m.who}` }, m.text));
+
+    bubble.replaceChildren(
+      el('div', { class: 'dg-head' },
+        s.kind ? el('span', { class: 'dg-kind' }, s.kind) : el('span', {}),
+        dots,
+        el('button', { class: 'dg-x', title: 'Exit walkthrough (Esc)', onclick: close }, '✕'),
+      ),
+      el('div', { class: 'dg-say' }, s.text),
+      (idx > 0 && s.title) ? el('button', { class: 'dg-cite', onclick: () => resolveAnchor(s.anchor) },
+        `↳ ${s.title}`) : null,
+      ...thread,
+      busy ? el('div', { class: 'dg-turn copilot thinking' }, 'thinking…') : null,
+      el('div', { class: 'dg-foot' },
+        el('input', {
+          class: 'dg-ask', placeholder: idx === 0 ? 'ask me anything, or hit ▸' : 'ask a follow-up…',
+          onkeydown: (e) => { if (e.key === 'Enter') { const v = e.target.value.trim(); e.target.value = ''; ask(v); } },
+        }),
+        el('div', { class: 'dg-nav' },
+          idx > 0 ? el('button', { class: 'dg-back', onclick: () => go(idx - 1) }, 'Back') : null,
+          el('button', { class: 'primary dg-next', onclick: () => go(idx + 1) },
+            idx === 0 ? 'Show me ▸' : (idx >= total() - 1 ? 'Done' : 'Next ▸')),
+        ),
+      ),
+    );
+  }
+
+  activeGuide = { close };
+  window.addEventListener('resize', place);
+  document.addEventListener('keydown', onKey);
+  go(0);
+}
+
+function renderGuideBubble(guide, question = '') {
   chatLog.querySelector('.chat-intro')?.remove();
   const body = el('div', { class: 'bubble md' });
   if (guide.dynamic) {
     body.append(
-      el('div', { class: 'guide-verdict' }, '▶ ' + (guide.verdict_line || 'Guided walkthrough')),
-      el('button', { class: 'chat-suggest', onclick: () => playGuide(guide) },
-        `Replay walkthrough · ${guide.steps.length} step${guide.steps.length === 1 ? '' : 's'} ▸`),
+      el('div', { class: 'guide-verdict' },
+        el('img', { class: 'copilot-avatar', src: '/copilot.png', alt: '' }),
+        el('span', {}, guide.verdict_line || 'Guided walkthrough')),
+      el('button', { class: 'chat-suggest', onclick: () => playGuide(guide, question) },
+        `▶ Replay walkthrough · ${guide.steps.length} step${guide.steps.length === 1 ? '' : 's'}`),
     );
   } else {
     if (guide.verdict_line) body.append(el('div', {}, guide.verdict_line));
@@ -1398,10 +1538,15 @@ function renderChatIntro() {
       onclick: () => { setChatCollapsed(false); chatText.value = s; chatText.focus(); chatText.dispatchEvent(new Event('input')); },
     }, s));
   return el('div', { class: 'chat-intro' },
-    el('div', { class: 'chat-intro-title' }, '🔎 Audit copilot'),
+    el('div', { class: 'chat-hero' },
+      el('img', { class: 'copilot-avatar hero', src: '/copilot.png', alt: '' }),
+      el('div', { class: 'chat-hero-name' }, 'Audit copilot'),
+      el('div', { class: 'chat-hero-tag' }, 'your embedded ACC quality SME'),
+    ),
     el('div', { class: 'chat-intro-text' },
-      'I can read both trajectories, search them, and cross-check the annotator’s rank.json against what actually happened. ',
-      'I cite trajectory turns, QC rubric rows, and rank.json fields as clickable links. Ask anything, or start with:'),
+      'I read both trajectories, search them, and cross-check the annotator’s rank.json against what actually happened — ',
+      'citing exact trajectory turns, QC rubric rows, and rank.json fields as clickable links. ',
+      'Flip to ', el('b', {}, 'Dynamic'), ' and I’ll walk you through a failure step by step. Ask anything, or start with:'),
     el('div', { class: 'chat-suggests' }, ...chips),
   );
 }
@@ -1478,7 +1623,7 @@ async function sendMessage(message) {
       }
       if (m.type === 'tool' && m.name === 'present_guide') chatStatus.textContent = 'building walkthrough…';
       if (m.type === 'assistant') { appendChat('assistant', m.content); chatStatus.textContent = ''; }
-      if (m.type === 'guide') { chatStatus.textContent = ''; renderGuideBubble(m.guide); if (m.guide.dynamic) playGuide(m.guide); }
+      if (m.type === 'guide') { chatStatus.textContent = ''; renderGuideBubble(m.guide, message); if (m.guide.dynamic) playGuide(m.guide, message); }
       if (m.type === 'truncated') { chatStatus.textContent = ''; showContinueBtn(); }
       if (m.type === 'error') { chatStatus.textContent = m.message; chatStatus.classList.add('error-line'); }
       if (m.type === 'done') chatStatus.textContent = '';
@@ -1653,11 +1798,20 @@ const MIN_CHAT = 300, MAX_CHAT = 720, COLLAPSE_AT = 200;
 function setChatWidth(px) {
   layout.style.setProperty('--chat-w', `${Math.min(MAX_CHAT, Math.max(MIN_CHAT, px))}px`);
 }
+const fabNudge = document.getElementById('fab-nudge');
 function setChatCollapsed(collapsed) {
   layout.classList.toggle('chat-collapsed', collapsed);
   expandChatBtn.hidden = !collapsed;
+  // Nudge the reviewer toward the copilot when it's tucked away (unless they dismissed it).
+  if (fabNudge) fabNudge.hidden = !(collapsed && !localStorage.getItem('cwt_fab_nudge_dismissed'));
   localStorage.setItem('cwt_chat_collapsed', collapsed ? '1' : '');
 }
+fabNudge?.addEventListener('click', (e) => { if (!e.target.closest('#fab-nudge-x')) openCopilotWithFlair(); });
+document.getElementById('fab-nudge-x')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  localStorage.setItem('cwt_fab_nudge_dismissed', '1');
+  if (fabNudge) fabNudge.hidden = true;
+});
 
 const savedW = Number(localStorage.getItem('cwt_chat_w'));
 if (savedW) setChatWidth(savedW);
@@ -1690,7 +1844,18 @@ resizer.addEventListener('pointerdown', (e) => {
 });
 resizer.addEventListener('dblclick', () => setChatCollapsed(true));
 document.getElementById('collapse-chat').addEventListener('click', () => setChatCollapsed(true));
-expandChatBtn.addEventListener('click', () => setChatCollapsed(false));
+expandChatBtn.addEventListener('click', openCopilotWithFlair);
+
+// Open the copilot as if it pops out of the mascot: a ghost of the mailbox leaps out with a
+// bubble burst, and the panel unfurls from that corner. Only when actually opening from collapsed.
+function openCopilotWithFlair() {
+  const wasCollapsed = layout.classList.contains('chat-collapsed');
+  setChatCollapsed(false);
+  if (!wasCollapsed) return;
+  const panel = document.getElementById('chat-panel');
+  panel.classList.add('opening');
+  panel.addEventListener('animationend', () => panel.classList.remove('opening'), { once: true });
+}
 
 // ---------- boot ----------
 const me = await api('/me'); // 401 redirects to login

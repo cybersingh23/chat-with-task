@@ -59,6 +59,7 @@
 
     <aside class="chat-panel glass" id="chat-panel">
       <div class="chat-head">
+        <img class="copilot-avatar" src="/copilot.png" alt="" />
         <span class="title">Audit copilot</span>
         <div class="mode-toggle" id="copilot-mode" role="group" aria-label="Copilot mode" title="Static = written answer with citation chips. Dynamic = a clickable, step-by-step guided walkthrough of the evidence.">
           <button type="button" data-mode="static" class="active">Static</button>
@@ -76,7 +77,13 @@
     </aside>
   </div>
 
-  <button class="chat-fab glass" id="expand-chat" hidden>Copilot ⟨</button>
+  <button class="chat-fab glass" id="expand-chat" hidden aria-label="Open the audit copilot" title="Open the audit copilot">
+    <img class="fab-avatar" src="/copilot.png" alt="" />
+  </button>
+  <div class="fab-nudge glass" id="fab-nudge" hidden>
+    <button class="fab-nudge-x" id="fab-nudge-x" title="dismiss" aria-label="dismiss">✕</button>
+    <span>Stuck on this audit? <b>Ask the copilot</b> — I’ll walk you through it →</span>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>

@@ -235,7 +235,7 @@ export function startTour(steps, opts = {}) {
   let i = 0, poll = null, done = false, exited = false;
   const hole = el('div', { class: 'tour-hole' });
   const tip = el('div', { class: 'tour-tip glass' });
-  const overlay = el('div', { class: 'tour-overlay' }, hole, tip);
+  const overlay = el('div', { class: `tour-overlay${opts.className ? ' ' + opts.className : ''}` }, hole, tip);
   document.body.append(overlay);
 
   const clearPoll = () => { if (poll) { clearInterval(poll); poll = null; } };
@@ -254,6 +254,8 @@ export function startTour(steps, opts = {}) {
   function place() {
     const s = valid[i];
     const target = s.selector ? document.querySelector(s.selector) : null;
+    // No spotlight target (e.g. the opening verdict card) → dim + blur the whole screen.
+    overlay.classList.toggle('no-target', !isVisible(target));
     const margin = 12, gap = 14;
     const tipW = tip.offsetWidth || 320;
     const tipH = tip.offsetHeight || 170;
@@ -265,6 +267,7 @@ export function startTour(steps, opts = {}) {
       const r = target.getBoundingClientRect();
       const pad = 6;
       hole.style.display = 'block';
+      hole.style.outline = `2px solid ${s.accent || 'var(--blue)'}`; // spotlight ring in the step's color
       hole.style.left = `${r.left - pad}px`;
       hole.style.top = `${r.top - pad}px`;
       hole.style.width = `${r.width + pad * 2}px`;
@@ -301,19 +304,28 @@ export function startTour(steps, opts = {}) {
       onclick: () => { if (s.onNext && s.onNext() === true) return; advance(); },
     }, s.nextLabel || (i === valid.length - 1 ? 'Done' : (s.try ? 'Skip step' : 'Next')));
 
-    tip.replaceChildren(
-      el('div', { class: 'tour-step-count' }, `${i + 1} / ${valid.length}`),
-      el('div', { class: 'tour-title' }, s.title),
+    // Optional per-step accent (color) + kind badge — used by the dynamic copilot
+    // guide to color-code trajectory / rank.json / rubric steps. Tour steps omit these.
+    tip.style.setProperty('--tour-accent', s.accent || 'var(--edge-strong)');
+    tip.classList.toggle('has-accent', !!s.accent);
+    // Filter falsy children so a step without `try`/`title` never renders a literal "null".
+    tip.replaceChildren(...[
+      el('div', { class: 'tour-head' },
+        opts.avatar ? el('img', { class: 'tour-avatar', src: opts.avatar, alt: '' }) : null,
+        el('div', { class: 'tour-step-count' }, `${i + 1} / ${valid.length}`),
+        s.kind ? el('span', { class: 'tour-kind' }, s.kind) : null,
+      ),
+      s.title ? el('div', { class: 'tour-title' }, s.title) : null,
       el('div', { class: 'tour-body' }, s.body),
       status,
       el('div', { class: 'tour-actions' },
-        el('button', { class: 'tour-skip', onclick: end }, 'Skip tour'),
+        el('button', { class: 'tour-skip', onclick: end }, opts.exitLabel || 'Skip tour'),
         el('div', { class: 'tour-nav' },
           i > 0 ? el('button', { onclick: back }, 'Back') : null,
           primaryBtn,
         ),
       ),
-    );
+    ].filter(Boolean));
     place(); // measure + position after content is in the DOM
     if (s.onShow) s.onShow();
 

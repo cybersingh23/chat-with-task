@@ -299,55 +299,93 @@ Answer discipline (strict):
   ordered by expected yield, not an essay.
 `.trim();
 
-// --- dynamic copilot: answer as a clickable, step-by-step guided walkthrough ---
-const GUIDE_RULES = `
-DYNAMIC GUIDE MODE. Instead of a prose answer, produce a step-by-step guided walkthrough the
-reviewer clicks through, each step pointing at an exact place in this task's data.
+// --- dynamic copilot: a conversational, clickable guided walkthrough ---
+// Shared voice: talk like a sharp colleague walking a teammate through a finding —
+// plain English, no rubric-code soup — while every step still points at the exact spot.
+const GUIDE_VOICE = `
+Voice: casual + precise. Talk like a sharp colleague leaning over the reviewer's shoulder —
+plain, direct, a little warm. Say what the problem is and why it matters in everyday words
+("See here — Alpha swore all the tests passed, but it never actually ran them. That's the miss.").
+Do NOT lead with rubric codes or field paths in the prose; the anchor already gives them a
+one-click chip to verify. Short sentences. No preamble.
 
-Investigate with your tools exactly as usual (read/search the trajectories, rank.json, the spec).
-THEN finish by calling the present_guide tool EXACTLY ONCE. Do not also write a prose answer — the
-guide IS the answer.
-
-present_guide arguments:
-- answerable: true only if you can support the answer with at least one concrete anchored step.
-  If it is a general/opinion question with no specific place to point at, set answerable:false with
-  a one-line reason (the reviewer will see "not available for dynamic").
-- verdict_line: one sentence stating the verdict, phrased to open a walkthrough
-  (e.g. "Yes — this is a valid HARD failure. Let me show you why.").
-- steps: an ORDERED array of {anchor, commentary} in the sequence a reviewer should walk;
-  commentary = one or two sentences on what to notice there and why it matters.
-  Every anchor MUST be one of these EXACT forms (nothing else resolves):
-    traj://model_a/<int>  or  traj://model_b/<int>   — a specific trajectory message index
-    field://<rank.json path>   — e.g. field:///results/model_1/grading/correctness/rationale
-    spec://R<n>                — a QC rubric row, e.g. spec://R15
-  Use real indices/paths you actually observed via your tools. Invalid anchors are dropped
-  server-side; if none survive the reviewer gets "not available for dynamic".
+Anchor forms (EXACT — nothing else resolves; use real indices/paths you observed via tools):
+  traj://model_a/<int>  or  traj://model_b/<int>   — a specific trajectory message
+  field://<rank.json path>   — e.g. field:///results/model_1/grading/correctness/rationale
+  spec://R<n>                — a QC rubric row, e.g. spec://R15
+Invalid anchors are dropped server-side.
 `.trim();
+
+const GUIDE_RULES = `
+DYNAMIC GUIDE MODE. Instead of a prose answer, build a step-by-step walkthrough the reviewer
+clicks through, each step pointing at an exact place in this task's data.
+
+${GUIDE_VOICE}
+
+Investigate with your tools as usual, THEN finish by calling present_guide EXACTLY ONCE — the guide
+IS the answer; do not also write prose.
+- answerable: true only if at least one concrete anchored step supports the answer. For a
+  general/opinion question with no place to point at, set answerable:false + a one-line reason.
+- verdict_line: one conversational sentence opening the walk ("Yeah, this one's a real failure —
+  let me walk you through it.").
+- steps: ORDERED {anchor, commentary}; commentary = one or two plain-English sentences on what to
+  notice here and why it matters.
+`.trim();
+
+const GUIDE_FOLLOWUP_RULES = `
+DYNAMIC GUIDE — FOLLOW-UP. The reviewer is partway through a walkthrough you built and just asked
+you something. Investigate with your tools if needed, then call guide_reply EXACTLY ONCE.
+
+${GUIDE_VOICE}
+
+- reply: answer their question directly and conversationally (2–4 sentences).
+- revised_steps: include ONLY if their question means the walkthrough should now go somewhere
+  different — the new ORDERED steps to REPLACE everything AFTER the step they're on (same
+  {anchor, commentary} shape, same anchor rules). Omit it entirely if the existing plan still holds.
+`.trim();
+
+const guideStepsSchema = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      anchor: { type: 'string', description: 'traj://model_a/<int> | traj://model_b/<int> | field://<rank.json path> | spec://R<n>' },
+      commentary: { type: 'string' },
+    },
+    required: ['anchor', 'commentary'],
+  },
+};
 
 const PRESENT_GUIDE_TOOL = {
   type: 'function',
   function: {
     name: 'present_guide',
-    description: 'Deliver the final answer as an ordered, clickable guided walkthrough anchored to exact spots in this task. Call exactly once, at the end, instead of writing a prose answer.',
+    description: 'Deliver the answer as an ordered, clickable guided walkthrough anchored to exact spots. Call exactly once, at the end, instead of writing prose.',
     parameters: {
       type: 'object',
       properties: {
         answerable: { type: 'boolean' },
         reason: { type: 'string', description: 'why not answerable (only when answerable is false)' },
         verdict_line: { type: 'string' },
-        steps: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              anchor: { type: 'string', description: 'traj://model_a/<int> | traj://model_b/<int> | field://<rank.json path> | spec://R<n>' },
-              commentary: { type: 'string' },
-            },
-            required: ['anchor', 'commentary'],
-          },
-        },
+        steps: guideStepsSchema,
       },
       required: ['answerable', 'verdict_line'],
+    },
+  },
+};
+
+const GUIDE_FOLLOWUP_TOOL = {
+  type: 'function',
+  function: {
+    name: 'guide_reply',
+    description: "Answer the reviewer's mid-walkthrough question, and optionally revise the steps that come after where they are now.",
+    parameters: {
+      type: 'object',
+      properties: {
+        reply: { type: 'string' },
+        revised_steps: { ...guideStepsSchema, description: 'omit unless the walkthrough should change course from here' },
+      },
+      required: ['reply'],
     },
   },
 };
@@ -372,12 +410,8 @@ function validateAnchor(anchor, lens, rankRaw, rubricKeys) {
   return { ok: false, why: 'unrecognized anchor form' };
 }
 
-// Build the guide the client will play — every anchor resolved against real task data.
-function validateGuide(bucket, id, args) {
-  const verdict_line = String(args.verdict_line || '').slice(0, 400);
-  if (args.answerable === false) {
-    return { dynamic: false, reason: String(args.reason || 'no anchored evidence'), verdict_line };
-  }
+// Resolve a list of {anchor, commentary} against real task data; drop anything unresolvable.
+function validateSteps(bucket, id, steps) {
   const trajLen = (model) => {
     try { const t = readTrajectory(bucket, id, model); return (t.messages || t || []).length; } catch { return 0; }
   };
@@ -390,13 +424,23 @@ function validateGuide(bucket, id, args) {
 
   const kept = [];
   const dropped = [];
-  for (const s of Array.isArray(args.steps) ? args.steps : []) {
+  for (const s of Array.isArray(steps) ? steps : []) {
     const anchor = String(s?.anchor || '').trim();
     const commentary = String(s?.commentary || '').slice(0, 600);
     const v = validateAnchor(anchor, lens, rankRaw, rubricKeys);
     if (v.ok) kept.push({ anchor: v.anchor, commentary });
     else dropped.push({ anchor, why: v.why });
   }
+  return { kept, dropped };
+}
+
+// Build the guide the client will play — every anchor resolved against real task data.
+function validateGuide(bucket, id, args) {
+  const verdict_line = String(args.verdict_line || '').slice(0, 400);
+  if (args.answerable === false) {
+    return { dynamic: false, reason: String(args.reason || 'no anchored evidence'), verdict_line };
+  }
+  const { kept, dropped } = validateSteps(bucket, id, args.steps);
   if (!kept.length) return { dynamic: false, reason: 'no resolvable anchors', verdict_line, dropped };
   return { dynamic: true, verdict_line, steps: kept, dropped };
 }
@@ -440,6 +484,61 @@ api.post('/task/:bucket/:id/chat', wrap(async (req, res) => {
     sendSSE(res, { type: 'error', message: e.message });
   } finally {
     recordUsage({ user: req.user.username, taskId: id, kind: 'chat', model: config.litellm.model, usage: acc, text: userMsg.content });
+  }
+  res.end();
+}));
+
+// Mid-walkthrough follow-up: answer conversationally, and optionally revise the steps that come
+// after where the reviewer is. Stateless (the client holds the guide); not persisted to chat.
+api.post('/task/:bucket/:id/guide/followup', wrap(async (req, res) => {
+  const { bucket, id } = req.params;
+  const question = String(req.body.question || '').slice(0, 10_000);
+  if (!question) return res.status(400).json({ error: 'question required' });
+  const steps = Array.isArray(req.body.steps) ? req.body.steps : [];
+  const stepIndex = Number.isInteger(req.body.stepIndex) ? req.body.stepIndex : 0;
+  const original = String(req.body.originalQuestion || '').slice(0, 5_000);
+
+  const here = steps[stepIndex] || null;
+  const ahead = steps.slice(stepIndex + 1);
+  const state = [
+    original ? `The walkthrough answers the reviewer's original question: "${original}".` : '',
+    here ? `They are on this step — commentary: "${here.commentary}" (anchor ${here.anchor}).` : 'They are on the opening card.',
+    ahead.length
+      ? `Steps still ahead of them:\n${ahead.map((s, i) => `${i + 1}. (${s.anchor}) ${s.commentary}`).join('\n')}`
+      : 'There are no steps after this one yet.',
+    `They just asked: "${question}"`,
+  ].filter(Boolean).join('\n\n');
+
+  const system = [CHAT_PROMPT, QUALITY_CANON, CITATION_RULES, GUIDE_FOLLOWUP_RULES, taskContext(bucket, id)].join('\n\n');
+  const acc = { prompt_tokens: 0, completion_tokens: 0 };
+  const onUsage = (u) => { acc.prompt_tokens += u.prompt_tokens || 0; acc.completion_tokens += u.completion_tokens || 0; };
+  const baseExec = makeExecutor(bucket, id);
+  const executor = async (name, args) => {
+    if (name !== 'guide_reply') return baseExec(name, args);
+    const reply = String(args.reply || '').slice(0, 2000);
+    let revised = null;
+    if (Array.isArray(args.revised_steps) && args.revised_steps.length) {
+      const { kept } = validateSteps(bucket, id, args.revised_steps);
+      if (kept.length) revised = kept;
+    }
+    sendSSE(res, { type: 'guide_reply', reply, revisedSteps: revised });
+    return `Reply delivered${revised ? ` and ${revised.length} step(s) revised` : ''}. Stop now — do not add prose.`;
+  };
+  startSSE(res);
+  try {
+    await runAgentLoop({
+      messages: [{ role: 'system', content: system }, { role: 'user', content: state }],
+      tools: [...TOOL_DEFS, GUIDE_FOLLOWUP_TOOL],
+      executor,
+      onEvent: (e) => sendSSE(res, e),
+      maxSteps: 30,
+      onUsage,
+    });
+    sendSSE(res, { type: 'done' });
+  } catch (e) {
+    sendSSE(res, { type: 'error', message: e.message });
+  } finally {
+    recordUsage({ user: req.user.username, taskId: id, kind: 'chat', model: config.litellm.model, usage: acc, text: question });
   }
   res.end();
 }));
