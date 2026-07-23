@@ -25,11 +25,17 @@
       <option value="SECOND_OPINION">Second Opinion Needed</option>
     </select>
 
+    <div class="divider"></div>
+
     <button class="tour-btn" id="tour-btn" title="guided walkthrough">✦ Tour</button>
     <button class="danger" id="delete-task" hidden>Delete</button>
+
+    <div class="divider"></div>
+
     <div class="user-chip" id="user-chip" hidden>
+      <span class="avatar sm" id="user-avatar"></span>
       <span id="user-name"></span>
-      <button id="logout-btn">sign out</button>
+      <button id="logout-btn" title="sign out">Sign out</button>
     </div>
   </header>
 
@@ -59,20 +65,31 @@
 
     <aside class="chat-panel glass" id="chat-panel">
       <div class="chat-head">
-        <span class="title">Audit copilot</span>
+        <img class="copilot-avatar" src="/copilot.png" alt="" />
+        <span class="title">Acey</span>
+        <div class="mode-toggle" id="copilot-mode" role="group" aria-label="Copilot mode" title="Static = written answer with citation chips. Dynamic = a clickable, step-by-step guided walkthrough of the evidence.">
+          <button type="button" data-mode="static" class="active">Static</button>
+          <button type="button" data-mode="dynamic">Dynamic</button>
+        </div>
         <button id="clear-chat">clear</button>
-        <button id="collapse-chat" title="hide the copilot panel (or double-click the divider)">Hide</button>
+        <button id="collapse-chat" title="hide Acey (or double-click the divider)">Hide</button>
       </div>
       <div class="chat-log" id="chat-log"></div>
       <div class="status-line" id="chat-status"></div>
       <div class="chat-input">
-        <textarea id="chat-text" placeholder="Ask about this task… (Enter to send, Shift+Enter for newline)"></textarea>
+        <textarea id="chat-text" placeholder="Ask Acey about this task… (Enter to send, Shift+Enter for newline)"></textarea>
         <button class="primary" id="chat-send">Send</button>
       </div>
     </aside>
   </div>
 
-  <button class="chat-fab glass" id="expand-chat" hidden>Copilot ⟨</button>
+  <button class="chat-fab glass" id="expand-chat" hidden aria-label="Ask Acey" title="Ask Acey">
+    <img class="fab-avatar" src="/copilot.png" alt="" />
+  </button>
+  <div class="fab-nudge glass" id="fab-nudge" hidden>
+    <button class="fab-nudge-x" id="fab-nudge-x" title="dismiss" aria-label="dismiss">✕</button>
+    <span>Stuck on this audit? <b>Ask Acey</b> — I’ll walk you through it →</span>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>

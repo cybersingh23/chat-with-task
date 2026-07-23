@@ -19,6 +19,7 @@ import { recordUsage, readUsage, usageCsv } from '../usage.js';
 import { enqueueDocs, jobSummary, statusFor } from '../jobs.js';
 import { startPull, pullStatus, currentDownload } from '../l10.js';
 import { markDelivered, markUndelivered, deliverStatus, currentBackup } from '../deliver.js';
+import { computeL12 } from '../l12.js';
 import { createDummyTask, removeTourTasks, logTour } from '../tour.js';
 
 export const api = express.Router();
@@ -74,9 +75,24 @@ api.post('/spec/rubric', requireAdmin, express.text({ type: '*/*', limit: '8mb' 
 
 api.get('/workspace', wrap(async (req, res) => res.json(listWorkspace())));
 
+// Archive = the delivered (soft-archived) tasks, flattened and viewable by ALL users.
+// Powers the browse/search Archive page. Sorted newest-archived first.
+api.get('/archive', wrap(async (req, res) => {
+  const ws = listWorkspace();
+  const tasks = Object.values(ws).flat().filter((t) => t.delivered && !t.tour);
+  tasks.sort((a, b) => String(b.deliveredAt || '').localeCompare(String(a.deliveredAt || '')));
+  res.json({ tasks, count: tasks.length });
+}));
+
 api.get('/config', (req, res) =>
   res.json({ model: config.litellm.model, deliveryRoots: config.deliveryRoots, workspaceRoot: config.workspaceRoot })
 );
+
+// L12 analytics dashboard data. scope: completed (default) | active | all.
+api.get('/l12', wrap(async (req, res) => {
+  const scope = ['completed', 'active', 'all'].includes(req.query.scope) ? req.query.scope : 'completed';
+  res.json(computeL12(scope));
+}));
 
 api.post('/ingest', requireAdmin, wrap(async (req, res) => {
   const { taskId, bucket } = req.body;
@@ -105,6 +121,26 @@ api.post('/task/:bucket/:id/verdict', wrap(async (req, res) =>
   res.json(setVerdict(req.params.bucket, req.params.id, req.body.verdict ?? null, req.user.username))
 ));
 
+// Bulk workflow move: set a verdict (→ lane) across a whole severity bucket (or explicit ids).
+// Any reviewer can do this — it's a personal workflow action, not an admin edit.
+api.post('/verdict/bulk', wrap(async (req, res) => {
+  const verdict = req.body.verdict ?? null;
+  const only = req.body.bucket && req.body.bucket !== 'ALL' ? req.body.bucket : null;
+  const idSet = Array.isArray(req.body.ids) && req.body.ids.length ? new Set(req.body.ids) : null;
+  const ws = listWorkspace();
+  let moved = 0;
+  for (const [bucket, tasks] of Object.entries(ws)) {
+    if (only && bucket !== only) continue;
+    for (const t of tasks) {
+      if (t.tour) continue;
+      if (idSet && !idSet.has(t.id)) continue;
+      setVerdict(bucket, t.id, verdict, req.user.username);
+      moved++;
+    }
+  }
+  res.json({ moved, verdict });
+}));
+
 // the "key issue" note behind a Second Opinion verdict
 api.post('/task/:bucket/:id/verdict-note', wrap(async (req, res) =>
   res.json(setVerdictNote(req.params.bucket, req.params.id, req.body.note ?? '', req.user.username))
@@ -129,16 +165,22 @@ api.get('/export/ids/:bucket', wrap(async (req, res) => {
 }));
 
 api.get('/export/all.csv', wrap(async (req, res) => {
+  const RESOLVED = new Set(['NO_ISSUES', 'FIXES_MADE', 'SBQ']);
+  const laneOf = (t) => t.verdict === 'SECOND_OPINION' ? '2nd opinion'
+    : (t.verdict && RESOLVED.has(t.verdict)) ? 'Resolved'
+    : t.claimedBy ? 'In review' : 'Open';
+  const csv = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const ws = listWorkspace();
-  const lines = ['task_id,bucket,verdict,claimed_by,has_review,has_remediation'];
+  const lines = ['task_id,bucket,lane,verdict,claimed_by,tags,has_review,has_remediation'];
   for (const [bucket, tasks] of Object.entries(ws)) {
     for (const t of tasks) {
-      if (t.tour) continue;
-      lines.push([t.id, bucket, t.verdict || '', t.claimedBy || '', t.hasReview, t.hasRemediation].join(','));
+      if (t.tour) continue;   // dummy tour tasks aren't real audit tasks
+      const tags = t.grammar ? 'Spelling/Grammar Issues' : '';
+      lines.push([t.id, bucket, laneOf(t), t.verdict || '', t.claimedBy || '', tags, t.hasReview, t.hasRemediation].map(csv).join(','));
     }
   }
   res.setHeader('content-type', 'text/csv');
-  res.setHeader('content-disposition', 'attachment; filename="workspace_export.csv"');
+  res.setHeader('content-disposition', 'attachment; filename="audit_studio_export.csv"');
   res.send(lines.join('\n') + '\n');
 }));
 
@@ -276,7 +318,7 @@ api.get('/task/:bucket/:id/docstatus', wrap(async (req, res) => res.json(statusF
 
 // --- chat with task (SSE agent loop, history persisted in _chat.json) ---
 const CHAT_PROMPT = `
-You are the ACC quality SME embedded in a QM reviewer's audit session. You know the customer
+You are Acey, the ACC quality SME embedded in a QM reviewer's audit session. You know the customer
 program spec cold (the quality canon below; full texts via read_spec) and you have tools over
 this task's files. The reviewer already has a verbose review.md and remediation.md — you are NOT
 another source of prose. You are the source of truth they consult for specific questions.
@@ -299,6 +341,152 @@ Answer discipline (strict):
   ordered by expected yield, not an essay.
 `.trim();
 
+// --- dynamic copilot: a conversational, clickable guided walkthrough ---
+// Shared voice: talk like a sharp colleague walking a teammate through a finding —
+// plain English, no rubric-code soup — while every step still points at the exact spot.
+const GUIDE_VOICE = `
+Voice: casual + precise. Talk like a sharp colleague leaning over the reviewer's shoulder —
+plain, direct, a little warm. Say what the problem is and why it matters in everyday words
+("See here — Alpha swore all the tests passed, but it never actually ran them. That's the miss.").
+Do NOT lead with rubric codes or field paths in the prose; the anchor already gives them a
+one-click chip to verify. Short sentences. No preamble.
+
+Anchor forms (EXACT — nothing else resolves; use real indices/paths you observed via tools):
+  traj://model_a/<int>  or  traj://model_b/<int>   — a specific trajectory message
+  field://<rank.json path>   — e.g. field:///results/model_1/grading/correctness/rationale
+  spec://R<n>                — a QC rubric row, e.g. spec://R15
+Invalid anchors are dropped server-side.
+`.trim();
+
+const GUIDE_RULES = `
+DYNAMIC GUIDE MODE. Instead of a prose answer, build a step-by-step walkthrough the reviewer
+clicks through, each step pointing at an exact place in this task's data.
+
+${GUIDE_VOICE}
+
+Investigate with your tools as usual, THEN finish by calling present_guide EXACTLY ONCE — the guide
+IS the answer; do not also write prose.
+- answerable: true only if at least one concrete anchored step supports the answer. For a
+  general/opinion question with no place to point at, set answerable:false + a one-line reason.
+- verdict_line: one conversational sentence opening the walk ("Yeah, this one's a real failure —
+  let me walk you through it.").
+- steps: ORDERED {anchor, commentary}; commentary = one or two plain-English sentences on what to
+  notice here and why it matters.
+`.trim();
+
+const GUIDE_FOLLOWUP_RULES = `
+DYNAMIC GUIDE — FOLLOW-UP. The reviewer is partway through a walkthrough you built and just asked
+you something. Investigate with your tools if needed, then call guide_reply EXACTLY ONCE.
+
+${GUIDE_VOICE}
+
+- reply: answer their question directly and conversationally (2–4 sentences).
+- revised_steps: include ONLY if their question means the walkthrough should now go somewhere
+  different — the new ORDERED steps to REPLACE everything AFTER the step they're on (same
+  {anchor, commentary} shape, same anchor rules). Omit it entirely if the existing plan still holds.
+`.trim();
+
+const guideStepsSchema = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      anchor: { type: 'string', description: 'traj://model_a/<int> | traj://model_b/<int> | field://<rank.json path> | spec://R<n>' },
+      commentary: { type: 'string' },
+    },
+    required: ['anchor', 'commentary'],
+  },
+};
+
+const PRESENT_GUIDE_TOOL = {
+  type: 'function',
+  function: {
+    name: 'present_guide',
+    description: 'Deliver the answer as an ordered, clickable guided walkthrough anchored to exact spots. Call exactly once, at the end, instead of writing prose.',
+    parameters: {
+      type: 'object',
+      properties: {
+        answerable: { type: 'boolean' },
+        reason: { type: 'string', description: 'why not answerable (only when answerable is false)' },
+        verdict_line: { type: 'string' },
+        steps: guideStepsSchema,
+      },
+      required: ['answerable', 'verdict_line'],
+    },
+  },
+};
+
+const GUIDE_FOLLOWUP_TOOL = {
+  type: 'function',
+  function: {
+    name: 'guide_reply',
+    description: "Answer the reviewer's mid-walkthrough question, and optionally revise the steps that come after where they are now.",
+    parameters: {
+      type: 'object',
+      properties: {
+        reply: { type: 'string' },
+        revised_steps: { ...guideStepsSchema, description: 'omit unless the walkthrough should change course from here' },
+      },
+      required: ['reply'],
+    },
+  },
+};
+
+const resolvePath = (obj, p) => p.split('/').filter(Boolean).reduce((o, k) => (o == null ? undefined : o[k]), obj);
+
+function validateAnchor(anchor, lens, rankRaw, rubricKeys) {
+  let m;
+  if ((m = anchor.match(/^traj:\/\/(model_[ab])\/(\d+)$/))) {
+    const idx = Number(m[2]);
+    if (idx >= 0 && idx < lens[m[1]]) return { ok: true, anchor };
+    return { ok: false, why: `traj index ${idx} out of range (0..${Math.max(lens[m[1]] - 1, 0)})` };
+  }
+  if ((m = anchor.match(/^field:\/\/(\/.+)$/))) {
+    if (rankRaw && resolvePath(rankRaw, m[1]) !== undefined) return { ok: true, anchor };
+    return { ok: false, why: `rank.json path not found: ${m[1]}` };
+  }
+  if ((m = anchor.match(/^spec:\/\/(R\d+)$/))) {
+    if (!rubricKeys || rubricKeys.has(m[1])) return { ok: true, anchor };
+    return { ok: false, why: `rubric ${m[1]} not found` };
+  }
+  return { ok: false, why: 'unrecognized anchor form' };
+}
+
+// Resolve a list of {anchor, commentary} against real task data; drop anything unresolvable.
+function validateSteps(bucket, id, steps) {
+  const trajLen = (model) => {
+    try { const t = readTrajectory(bucket, id, model); return (t.messages || t || []).length; } catch { return 0; }
+  };
+  const lens = { model_a: trajLen('model_a'), model_b: trajLen('model_b') };
+  let rankRaw = null;
+  try { rankRaw = JSON.parse(fs.readFileSync(path.join(taskDir(bucket, id), 'rank.json'), 'utf8')); } catch { /* no rank */ }
+  let rubricKeys = null;
+  try { const r = getRubric(); rubricKeys = new Set(Object.keys(r?.dimensions || r || {}).filter((k) => /^R\d+$/.test(k))); } catch { /* no rubric */ }
+  if (rubricKeys && !rubricKeys.size) rubricKeys = null; // no rubric loaded → don't hard-fail spec anchors
+
+  const kept = [];
+  const dropped = [];
+  for (const s of Array.isArray(steps) ? steps : []) {
+    const anchor = String(s?.anchor || '').trim();
+    const commentary = String(s?.commentary || '').slice(0, 600);
+    const v = validateAnchor(anchor, lens, rankRaw, rubricKeys);
+    if (v.ok) kept.push({ anchor: v.anchor, commentary });
+    else dropped.push({ anchor, why: v.why });
+  }
+  return { kept, dropped };
+}
+
+// Build the guide the client will play — every anchor resolved against real task data.
+function validateGuide(bucket, id, args) {
+  const verdict_line = String(args.verdict_line || '').slice(0, 400);
+  if (args.answerable === false) {
+    return { dynamic: false, reason: String(args.reason || 'no anchored evidence'), verdict_line };
+  }
+  const { kept, dropped } = validateSteps(bucket, id, args.steps);
+  if (!kept.length) return { dynamic: false, reason: 'no resolvable anchors', verdict_line, dropped };
+  return { dynamic: true, verdict_line, steps: kept, dropped };
+}
+
 api.post('/task/:bucket/:id/chat', wrap(async (req, res) => {
   const { bucket, id } = req.params;
   const dir = taskDir(bucket, id);
@@ -306,15 +494,28 @@ api.post('/task/:bucket/:id/chat', wrap(async (req, res) => {
   const userMsg = { role: 'user', content: String(req.body.message || '').slice(0, 50_000) };
   if (!userMsg.content) return res.status(400).json({ error: 'message required' });
 
-  const system = [CHAT_PROMPT, QUALITY_CANON, CITATION_RULES, taskContext(bucket, id)].join('\n\n');
+  const dynamic = req.body.mode === 'dynamic';
+  const system = [CHAT_PROMPT, QUALITY_CANON, CITATION_RULES, dynamic ? GUIDE_RULES : '', taskContext(bucket, id)]
+    .filter(Boolean).join('\n\n');
   const acc = { prompt_tokens: 0, completion_tokens: 0 };
   const onUsage = (u) => { acc.prompt_tokens += u.prompt_tokens || 0; acc.completion_tokens += u.completion_tokens || 0; };
+  // In dynamic mode the model's final answer is a present_guide tool call: validate its anchors
+  // against real task data and push the built guide straight to the client.
+  const baseExec = makeExecutor(bucket, id);
+  const executor = !dynamic ? baseExec : async (name, args) => {
+    if (name !== 'present_guide') return baseExec(name, args);
+    const guide = validateGuide(bucket, id, args);
+    sendSSE(res, { type: 'guide', guide });
+    return guide.dynamic
+      ? `Guide delivered to the reviewer (${guide.steps.length} validated step(s)${guide.dropped?.length ? `, ${guide.dropped.length} dropped as unresolvable` : ''}). Stop now — do not add any prose.`
+      : `Guide not available for dynamic (${guide.reason}); the reviewer was told. Stop now — do not add any prose.`;
+  };
   startSSE(res);
   try {
     const { messages } = await runAgentLoop({
       messages: [{ role: 'system', content: system }, ...history, userMsg],
-      tools: TOOL_DEFS,
-      executor: makeExecutor(bucket, id),
+      tools: dynamic ? [...TOOL_DEFS, PRESENT_GUIDE_TOOL] : TOOL_DEFS,
+      executor,
       onEvent: (e) => sendSSE(res, e),
       maxSteps: 50,
       onUsage,
@@ -325,6 +526,61 @@ api.post('/task/:bucket/:id/chat', wrap(async (req, res) => {
     sendSSE(res, { type: 'error', message: e.message });
   } finally {
     recordUsage({ user: req.user.username, taskId: id, kind: 'chat', model: config.litellm.model, usage: acc, text: userMsg.content });
+  }
+  res.end();
+}));
+
+// Mid-walkthrough follow-up: answer conversationally, and optionally revise the steps that come
+// after where the reviewer is. Stateless (the client holds the guide); not persisted to chat.
+api.post('/task/:bucket/:id/guide/followup', wrap(async (req, res) => {
+  const { bucket, id } = req.params;
+  const question = String(req.body.question || '').slice(0, 10_000);
+  if (!question) return res.status(400).json({ error: 'question required' });
+  const steps = Array.isArray(req.body.steps) ? req.body.steps : [];
+  const stepIndex = Number.isInteger(req.body.stepIndex) ? req.body.stepIndex : 0;
+  const original = String(req.body.originalQuestion || '').slice(0, 5_000);
+
+  const here = steps[stepIndex] || null;
+  const ahead = steps.slice(stepIndex + 1);
+  const state = [
+    original ? `The walkthrough answers the reviewer's original question: "${original}".` : '',
+    here ? `They are on this step — commentary: "${here.commentary}" (anchor ${here.anchor}).` : 'They are on the opening card.',
+    ahead.length
+      ? `Steps still ahead of them:\n${ahead.map((s, i) => `${i + 1}. (${s.anchor}) ${s.commentary}`).join('\n')}`
+      : 'There are no steps after this one yet.',
+    `They just asked: "${question}"`,
+  ].filter(Boolean).join('\n\n');
+
+  const system = [CHAT_PROMPT, QUALITY_CANON, CITATION_RULES, GUIDE_FOLLOWUP_RULES, taskContext(bucket, id)].join('\n\n');
+  const acc = { prompt_tokens: 0, completion_tokens: 0 };
+  const onUsage = (u) => { acc.prompt_tokens += u.prompt_tokens || 0; acc.completion_tokens += u.completion_tokens || 0; };
+  const baseExec = makeExecutor(bucket, id);
+  const executor = async (name, args) => {
+    if (name !== 'guide_reply') return baseExec(name, args);
+    const reply = String(args.reply || '').slice(0, 2000);
+    let revised = null;
+    if (Array.isArray(args.revised_steps) && args.revised_steps.length) {
+      const { kept } = validateSteps(bucket, id, args.revised_steps);
+      if (kept.length) revised = kept;
+    }
+    sendSSE(res, { type: 'guide_reply', reply, revisedSteps: revised });
+    return `Reply delivered${revised ? ` and ${revised.length} step(s) revised` : ''}. Stop now — do not add prose.`;
+  };
+  startSSE(res);
+  try {
+    await runAgentLoop({
+      messages: [{ role: 'system', content: system }, { role: 'user', content: state }],
+      tools: [...TOOL_DEFS, GUIDE_FOLLOWUP_TOOL],
+      executor,
+      onEvent: (e) => sendSSE(res, e),
+      maxSteps: 30,
+      onUsage,
+    });
+    sendSSE(res, { type: 'done' });
+  } catch (e) {
+    sendSSE(res, { type: 'error', message: e.message });
+  } finally {
+    recordUsage({ user: req.user.username, taskId: id, kind: 'chat', model: config.litellm.model, usage: acc, text: question });
   }
   res.end();
 }));
