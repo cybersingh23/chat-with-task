@@ -6,7 +6,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { config } from './config.js';
 import { assertBucket, ensureWorkspace, findTaskBucket, httpError } from './workspace.js';
-import { writeAuditSeed } from './ingest.js';
+import { writeAuditSeed, ensureRankingProof } from './ingest.js';
 
 const execFileP = promisify(execFile);
 const TASK_ID_RE = /^[a-f0-9]{24}$/;
@@ -139,6 +139,7 @@ function bulkIngest(taskRoots, fields, forcedId = null) {
     }
     const dest = path.join(config.workspaceRoot, bucket, taskId);
     fs.cpSync(taskRoot, dest, { recursive: true });
+    ensureRankingProof(dest); // re-fetch any proof image that didn't materialize (expired CDS URL) while it's still uploadable
     if (studio) fs.writeFileSync(path.join(dest, '_studio.json'), studio); // keeps checklist/delivered; verdict+claim reset if reopened
     let seeded = false;
     if (fs.existsSync(path.join(deliveryDir, '_audit'))) {

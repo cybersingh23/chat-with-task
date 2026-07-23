@@ -8,17 +8,24 @@ import { config } from './config.js';
 const USAGE_PATH = path.join(config.dataDir, 'usage.jsonl');
 
 // Cost is an estimate at a configurable rate ($ per 1M tokens). Tokens are the
-// ground truth from the API; rate defaults to Opus-tier pricing.
+// ground truth from the API; rate defaults to the current model pricing
+// ($5 / $25 per 1M in/out). Override via PRICE_INPUT_PER_1M / PRICE_OUTPUT_PER_1M.
 export function rate() {
   return {
-    inPer1M: Number(process.env.PRICE_INPUT_PER_1M ?? 15),
-    outPer1M: Number(process.env.PRICE_OUTPUT_PER_1M ?? 75),
+    inPer1M: Number(process.env.PRICE_INPUT_PER_1M ?? 5),
+    outPer1M: Number(process.env.PRICE_OUTPUT_PER_1M ?? 25),
   };
 }
 
 export function costOf(promptTokens, completionTokens) {
   const r = rate();
   return (promptTokens / 1e6) * r.inPer1M + (completionTokens / 1e6) * r.outPer1M;
+}
+
+// Tokens are ground truth; cost is always (re)derived from them at the CURRENT
+// rate, so a pricing change applies to the whole history, not just new events.
+function withCost(e) {
+  return { ...e, cost: Number(costOf(e.prompt_tokens || 0, e.completion_tokens || 0).toFixed(6)) };
 }
 
 export function recordUsage({ user, taskId, kind, model, usage, text }) {
@@ -45,7 +52,7 @@ export function readUsage(limit = 500) {
   let events = [];
   try {
     events = fs.readFileSync(USAGE_PATH, 'utf8').trim().split('\n').filter(Boolean)
-      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .map((l) => { try { return withCost(JSON.parse(l)); } catch { return null; } })
       .filter(Boolean);
   } catch {
     return { events: [], byUser: [], byDay: [], totals: blank(), rate: rate() };
@@ -71,7 +78,7 @@ export function usageCsv() {
   let events = [];
   try {
     events = fs.readFileSync(USAGE_PATH, 'utf8').trim().split('\n').filter(Boolean)
-      .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      .map((l) => { try { return withCost(JSON.parse(l)); } catch { return null; } }).filter(Boolean);
   } catch { /* no log yet */ }
   const cols = ['ts', 'user', 'taskId', 'kind', 'model', 'prompt_tokens', 'completion_tokens', 'cost', 'text'];
   const esc = (v) => {

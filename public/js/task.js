@@ -408,7 +408,7 @@ function buildTaskDefView(presence) {
     el('h2', {}, `Milestones (${taskDef.milestones.length})`),
     el('p', { class: 'hint-line' },
       'The annotator must enter each milestone prompt (paraphrase counts) in order, in both trajectories. ',
-      'Present / not-present matches distinctive words in order, one user turn per milestone — it errs toward "not found" over false positives, and can miss heavy paraphrases, so if a milestone reads "not found" but you believe it is there, ask the copilot to confirm. ',
+      'Present / not-present matches distinctive words in order, one user turn per milestone — it errs toward "not found" over false positives, and can miss heavy paraphrases, so if a milestone reads "not found" but you believe it is there, ask Acey to confirm. ',
       '"Locate" jumps to the closest user turn — navigation, not a coverage verdict.'),
     taskDef.milestones.map((m, i) =>
       el('div', { class: 'milestone' },
@@ -419,18 +419,59 @@ function buildTaskDefView(presence) {
           presence ? presenceChip(m, presence[m.id]?.model_a, presence[m.id]?.model_b) : null,
           el('button', { onclick: () => locateMilestone('model_a', m) }, 'Locate in A'),
           el('button', { onclick: () => locateMilestone('model_b', m) }, 'Locate in B'),
-          el('button', { onclick: () => askCopilotAboutMilestone(m) }, 'Ask copilot'),
+          el('button', { onclick: () => askCopilotAboutMilestone(m) }, 'Ask Acey'),
         ),
         el('div', { class: 'milestone-prompt' }, m.prompt),
       )
     ),
     taskDef.user_persona
-      ? [el('h2', {}, 'User persona'), el('div', { class: 'callout' }, taskDef.user_persona)]
+      ? [el('h2', {}, 'User persona'), renderPersona(taskDef.user_persona)]
       : null,
     taskDef.guardrails.length
       ? [el('h2', {}, 'Guardrails'), el('ul', {}, taskDef.guardrails.map((g) => el('li', {}, g)))]
       : null,
   );
+}
+
+// The persona usually ships as a JSON blob ({high_level_goals, hint_policy, …}).
+// Render it as labeled cards instead of dumping the raw string. hint_policy is
+// audit-critical (what the persona will / won't reveal), so it gets a highlight.
+const PERSONA_FIELDS = [
+  ['high_level_goals', 'Goals', '◎', ''],
+  ['familiarity_with_tools', 'Tooling familiarity', '⚒', ''],
+  ['opinions_on_patterns', 'Opinions & preferences', '✦', ''],
+  ['communication_style', 'Communication style', '❝', ''],
+  ['patience_style', 'Patience', '⏳', ''],
+  ['hint_policy', 'Hint policy', '⚑', 'key'],
+];
+function humanizeKey(k) {
+  return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+function personaCard(label, icon, value, cls) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  return el('div', { class: `persona-field${cls ? ' ' + cls : ''}` },
+    el('div', { class: 'persona-label' }, el('span', { class: 'persona-ico' }, icon), el('span', {}, label)),
+    el('div', { class: 'persona-value' }, text),
+  );
+}
+function renderPersona(raw) {
+  let data = raw;
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    data = s[0] === '{' || s[0] === '[' ? (() => { try { return JSON.parse(s); } catch { return null; } })() : null;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return el('div', { class: 'callout persona-plain' }, String(raw)); // not structured — plain text
+  }
+  const known = new Set(PERSONA_FIELDS.map((f) => f[0]));
+  const rows = [];
+  for (const [key, label, icon, cls] of PERSONA_FIELDS) {
+    if (data[key] != null && data[key] !== '') rows.push(personaCard(label, icon, data[key], cls));
+  }
+  for (const [key, v] of Object.entries(data)) {
+    if (!known.has(key) && v != null && v !== '') rows.push(personaCard(humanizeKey(key), '•', v, ''));
+  }
+  return rows.length ? el('div', { class: 'persona' }, ...rows) : el('div', { class: 'callout persona-plain' }, String(raw));
 }
 
 async function locateMilestone(model, milestone) {
@@ -552,7 +593,7 @@ function buildQcSpecView(dimensions) {
     el('h1', {}, 'QC spec'),
     el('p', { class: 'hint-line' },
       `V5 rubric · ${dimensions.length} failure modes across ${byCategory.size} categories. `,
-      'Cited as R-keys throughout reviews, remediations, and the copilot — click any citation to land on its card.'),
+      'Cited as R-keys throughout reviews, remediations, and Acey — click any citation to land on its card.'),
     ...[...byCategory.entries()].flatMap(([category, groups]) => [
       el('h2', { class: 'spec-cat' }, category),
       [...groups.entries()].map(([group, dims]) => {
@@ -636,8 +677,8 @@ function cssEscape(s) {
 function scoreClass(score) {
   const n = Number(score);
   if (!Number.isFinite(n)) return '';
-  if (n >= 4) return 'good';
-  if (n === 3) return 'mid';
+  if (n >= 3) return 'good';   // ACC dimensions are scored 1–3 (3 = best)
+  if (n === 2) return 'mid';
   return 'bad';
 }
 
@@ -722,7 +763,7 @@ function buildCbResponsesView(rank) {
         rat.innerHTML = renderMarkdown(g.rationale || '_(none)_');
         tbody.append(el('tr', { 'data-cb-dim': g.dim },
           el('td', { class: 'dim' }, g.dim.replace(/_/g, ' ')),
-          el('td', { class: 'score' }, g.score != null ? el('span', { class: `cb-score ${scoreClass(g.score)}` }, `${g.score} / 5`) : '—'),
+          el('td', { class: 'score' }, g.score != null ? el('span', { class: `cb-score ${scoreClass(g.score)}` }, `${g.score} / 3`) : '—'),
           rat,
         ));
       }
@@ -1328,17 +1369,30 @@ const chatStatus = document.getElementById('chat-status');
 // ---------- dynamic copilot: static answer vs. guided walkthrough ----------
 let copilotMode = localStorage.getItem('cwt_copilot_mode') === 'dynamic' ? 'dynamic' : 'static';
 const modeToggle = document.getElementById('copilot-mode');
+const chatPanel = document.getElementById('chat-panel');
+// A living ambient layer behind the chat — aurora glow in dynamic, calm in static.
+const chatAmbient = el('div', { class: 'chat-ambient', 'aria-hidden': 'true' });
+chatPanel?.prepend(chatAmbient);
 function syncModeToggle() {
   modeToggle?.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.mode === copilotMode));
 }
+function applyMode() {
+  chatPanel?.classList.toggle('mode-dynamic', copilotMode === 'dynamic');
+  chatPanel?.classList.toggle('mode-static', copilotMode === 'static');
+}
 modeToggle?.addEventListener('click', (e) => {
   const b = e.target.closest('button[data-mode]');
-  if (!b) return;
+  if (!b || b.dataset.mode === copilotMode) return;
   copilotMode = b.dataset.mode;
   localStorage.setItem('cwt_copilot_mode', copilotMode);
   syncModeToggle();
+  applyMode();
+  // one-shot light sweep across the panel to punctuate the switch
+  chatPanel?.classList.add('mode-switching');
+  setTimeout(() => chatPanel?.classList.remove('mode-switching'), 650);
 });
 syncModeToggle();
+applyMode();
 
 // A guide anchor -> the existing deep-link resolver (mounts the view, scrolls, highlights).
 function resolveAnchor(anchor) {
@@ -1471,7 +1525,7 @@ function playGuide(guide, originalQuestion = '') {
     const thread = (threads[idx] || []).map((m) =>
       el('div', { class: `dg-turn ${m.who}` }, m.text));
 
-    bubble.replaceChildren(
+    bubble.replaceChildren(...[
       el('div', { class: 'dg-head' },
         s.kind ? el('span', { class: 'dg-kind' }, s.kind) : el('span', {}),
         dots,
@@ -1493,7 +1547,7 @@ function playGuide(guide, originalQuestion = '') {
             idx === 0 ? 'Show me ▸' : (idx >= total() - 1 ? 'Done' : 'Next ▸')),
         ),
       ),
-    );
+    ].filter(Boolean));
   }
 
   activeGuide = { close };
@@ -1518,7 +1572,7 @@ function renderGuideBubble(guide, question = '') {
     body.append(el('div', { class: 'tool-line' },
       `Not available for dynamic — ${guide.reason || 'no anchored evidence'}. Switch to Static for a written answer.`));
   }
-  chatLog.append(el('div', { class: 'chat-msg assistant' }, el('div', { class: 'who' }, 'copilot'), body));
+  chatLog.append(el('div', { class: 'chat-msg assistant' }, el('div', { class: 'who' }, 'Acey'), body));
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
@@ -1540,7 +1594,7 @@ function renderChatIntro() {
   return el('div', { class: 'chat-intro' },
     el('div', { class: 'chat-hero' },
       el('img', { class: 'copilot-avatar hero', src: '/copilot.png', alt: '' }),
-      el('div', { class: 'chat-hero-name' }, 'Audit copilot'),
+      el('div', { class: 'chat-hero-name' }, 'Acey'),
       el('div', { class: 'chat-hero-tag' }, 'your embedded ACC quality SME'),
     ),
     el('div', { class: 'chat-intro-text' },
@@ -1566,7 +1620,7 @@ function appendChat(role, content) {
   else bubble.textContent = content;
   chatLog.append(
     el('div', { class: `chat-msg ${role}` },
-      el('div', { class: 'who' }, role === 'user' ? 'reviewer' : 'copilot'),
+      el('div', { class: 'who' }, role === 'user' ? 'reviewer' : 'Acey'),
       bubble,
     )
   );
@@ -1762,8 +1816,8 @@ const TASK_TOUR = [
   { selector: '#nav-docs', title: 'Documents', body: 'Task definition & milestones, the V5 QC spec, and CB responses — the annotator\'s rank.json in a clean UI (summary, per-dimension grading, failure modes, and the A↔B decision). The generated Review, Remediation, and your Checklist live here too.' },
   { selector: '#nav-trajs', title: 'Trajectory viewer', body: 'Read Model A or Model B on their own, or Compare A ↔ B side by side to see exactly where the two runs diverge — matching prompts line up, and one-sided turns are clearly called out.' },
   { selector: '#viewer', title: 'Clickable citation "chips"', body: 'Everywhere you read — docs, CB responses, copilot answers — you\'ll see little chips. A traj:// chip jumps to an exact trajectory turn; a spec:// chip opens the QC rubric row that applies; a /rank.json field chip lands you in CB responses. Each one scrolls to the precise spot and highlights it — even a specific quoted phrase inside a response. See one? Click it.' },
-  { selector: '#chat-panel', title: 'Your audit copilot — try it 🚀', body: 'Ask anything about this task. It reads and searches both trajectories and cross-checks the rank.json, then answers with those same clickable chips so you can verify in one click. I\'ve dropped a starter question in the box — click a suggestion or hit Send, and I\'ll wait for the reply.',
-    onShow: primeCopilot, try: { action: 'copilot', hint: 'Waiting for the copilot to answer…', verify: verifyCopilot } },
+  { selector: '#chat-panel', title: 'Meet Acey — try it 🚀', body: 'Ask Acey anything about this task. It reads and searches both trajectories and cross-checks the rank.json, then answers with those same clickable chips so you can verify in one click. I\'ve dropped a starter question in the box — click a suggestion or hit Send, and I\'ll wait for the reply.',
+    onShow: primeCopilot, try: { action: 'copilot', hint: 'Waiting for Acey to answer…', verify: verifyCopilot } },
   { selector: '#verdict-select', title: 'Try it: record a decision ✅', body: 'Set a decision for this sandbox task — No Issues / Fixes made / SBQ / Second Opinion. Pick Second Opinion and it\'ll ask for the key issue, which then shows on the board card for the next reviewer.',
     try: { action: 'decision', hint: 'Waiting for you to pick a decision…', verify: verifyDecision } },
   { selector: '#claim-btn', title: 'Claim the task', body: 'Claim it so the team knows you\'re auditing it — your name then shows on the board for everyone. (Feel free to try it.)' },
@@ -1861,6 +1915,11 @@ function openCopilotWithFlair() {
 const me = await api('/me'); // 401 redirects to login
 document.getElementById('user-chip').hidden = false;
 document.getElementById('user-name').textContent = me.username;
+const uAvatar = document.getElementById('user-avatar');
+if (uAvatar) {
+  uAvatar.textContent = (me.username[0] || '?').toUpperCase();
+  uAvatar.style.background = `hsl(${avatarHue(me.username)} 52% 42%)`;
+}
 if (me.role === 'admin') {
   const del = document.getElementById('delete-task');
   del.hidden = false;

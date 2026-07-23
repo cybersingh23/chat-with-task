@@ -12,6 +12,8 @@
     <div class="app-name">Chat with Task <span>/ ACC Audit Studio</span></div>
     <div class="spacer"></div>
     <button class="tour-btn" id="tour-btn" title="guided walkthrough">✦ Take a tour</button>
+    <a class="back-home" href="/l12.html" title="delivery analytics dashboard">L12 Stats</a>
+    <a class="back-home" href="/archive.html" title="browse archived / delivered tasks">Archive</a>
     <a class="back-home" id="admin-link" href="/admin.html" hidden>Admin Console</a>
     <div class="user-chip" id="user-chip" hidden>
       <span id="user-name"></span><span class="role" id="user-role"></span>
@@ -106,6 +108,27 @@
     <div class="toolbar">
       <span class="summary" id="ws-summary"></span>
       <div class="right">
+        <div class="bulk-verdict" id="bulk-verdict" title="Move a whole group of tasks into a workflow lane at once">
+          <span class="bv-label">Bulk move</span>
+          <select id="bv-src" aria-label="which tasks to move">
+            <option value="PASS">All Pass</option>
+            <option value="SOFT_FAIL">All Soft</option>
+            <option value="HARD_FAIL">All Hard</option>
+            <option value="UNSORTED">All Unsorted</option>
+            <option value="ALL">Everything</option>
+          </select>
+          <span class="bv-arrow">→</span>
+          <select id="bv-dst" aria-label="destination lane">
+            <option value="NO_ISSUES">Complete</option>
+            <option value="SECOND_OPINION">Needs 2nd Opinion</option>
+            <option value="FIXES_MADE">Fixes Made</option>
+            <option value="SBQ">SBQ</option>
+            <option value="">Reopen</option>
+          </select>
+          <button id="bv-apply">Move</button>
+          <span class="mono" id="bv-status"></span>
+        </div>
+        <button class="quiet" id="archive-completed" hidden title="Move every completed (Resolved-lane) task, any severity, into the Archive"></button>
         <button class="quiet" id="toggle-delivered" hidden></button>
         <button class="quiet" id="gen-all" hidden>Generate all docs</button>
         <button class="quiet" id="export-csv">Export all · CSV</button>

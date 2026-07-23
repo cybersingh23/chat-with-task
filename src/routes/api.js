@@ -19,6 +19,7 @@ import { recordUsage, readUsage, usageCsv } from '../usage.js';
 import { enqueueDocs, jobSummary, statusFor } from '../jobs.js';
 import { startPull, pullStatus, currentDownload } from '../l10.js';
 import { markDelivered, markUndelivered, deliverStatus, currentBackup } from '../deliver.js';
+import { computeL12 } from '../l12.js';
 import { createDummyTask, removeTourTasks, logTour } from '../tour.js';
 
 export const api = express.Router();
@@ -74,9 +75,24 @@ api.post('/spec/rubric', requireAdmin, express.text({ type: '*/*', limit: '8mb' 
 
 api.get('/workspace', wrap(async (req, res) => res.json(listWorkspace())));
 
+// Archive = the delivered (soft-archived) tasks, flattened and viewable by ALL users.
+// Powers the browse/search Archive page. Sorted newest-archived first.
+api.get('/archive', wrap(async (req, res) => {
+  const ws = listWorkspace();
+  const tasks = Object.values(ws).flat().filter((t) => t.delivered && !t.tour);
+  tasks.sort((a, b) => String(b.deliveredAt || '').localeCompare(String(a.deliveredAt || '')));
+  res.json({ tasks, count: tasks.length });
+}));
+
 api.get('/config', (req, res) =>
   res.json({ model: config.litellm.model, deliveryRoots: config.deliveryRoots, workspaceRoot: config.workspaceRoot })
 );
+
+// L12 analytics dashboard data. scope: completed (default) | active | all.
+api.get('/l12', wrap(async (req, res) => {
+  const scope = ['completed', 'active', 'all'].includes(req.query.scope) ? req.query.scope : 'completed';
+  res.json(computeL12(scope));
+}));
 
 api.post('/ingest', requireAdmin, wrap(async (req, res) => {
   const { taskId, bucket } = req.body;
@@ -105,6 +121,26 @@ api.post('/task/:bucket/:id/verdict', wrap(async (req, res) =>
   res.json(setVerdict(req.params.bucket, req.params.id, req.body.verdict ?? null, req.user.username))
 ));
 
+// Bulk workflow move: set a verdict (→ lane) across a whole severity bucket (or explicit ids).
+// Any reviewer can do this — it's a personal workflow action, not an admin edit.
+api.post('/verdict/bulk', wrap(async (req, res) => {
+  const verdict = req.body.verdict ?? null;
+  const only = req.body.bucket && req.body.bucket !== 'ALL' ? req.body.bucket : null;
+  const idSet = Array.isArray(req.body.ids) && req.body.ids.length ? new Set(req.body.ids) : null;
+  const ws = listWorkspace();
+  let moved = 0;
+  for (const [bucket, tasks] of Object.entries(ws)) {
+    if (only && bucket !== only) continue;
+    for (const t of tasks) {
+      if (t.tour) continue;
+      if (idSet && !idSet.has(t.id)) continue;
+      setVerdict(bucket, t.id, verdict, req.user.username);
+      moved++;
+    }
+  }
+  res.json({ moved, verdict });
+}));
+
 // the "key issue" note behind a Second Opinion verdict
 api.post('/task/:bucket/:id/verdict-note', wrap(async (req, res) =>
   res.json(setVerdictNote(req.params.bucket, req.params.id, req.body.note ?? '', req.user.username))
@@ -129,16 +165,22 @@ api.get('/export/ids/:bucket', wrap(async (req, res) => {
 }));
 
 api.get('/export/all.csv', wrap(async (req, res) => {
+  const RESOLVED = new Set(['NO_ISSUES', 'FIXES_MADE', 'SBQ']);
+  const laneOf = (t) => t.verdict === 'SECOND_OPINION' ? '2nd opinion'
+    : (t.verdict && RESOLVED.has(t.verdict)) ? 'Resolved'
+    : t.claimedBy ? 'In review' : 'Open';
+  const csv = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const ws = listWorkspace();
-  const lines = ['task_id,bucket,verdict,claimed_by,has_review,has_remediation'];
+  const lines = ['task_id,bucket,lane,verdict,claimed_by,tags,has_review,has_remediation'];
   for (const [bucket, tasks] of Object.entries(ws)) {
     for (const t of tasks) {
-      if (t.tour) continue;
-      lines.push([t.id, bucket, t.verdict || '', t.claimedBy || '', t.hasReview, t.hasRemediation].join(','));
+      if (t.tour) continue;   // dummy tour tasks aren't real audit tasks
+      const tags = t.grammar ? 'Spelling/Grammar Issues' : '';
+      lines.push([t.id, bucket, laneOf(t), t.verdict || '', t.claimedBy || '', tags, t.hasReview, t.hasRemediation].map(csv).join(','));
     }
   }
   res.setHeader('content-type', 'text/csv');
-  res.setHeader('content-disposition', 'attachment; filename="workspace_export.csv"');
+  res.setHeader('content-disposition', 'attachment; filename="audit_studio_export.csv"');
   res.send(lines.join('\n') + '\n');
 }));
 
@@ -276,7 +318,7 @@ api.get('/task/:bucket/:id/docstatus', wrap(async (req, res) => res.json(statusF
 
 // --- chat with task (SSE agent loop, history persisted in _chat.json) ---
 const CHAT_PROMPT = `
-You are the ACC quality SME embedded in a QM reviewer's audit session. You know the customer
+You are Acey, the ACC quality SME embedded in a QM reviewer's audit session. You know the customer
 program spec cold (the quality canon below; full texts via read_spec) and you have tools over
 this task's files. The reviewer already has a verbose review.md and remediation.md — you are NOT
 another source of prose. You are the source of truth they consult for specific questions.

@@ -64,25 +64,31 @@ let dragging = null;
 async function applyLaneChange(t, target, x, y) {
   const { bucket, id } = t;
   if (laneOf(t) === target) return;
-  const setVerdict = (v) => api(`/task/${bucket}/${id}/verdict`, { method: 'POST', body: { verdict: v } });
+  // Decide the resulting state first (RESOLVED asks which decision).
+  let verdict = null, claim = null;
+  if (target === 'SECOND_OPINION') verdict = 'SECOND_OPINION';
+  else if (target === 'RESOLVED') { verdict = await pickResolution(x, y); if (!verdict) return; }
+  else if (target === 'REVIEW') { verdict = null; claim = 'claim'; }
+  else if (target === 'OPEN') { verdict = null; claim = t.claimedBy ? 'release' : null; }
+
+  // Optimistically update the card in place + render once — no full refetch, no flash/jump.
+  const orig = (currentWs[bucket] || []).find((x2) => x2.id === id);
+  if (orig) {
+    orig.verdict = verdict;
+    if (claim === 'claim') orig.claimedBy = me?.username || orig.claimedBy;
+    if (claim === 'release') orig.claimedBy = null;
+  }
+  render();
+
+  // Persist in the background; only reload (to reconcile) if something failed.
   try {
-    if (target === 'SECOND_OPINION') {
-      await setVerdict('SECOND_OPINION');
-    } else if (target === 'RESOLVED') {
-      const v = await pickResolution(x, y); // 3-way: which decision?
-      if (!v) return;
-      await setVerdict(v);
-    } else if (target === 'REVIEW') {
-      await setVerdict(null);
-      if (!t.claimedBy) await api(`/task/${bucket}/${id}/claim`, { method: 'POST' });
-    } else if (target === 'OPEN') {
-      await setVerdict(null);
-      if (t.claimedBy) await api(`/task/${bucket}/${id}/release`, { method: 'POST' }).catch((e) => toast(e.message));
-    }
+    await api(`/task/${bucket}/${id}/verdict`, { method: 'POST', body: { verdict } });
+    if (claim === 'claim' && !t.claimedBy) await api(`/task/${bucket}/${id}/claim`, { method: 'POST' });
+    if (claim === 'release') await api(`/task/${bucket}/${id}/release`, { method: 'POST' });
   } catch (e) {
     toast(e.message);
+    await load();
   }
-  await load();
 }
 
 // Resolved is a 3-way decision — ask which one at the drop point.
@@ -180,6 +186,7 @@ function ticketCard(t) {
       : null,
     el('div', { class: 'ticket-foot' },
       t.claimedBy ? assignee(t.claimedBy) : claimAction(t),
+      t.grammar ? el('span', { class: 'chip grammar-chip', title: 'Spelling/Grammar Issues — flagged by the R23 writing check' }, '✎ Spelling/Grammar') : null,
       t.verdict ? el('span', { class: `chip v-${t.verdict}` }, VERDICT_LABELS[t.verdict] || t.verdict) : null,
     ),
   );
@@ -196,10 +203,19 @@ function render() {
     (!q || t.id.toLowerCase().includes(q) || (t.problem || '').toLowerCase().includes(q))
   );
   updateDeliveredToggle();
+  updateArchiveBtn();
   const byLane = new Map(LANES.map((l) => [l.key, []]));
   for (const t of tickets) byLane.get(laneOf(t)).push(t);
 
   const root = document.getElementById('lanes');
+  // Preserve each lane's scroll position across the 8s auto-refresh (and any re-render),
+  // so scrolling down into a lane doesn't snap back to the top.
+  const prevScroll = {};
+  root.querySelectorAll('.lane').forEach((l) => {
+    const k = (l.className.match(/lane-([A-Z_]+)/) || [])[1];
+    const b = l.querySelector('.lane-body');
+    if (k && b) prevScroll[k] = b.scrollTop;
+  });
   root.replaceChildren(
     ...LANES.map((lane) => {
       const items = byLane.get(lane.key);
@@ -227,6 +243,12 @@ function render() {
       );
     })
   );
+  // restore the per-lane scroll captured above
+  root.querySelectorAll('.lane').forEach((l) => {
+    const k = (l.className.match(/lane-([A-Z_]+)/) || [])[1];
+    const b = l.querySelector('.lane-body');
+    if (k && b && prevScroll[k]) b.scrollTop = prevScroll[k];
+  });
 
   const total = allTickets().filter((t) => !t.delivered && !t.tour).length;
   document.getElementById('ws-summary').textContent =
@@ -243,6 +265,33 @@ function updateDeliveredToggle() {
   btn.textContent = showDelivered ? `Hide delivered (${n})` : `Show delivered (${n})`;
   btn.classList.toggle('on', showDelivered);
 }
+
+// "Completed" = the Resolved workflow lane (any recorded decision), independent of
+// severity — archiving sorts by completion status, NOT by Pass/Fail.
+function completedTasks() {
+  return allTickets().filter((t) => !t.tour && !t.delivered && t.verdict && RESOLVED_VERDICTS.has(t.verdict));
+}
+function updateArchiveBtn() {
+  const btn = document.getElementById('archive-completed');
+  if (!btn) return;
+  const n = completedTasks().length;
+  btn.hidden = me?.role !== 'admin' || n === 0; // admin-only; nothing completed → nothing to archive
+  btn.textContent = `📦 Archive completed (${n})`;
+}
+async function archiveCompleted() {
+  const status = document.getElementById('bv-status');
+  const done = completedTasks();
+  if (!done.length) return;
+  if (!confirm(`Archive ${done.length} completed task${done.length === 1 ? '' : 's'} — everything in the Resolved lane, any severity? They leave the board but stay searchable in the Archive, and a restorable backup zip is built.`)) return;
+  status.textContent = 'archiving…';
+  try {
+    const r = await api('/admin/deliver', { method: 'POST', body: { taskIds: done.map((t) => t.id) } });
+    await load();
+    status.textContent = `archived ${r.delivered}`;
+    setTimeout(() => { status.textContent = ''; }, 2600);
+  } catch (e) { status.textContent = e.message; }
+}
+document.getElementById('archive-completed')?.addEventListener('click', archiveCompleted);
 document.getElementById('toggle-delivered').addEventListener('click', () => {
   showDelivered = !showDelivered;
   render();
@@ -298,6 +347,32 @@ document.getElementById('rubric-input')?.addEventListener('change', async (e) =>
 
 
 document.getElementById('export-csv').addEventListener('click', () => { location.href = '/api/export/all.csv'; });
+
+// ---------- bulk workflow move (any reviewer): all tasks of a severity → a lane ----------
+document.getElementById('bv-apply')?.addEventListener('click', async () => {
+  const src = document.getElementById('bv-src');
+  const dst = document.getElementById('bv-dst');
+  const status = document.getElementById('bv-status');
+  const bucket = src.value;
+  const verdict = dst.value || null;
+  const srcLabel = src.selectedOptions[0].textContent.trim();
+  const dstLabel = dst.selectedOptions[0].textContent.trim();
+  // Count only tasks that would actually change lane (exclude ones already there + tour dummies).
+  const targetLane = verdict === 'SECOND_OPINION' ? 'SECOND_OPINION'
+    : (verdict && RESOLVED_VERDICTS.has(verdict)) ? 'RESOLVED' : 'OPEN';
+  const buckets = bucket === 'ALL' ? ORDER : [bucket];
+  const toMove = buckets.flatMap((b) => currentWs[b] || []).filter((t) => !t.tour && laneOf(t) !== targetLane);
+  const noun = bucket === 'ALL' ? 'task' : `${srcLabel.replace(/^all\s+/i, '')} task`;
+  if (!toMove.length) { status.textContent = 'nothing to move'; setTimeout(() => { status.textContent = ''; }, 2600); return; }
+  if (!confirm(`Move ${toMove.length} ${noun}${toMove.length === 1 ? '' : 's'} → “${dstLabel}”? This updates the workflow lane for everyone.`)) return;
+  status.textContent = 'moving…';
+  try {
+    const r = await api('/verdict/bulk', { method: 'POST', body: { ids: toMove.map((t) => t.id), verdict } });
+    status.textContent = `moved ${r.moved}`;
+    await load();
+    setTimeout(() => { status.textContent = ''; }, 2600);
+  } catch (e) { status.textContent = e.message; }
+});
 // generate review+remediation for every task missing them, as background jobs
 let genPoll = null;
 document.getElementById('gen-all').addEventListener('click', async () => {
