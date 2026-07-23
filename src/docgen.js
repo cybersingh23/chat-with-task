@@ -70,9 +70,19 @@ Citation rules (mandatory):
   [model_a msg 23](traj://model_a/23). The UI turns these into "Show in trajectory" buttons that
   jump the reviewer to that exact message. model is model_a or model_b; the number is the message
   index shown by read_trajectory. Cite generously — every factual claim about a trajectory needs one.
+- To point at an exact word/phrase inside a message (not just the whole message), append ?q= with the
+  URL-encoded phrase: [model_a msg 23](traj://model_a/23?q=silently%20dropped). The reviewer lands on
+  that message with the phrase highlighted. Use this whenever you quote specific words a model wrote.
+- To point at a phrase in a model's responses without a specific index, use a cb:// link:
+  [Model B said "…"](cb://model_b?q=the%20exact%20phrase) — the UI searches that model's responses and
+  highlights the first match. Prefer traj://<model>/<N>?q= when you know the index; use cb:// otherwise.
 - Whenever a V5 rubric dimension decides a severity or verdict, cite it as a spec:// link:
   [R12 Summaries · Accuracy](spec://R12). The UI turns these into buttons that open the QC spec
   at that exact rubric row. Use the R-keys from the canon (R1-R25).
+- Whenever you cite a rank.json field (the annotator's grading/summary/decision), write the field
+  path as inline code with a leading slash — e.g. \`/ranking_rationale\`, \`/preference_rating\`,
+  \`/results/<codename>/summary\`, \`/results/<codename>/grading/correctness\`. The UI turns these
+  into clickable chips that jump to that field in the CB responses view.
 - "model_a"/"model_b" map to model codenames via rank.json model_assignment; always state the mapping once.
 - Verify before you assert: every specific number or quoted prompt in rank.json is a falsifiable
   claim — use the search tool against the trajectories before calling it accurate or fabricated.

@@ -2,13 +2,18 @@ import { config } from './config.js';
 
 // One non-streaming chat-completion call against the LiteLLM proxy
 // (OpenAI-compatible; same proxy + key as trajectory-viewer-v2).
-export async function chatCompletion({ messages, tools, temperature = 0.2, maxTokens = 4096, onUsage }) {
+export async function chatCompletion({ messages, tools, maxTokens = 4096, onUsage }) {
   if (!config.litellm.apiKey) throw new Error('LITELLM_API_KEY is not set — copy .env.example to .env');
   const body = {
     model: config.litellm.model,
     messages,
-    temperature,
     max_tokens: maxTokens,
+    // Opus 4.8 controls thinking via adaptive mode + effort ("medium" here).
+    // It rejects `temperature` (and LiteLLM's reasoning_effort→thinking.enabled
+    // mapping) whenever thinking is on, so we pass the native params and send no
+    // temperature.
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'medium' },
   };
   if (tools?.length) body.tools = tools;
 
@@ -76,7 +81,8 @@ export async function runAgentLoop({ messages, tools, executor, onEvent, maxStep
       added.push(toolMsg);
     }
   }
-  const note = '[stopped: agent loop hit max steps]';
-  onEvent?.({ type: 'assistant', content: note });
-  return { messages: added, final: note };
+  // Hit the per-turn step ceiling. Don't dead-end — signal the client so it can
+  // offer a Continue that resumes the loop with full context.
+  onEvent?.({ type: 'truncated' });
+  return { messages: added, final: '', truncated: true };
 }

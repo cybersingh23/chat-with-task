@@ -15,6 +15,7 @@ const DEFAULT_USERS = [
   { username: 'ernesto', password: 'ernesto-cwt26', role: 'reviewer' },
   { username: 'christian', password: 'christian-cwt26', role: 'reviewer' },
   { username: 'gilberto', password: 'gilberto-cwt26', role: 'reviewer' },
+  { username: 'nishchay', password: 'nishchay-cwt26', role: 'reviewer' },
 ];
 
 function hash(password, salt) {

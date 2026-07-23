@@ -1,6 +1,7 @@
-import { api, apiSSE, renderMarkdown, el, fmtTime, cap } from '/js/common.js';
+import { api, apiSSE, renderMarkdown, el, fmtTime, cap, startTour } from './common.js';
 
-const [, , bucket, taskId] = location.pathname.split('/');
+const pathRelative = location.pathname.slice((window.__base__ || '').length);
+const [, , bucket, taskId] = pathRelative.split('/');
 const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
 document.getElementById('task-id').textContent = taskId;
 const sevChip = document.getElementById('sev-chip');
@@ -72,7 +73,19 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-traj-model]');
   if (t) {
     e.preventDefault();
-    showTrajectory(t.dataset.trajModel, Number(t.dataset.trajIndex));
+    showTrajectory(t.dataset.trajModel, Number(t.dataset.trajIndex), t.dataset.trajPhrase || null);
+    return;
+  }
+  const c = e.target.closest('[data-cb-model]');
+  if (c) {
+    e.preventDefault();
+    showModelResponsePhrase(c.dataset.cbModel, c.dataset.cbPhrase || null);
+    return;
+  }
+  const cf = e.target.closest('[data-cb-field-path]');
+  if (cf) {
+    e.preventDefault();
+    locateRankField(cf.dataset.cbFieldPath);
     return;
   }
   const s = e.target.closest('[data-spec-key]');
@@ -133,6 +146,10 @@ async function buildSidebar() {
     el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showQcSpec(); } },
       el('span', {}, 'QC spec'),
       el('span', { class: 'missing' }, 'V5'),
+    ),
+    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showCbResponses(); } },
+      el('span', {}, 'CB responses'),
+      el('span', { class: 'missing' }, meta.models?.length ? `${meta.models.length} models` : 'rank.json'),
     ),
   );
 
@@ -315,26 +332,35 @@ async function showTaskDef() {
   mountView('taskdef', () => buildTaskDefView(presence), { refresh: true });
 }
 
-// Per-milestone string-match presence in each model's user turns. Reuses the
-// token-overlap scorer the Locate buttons use; deliberately rough (a literal
-// string check that misses paraphrases — hence the caveat in the UI).
+// Per-milestone presence in each model's user turns. Distinctive-token match
+// (stopwords stripped) with in-order, one-turn-per-milestone assignment: each
+// milestone claims the earliest not-yet-consumed user turn that clears the bar,
+// so a single content-rich turn can't light up several milestones and matches
+// must respect prompt order. Still advisory (paraphrases can slip past), but far
+// fewer false "found"s than the old any-turn 50%-overlap check.
 async function milestonePresence() {
-  const turns = {};
+  const turnToks = {};
   for (const m of ['model_a', 'model_b']) {
     try {
       const t = await loadTrajectory(m);
-      turns[m] = t.messages.filter((x) => x.role === 'user')
-        .map((x) => x.parts.filter((p) => p.type === 'text').map((p) => p.text).join(' '));
-    } catch { turns[m] = null; } // missing/stub trajectory
+      turnToks[m] = t.messages.filter((x) => x.role === 'user')
+        .map((x) => contentTokens(x.parts.filter((p) => p.type === 'text').map((p) => p.text).join(' ')));
+    } catch { turnToks[m] = null; } // missing/stub trajectory
   }
+  const msToks = taskDef.milestones.map((ms) => contentTokens(ms.prompt));
   const out = {};
-  for (const ms of taskDef.milestones) {
-    const toks = tokenize(ms.prompt);
-    out[ms.id] = {};
-    for (const m of ['model_a', 'model_b']) {
-      if (turns[m] == null) { out[ms.id][m] = null; continue; }
-      out[ms.id][m] = turns[m].some((tx) => score(toks, tokenize(tx)) >= 0.5);
-    }
+  for (const ms of taskDef.milestones) out[ms.id] = {};
+  for (const m of ['model_a', 'model_b']) {
+    const turns = turnToks[m];
+    if (turns == null) { for (const ms of taskDef.milestones) out[ms.id][m] = null; continue; }
+    let ptr = 0; // next unconsumed user turn — enforces in-order assignment
+    taskDef.milestones.forEach((ms, i) => {
+      let found = false;
+      for (let j = ptr; j < turns.length; j++) {
+        if (milestoneMatch(msToks[i], turns[j])) { found = true; ptr = j + 1; break; }
+      }
+      out[ms.id][m] = found;
+    });
   }
   return out;
 }
@@ -383,7 +409,7 @@ function buildTaskDefView(presence) {
     el('h2', {}, `Milestones (${taskDef.milestones.length})`),
     el('p', { class: 'hint-line' },
       'The annotator must enter each milestone prompt (paraphrase counts) in order, in both trajectories. ',
-      'Present / not-present is a rough string match against the user turns (A and B) — it can miss paraphrases, so if a milestone reads "not found" but you believe it is there, ask the copilot to confirm. ',
+      'Present / not-present matches distinctive words in order, one user turn per milestone — it errs toward "not found" over false positives, and can miss heavy paraphrases, so if a milestone reads "not found" but you believe it is there, ask the copilot to confirm. ',
       '"Locate" jumps to the closest user turn — navigation, not a coverage verdict.'),
     taskDef.milestones.map((m, i) =>
       el('div', { class: 'milestone' },
@@ -433,6 +459,30 @@ function score(a, b) {
   let hit = 0;
   for (const t of a) if (b.has(t)) hit++;
   return a.size ? hit / a.size : 0;
+}
+
+// Common English + task-boilerplate words that carry no distinguishing signal.
+// Stripping them stops generic overlap ("add the code to a file") from faking a
+// milestone match. Kept deliberately conservative — only truly ubiquitous words.
+const STOPWORDS = new Set('the and for are but not you your with this that from have has had was were will would should can could may might must into onto over per via out off use used using make made need needs want add adding added create creating created update updated please note like just get got set new file files code function functions method methods output input value values test tests case cases run runs step steps also each them they this these those there their then than when what which who how why all any some more most such very much many few able ensure sure allow allows return returns also within about above below same other only what some'.split(/\s+/).filter(Boolean));
+
+// Distinctive-token set for milestone matching: length>=3 alphanumerics minus
+// stopwords. Separate from tokenize() so the looser A↔B alignment / Locate
+// navigation behavior is untouched.
+function contentTokens(s) {
+  const toks = String(s).toLowerCase().match(/[a-z0-9_]{3,}/g) || [];
+  return new Set(toks.filter((t) => !STOPWORDS.has(t)));
+}
+
+// A milestone is "present" in a user turn only when a strong majority of its
+// distinctive tokens appear AND at least two do (tiny prompts must appear in
+// full) — much stricter than the old 50%-of-all-tokens-any-turn test.
+function milestoneMatch(msToks, turnToks) {
+  if (!msToks.size) return false;
+  let hit = 0;
+  for (const t of msToks) if (turnToks.has(t)) hit++;
+  const need = msToks.size <= 2 ? msToks.size : 2;
+  return hit >= need && hit / msToks.size >= 0.6;
 }
 
 function askCopilotAboutMilestone(m) {
@@ -522,6 +572,181 @@ function buildQcSpecView(dimensions) {
   );
 }
 
+// ---------- CB responses (rank.json behind a UI) ----------
+let rankPromise = null;
+
+async function showCbResponses() {
+  hideTrajToolbar();
+  viewerTitle.textContent = 'CB responses — rank.json';
+  document.querySelector('.viewer-head .regen')?.remove();
+  viewReopeners.set('cb', { label: 'CB responses', reopen: () => { setActive(findDocNav('CB responses')); showCbResponses(); } });
+  rankPromise ||= api(`/task/${bucket}/${taskId}/rank`);
+  const rank = await rankPromise;
+  mountView('cb', () => buildCbResponsesView(rank));
+}
+
+function mdNode(text, cls = 'cb-prose') {
+  const d = el('div', { class: cls });
+  d.innerHTML = renderMarkdown(text || '_(none)_');
+  return d;
+}
+
+// A labelled CB section tagged with its rank.json field name so /field citations
+// can locate it.
+function cbSection(field, label, content) {
+  return el('div', { class: 'cb-section', 'data-cb-field': field },
+    el('div', { class: 'cb-label' }, label), content);
+}
+
+// Open CB responses and scroll+flash the element for a rank.json field path
+// (e.g. /ranking_rationale, /results/blue_tower/grading/correctness).
+async function locateRankField(path) {
+  setActive(findDocNav('CB responses'));
+  await showCbResponses();
+  const target = findRankFieldEl(path);
+  if (!target) return;
+  const isRow = target.tagName === 'TR';
+  target.scrollIntoView({ behavior: 'smooth', block: isRow ? 'center' : 'start' });
+  target.classList.add('flash');
+  setTimeout(() => target.classList.remove('flash'), 2500);
+}
+
+function findRankFieldEl(path) {
+  const parts = String(path).replace(/^\//, '').split('/');
+  if (parts[0] === 'results' && parts[1]) {
+    const key = parts[1];
+    const card = [...viewerBody.querySelectorAll('.cb-model')]
+      .find((c) => [c.dataset.cbKey, c.dataset.cbCodename, c.dataset.cbSide].includes(key));
+    if (!card) return null;
+    const field = parts[2];
+    if (!field) return card;
+    if (field === 'grading') {
+      const dim = parts[3];
+      if (dim) return card.querySelector(`.cb-grade-tbl tr[data-cb-dim="${cssEscape(dim)}"]`) || card.querySelector('[data-cb-field="grading"]');
+      return card.querySelector('[data-cb-field="grading"]');
+    }
+    return card.querySelector(`[data-cb-field="${cssEscape(field)}"]`) || card;
+  }
+  return viewerBody.querySelector(`[data-cb-field="${cssEscape(parts[0])}"]`);
+}
+
+function cssEscape(s) {
+  return window.CSS?.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&');
+}
+
+function scoreClass(score) {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return '';
+  if (n >= 4) return 'good';
+  if (n === 3) return 'mid';
+  return 'bad';
+}
+
+// Preference rating panel: negative favors Model A, positive favors Model B.
+// Shows the winner up front, then a centered scale with a knob at the value.
+function buildPrefPanel(rating) {
+  const won = rating < 0 ? 'a' : rating > 0 ? 'b' : null;
+  const mag = Math.abs(rating);
+  const strength = ['no preference', 'slight', 'moderate', 'strong', 'very strong'][mag] || `magnitude ${mag}`;
+  const extent = Math.max(3, mag);
+  const pct = Math.max(2, Math.min(98, 50 + (rating / extent) * 50));
+  const fillStyle = won === 'b' ? `left:50%;width:${pct - 50}%`
+    : won === 'a' ? `left:${pct}%;width:${50 - pct}%`
+      : 'left:50%;width:0';
+
+  const verdict = el('div', { class: `cb-pref-verdict ${won ? 'won-' + won : 'tie'}` },
+    el('span', {}, won === 'a' ? 'Model A preferred' : won === 'b' ? 'Model B preferred' : 'No preference'),
+    el('span', { class: 'cb-pref-num' }, `${rating > 0 ? '+' : ''}${rating} · ${strength}`),
+  );
+  const track = el('div', { class: 'cb-pref-track' },
+    el('div', { class: 'cb-pref-axis' }),
+    el('div', { class: 'cb-pref-zero' }),
+    el('div', { class: `cb-pref-fill ${won ? 'won-' + won : ''}`, style: fillStyle }),
+    el('div', { class: `cb-pref-knob ${won ? 'won-' + won : ''}`, style: `left:${pct}%` }),
+  );
+  return el('div', { class: 'cb-pref-panel', 'data-cb-field': 'preference_rating' },
+    verdict,
+    el('div', { class: 'cb-pref-scale' },
+      el('span', { class: 'cb-pref-end left' }, 'Model A'),
+      track,
+      el('span', { class: 'cb-pref-end right' }, 'Model B'),
+    ),
+  );
+}
+
+function buildCbResponsesView(rank) {
+  if (!rank || !rank.present) {
+    return el('div', { class: 'callout info' }, 'No rank.json shipped with this task, or it could not be parsed.');
+  }
+  const container = el('div', { class: 'cb' }, el('h1', {}, 'CB responses'));
+  container.append(el('p', { class: 'hint-line' },
+    'The annotator\'s rank.json — each model\'s summary, per-dimension grading, and failure modes, plus the A-vs-B decision. ',
+    'Use “Open responses” or the find box to jump into a model\'s actual turns; citations in the text (traj:// / cb://) are clickable.'));
+
+  // task-level decision
+  const task = el('div', { class: 'cb-task' });
+  if (rank.preference_rating != null) task.append(buildPrefPanel(rank.preference_rating));
+  else task.append(el('div', { class: 'cb-pref-none', 'data-cb-field': 'preference_rating' }, 'No preference rating recorded in rank.json.'));
+  task.append(cbSection('ranking_rationale', 'Ranking rationale', mdNode(rank.ranking_rationale)));
+  if (rank.clarification) task.append(cbSection('optional_clarification_comments', 'Clarification comments', mdNode(rank.clarification)));
+  if (rank.other) task.append(cbSection('optional_other_comments', 'Other comments', mdNode(rank.other)));
+  container.append(task);
+
+  for (const m of rank.models) {
+    const sideCls = m.side === 'model_b' ? 'model_b' : 'model_a';
+    const sideLabel = m.side === 'model_b' ? 'Model B' : m.side === 'model_a' ? 'Model A' : (m.side || '?');
+    const head = el('div', { class: 'cb-model-head' },
+      el('span', { class: 'cb-side' }, sideLabel),
+      el('span', { class: 'cb-codename' }, m.codename || m.key),
+      m.winner ? el('span', { class: 'cb-winner' }, 'Winner') : null,
+      m.rank != null ? el('span', { class: 'cb-rank' }, `rank ${m.rank}`) : null,
+      el('span', { class: 'spacer' }),
+      m.side ? el('button', { class: 'cb-open', onclick: () => { setActive(null); showTrajectory(m.side); } }, 'Open responses →') : null,
+    );
+
+    const body = el('div', { class: 'cb-body' });
+
+    // find-a-quote box: jump to the first response turn containing the phrase
+    if (m.side) {
+      const input = el('input', { type: 'text', placeholder: `Find a quote in ${sideLabel}'s responses…` });
+      const go = () => { const q = input.value.trim(); if (q) showModelResponsePhrase(m.side, q); };
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+      body.append(el('div', { class: 'cb-find' }, input, el('button', { onclick: go }, 'Find →')));
+    }
+
+    if (m.summary) body.append(cbSection('summary', 'Summary', mdNode(m.summary)));
+
+    if (m.grading?.length) {
+      const tbody = el('tbody');
+      for (const g of m.grading) {
+        const rat = el('td', { class: 'rat' });
+        rat.innerHTML = renderMarkdown(g.rationale || '_(none)_');
+        tbody.append(el('tr', { 'data-cb-dim': g.dim },
+          el('td', { class: 'dim' }, g.dim.replace(/_/g, ' ')),
+          el('td', { class: 'score' }, g.score != null ? el('span', { class: `cb-score ${scoreClass(g.score)}` }, `${g.score} / 5`) : '—'),
+          rat,
+        ));
+      }
+      const wrap = el('div', { class: 'cb-grade-wrap', 'data-cb-field': 'grading' },
+        el('table', { class: 'cb-grade-tbl' },
+          el('thead', {}, el('tr', {}, el('th', {}, 'Dimension'), el('th', {}, 'Score'), el('th', {}, 'Assessment'))),
+          tbody,
+        ),
+      );
+      body.append(el('div', { class: 'cb-label' }, 'Grading'), wrap);
+    }
+
+    const flagged = (m.failure_modes || []).filter((f) => f.level && f.level !== 'none');
+    body.append(cbSection('failure_modes', `Failure modes${flagged.length ? ` (${flagged.length})` : ''}`,
+      flagged.length
+        ? el('div', { class: 'cb-fmodes' }, ...flagged.map((f) => el('span', { class: `cb-fmode ${f.level}` }, `${f.key.replace(/_/g, ' ')} · ${f.level}`)))
+        : el('div', { class: 'cb-fmodes-none' }, 'None flagged')));
+
+    container.append(el('div', { class: `cb-model ${sideCls}`, 'data-cb-key': m.key, 'data-cb-codename': m.codename || m.key, 'data-cb-side': m.side || '' }, head, body));
+  }
+  return container;
+}
+
 // ---------- ranking proof (image + justification per side) ----------
 async function showRankingProof() {
   hideTrajToolbar();
@@ -595,19 +820,18 @@ async function showChecklist() {
   let reviewText = '';
   try { reviewText = (await api(`/task/${bucket}/${taskId}/file?path=review.md`)).text; } catch { /* no review yet */ }
   const state = await api(`/task/${bucket}/${taskId}/state`);
-  mountView('checklist', () => buildChecklistView(parseFindings(reviewText), state.checklist || {}, state.verdict), { refresh: true });
+  mountView('checklist', () => buildChecklistView(parseFindings(reviewText), state.checklist || {}, state.verdict, state.verdict_note), { refresh: true });
+  if (focusNoteNext) { focusNoteNext = false; setTimeout(() => viewerBody.querySelector('.check-note-input')?.focus(), 80); }
 }
+let focusNoteNext = false;
 
-function buildChecklistView(findings, checks, verdict) {
+function buildChecklistView(findings, checks, verdict, note) {
   const container = el('div', { class: 'checklist' });
   container.append(el('h1', {}, 'Checklist'));
-  if (!findings.length) {
-    container.append(el('p', { class: 'hint-line' },
-      'No findings yet — generate the Review and its findings will populate this checklist.'));
-    return container;
-  }
   container.append(el('p', { class: 'hint-line' },
-    'Adjudicate each review finding — mark it Done (fixed / verified) or Over-flag (not a real issue) — then record the decision below.'));
+    findings.length
+      ? 'Adjudicate each review finding — mark it Done (fixed / verified) or Over-flag (not a real issue) — then record the decision below.'
+      : 'No review findings yet (generate the Review to populate them) — you can still record a decision below.'));
 
   const local = { ...checks };
   const statusOf = (id) => local[id]?.status || 'open';
@@ -642,9 +866,37 @@ function buildChecklistView(findings, checks, verdict) {
     recompute();
   }
 
-  const list = el('div', { class: 'check-list' });
-  for (const f of findings) list.append(checkRow(f, statusOf, onSet));
-  container.append(list);
+  if (findings.length) {
+    const list = el('div', { class: 'check-list' });
+    for (const f of findings) list.append(checkRow(f, statusOf, onSet));
+    container.append(list);
+  }
+
+  // Second-opinion "why": key-issue note, shown only when that verdict is active.
+  const noteInput = el('textarea', { class: 'check-note-input', rows: '3',
+    placeholder: 'What\'s the crux another reviewer needs to resolve? Cite the turn / claim / rank.json field.' });
+  noteInput.value = note || '';
+  const noteSaved = el('span', { class: 'check-note-saved' });
+  let noteTimer;
+  const saveNote = async () => {
+    try {
+      await api(`/task/${bucket}/${taskId}/verdict-note`, { method: 'POST', body: { note: noteInput.value } });
+      noteSaved.textContent = 'saved';
+      clearTimeout(noteTimer); noteTimer = setTimeout(() => { noteSaved.textContent = ''; }, 1500);
+    } catch (e) { noteSaved.textContent = e.message; }
+  };
+  noteInput.addEventListener('change', saveNote);
+  noteInput.addEventListener('blur', saveNote);
+  const noteWrap = el('div', { class: 'check-note' },
+    el('div', { class: 'check-note-label' }, el('span', {}, '⚠ Second opinion — key issue'), noteSaved),
+    noteInput,
+    el('div', { class: 'check-note-hint' }, 'Shown on the board and to whoever picks this up — the one thing that needs another set of eyes.'),
+  );
+  const updateNoteVisibility = (v) => {
+    const show = v === 'SECOND_OPINION';
+    noteWrap.hidden = !show;
+    if (!show) noteInput.value = ''; // server clears the note when the verdict moves away
+  };
 
   const verdictBtns = CHECK_VERDS.map(([k, label]) =>
     el('button', {
@@ -655,18 +907,22 @@ function buildChecklistView(findings, checks, verdict) {
         verdictSelect.className = `verdict-select set v-${k}`;
         refreshState();
         container.querySelectorAll('.check-verdicts .vbtn').forEach((b) => b.classList.toggle('active', b.dataset.v === k));
+        updateNoteVisibility(k);
+        if (k === 'SECOND_OPINION') noteInput.focus();
       },
     }, label)
   );
   container.append(
     el('div', { class: 'check-panel' },
       el('h2', {}, 'Decision'),
-      summary,
-      el('p', { class: 'check-suggestion-wrap' }, suggestion),
+      findings.length ? summary : null,
+      findings.length ? el('p', { class: 'check-suggestion-wrap' }, suggestion) : null,
       el('div', { class: 'check-verdicts' }, ...verdictBtns),
+      noteWrap,
     )
   );
-  recompute();
+  updateNoteVisibility(verdict);
+  if (findings.length) recompute();
   return container;
 }
 
@@ -719,7 +975,7 @@ function userText(m) {
   return m.parts.filter((p) => p.type === 'text').map((p) => p.text).join('\n');
 }
 
-async function showTrajectory(model, focusIndex = null) {
+async function showTrajectory(model, focusIndex = null, phrase = null) {
   setActive(null); // single highlight: the launcher below is the only active marker
   viewerTitle.textContent = `Trajectory viewer — trajectory_${model}.json`;
   document.querySelector('.viewer-head .regen')?.remove();
@@ -736,7 +992,51 @@ async function showTrajectory(model, focusIndex = null) {
   );
 
   // An explicit citation jump overrides the remembered scroll position.
-  if (focusIndex != null) jumpToMessage(model, focusIndex);
+  if (focusIndex != null) jumpToMessage(model, focusIndex, phrase);
+}
+
+// Jump to the first message in a model's responses containing `phrase` (searched
+// case-insensitively across text + reasoning), then highlight it. Backs cb://
+// citations that point at model responses without a known message index.
+async function showModelResponsePhrase(model, phrase) {
+  let traj;
+  try { traj = await loadTrajectory(model); }
+  catch { alert(`${model === 'model_a' ? 'Model A' : 'Model B'} trajectory is unavailable.`); return; }
+  let index = null;
+  if (phrase) {
+    const needle = phrase.trim().toLowerCase();
+    for (const m of traj.messages) {
+      const text = m.parts.filter((p) => p.type === 'text' || p.type === 'reasoning').map((p) => p.text).join(' ').toLowerCase();
+      if (text.includes(needle)) { index = m.index; break; }
+    }
+  }
+  setActive(null);
+  showTrajectory(model, index, phrase);
+}
+
+// Wrap the first case-insensitive occurrence of `phrase` inside `container` in a
+// <mark>, scroll to it, and flash. Returns true if it highlighted something.
+function highlightPhraseIn(container, phrase) {
+  if (!container || !phrase) return false;
+  container.querySelectorAll('mark.cb-hl').forEach((mk) => mk.replaceWith(document.createTextNode(mk.textContent)));
+  const needle = phrase.trim().toLowerCase();
+  if (!needle) return false;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+  let node;
+  while ((node = walker.nextNode())) {
+    const idx = node.nodeValue.toLowerCase().indexOf(needle);
+    if (idx === -1) continue;
+    const range = document.createRange();
+    range.setStart(node, idx);
+    range.setEnd(node, idx + needle.length);
+    const mark = el('mark', { class: 'cb-hl' });
+    try { range.surroundContents(mark); } catch { return false; } // phrase spans elements — bail to block flash
+    mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    mark.classList.add('flash');
+    setTimeout(() => mark.classList.remove('flash'), 2500);
+    return true;
+  }
+  return false;
 }
 
 function setTrajLauncherActive(which) {
@@ -779,36 +1079,59 @@ function buildSideBySide(A, B) {
   }
   const ga = groupTurns(A.messages), gb = groupTurns(B.messages);
   const rows = alignPrompts(ga, gb);
-  const grid = el('div', { class: 'sbs-grid' });
+  const rowsWrap = el('div', { class: 'sbs-rows' });
   let n = 0;
   for (const r of rows) {
     if (r.type === 'anchor') {
       n++;
-      grid.append(
-        el('div', { class: 'sbs-anchor', 'data-a-user': String(r.a.user.index), 'data-b-user': String(r.b.user.index) },
-          el('div', { class: 'sbs-anchor-head' },
-            el('span', { class: 'turn-num' }, `Prompt ${n}`),
-            el('span', { class: 'sbs-idx' }, `A[${r.a.user.index}] · B[${r.b.user.index}]`),
-            el('span', { class: 'spacer' }),
-            el('span', { class: 'sbs-count' }, `${r.a.assistants.length} vs ${r.b.assistants.length} turns`),
+      rowsWrap.append(
+        el('div', { class: 'sbs-row' },
+          // shared prompt header spans both columns; carries the deep-link anchor
+          el('div', { class: 'sbs-anchor', 'data-a-user': String(r.a.user.index), 'data-b-user': String(r.b.user.index) },
+            el('div', { class: 'sbs-anchor-head' },
+              el('span', { class: 'turn-num' }, `Prompt ${n}`),
+              el('span', { class: 'sbs-idx' }, `A[${r.a.user.index}] · B[${r.b.user.index}]`),
+              el('span', { class: 'spacer' }),
+              el('span', { class: 'sbs-count' }, `${r.a.assistants.length} vs ${r.b.assistants.length} turns`),
+            ),
+            el('div', { class: 'msg-user-text' }, userText(r.a.user)),
           ),
-          el('div', { class: 'msg-user-text' }, userText(r.a.user)),
+          el('div', { class: 'sbs-cols' },
+            el('div', { class: 'sbs-col col-a' },
+              el('div', { class: 'sbs-col-tag traj-model_a' }, 'Model A'),
+              ...r.a.assistants.map((a) => assistantBlock('model_a', a)),
+            ),
+            el('div', { class: 'sbs-col col-b' },
+              el('div', { class: 'sbs-col-tag traj-model_b' }, 'Model B'),
+              ...r.b.assistants.map((a) => assistantBlock('model_b', a)),
+            ),
+          ),
         ),
-        el('div', { class: 'sbs-cell' }, ...r.a.assistants.map((a) => assistantBlock('model_a', a))),
-        el('div', { class: 'sbs-cell' }, ...r.b.assistants.map((a) => assistantBlock('model_b', a))),
       );
     } else {
-      // one-sided (extra/reactive turn on A or B)
-      const side = r.a ? 'a' : 'b';
+      // one-sided (extra/reactive turn on A or B): a dashed card with a clear
+      // "Model X only" badge, and the content kept IN its own column so the side
+      // is obvious at a glance — the other column shows a muted placeholder.
       const g = r.a || r.b;
       const model = r.a ? 'model_a' : 'model_b';
-      const cell = el('div', { class: 'sbs-cell oneside' },
-        el('div', { class: 'sbs-oneside-tag' }, `${side === 'a' ? 'Model A' : 'Model B'} only`),
+      const isA = model === 'model_a';
+      const content = el('div', { class: `sbs-col ${isA ? 'col-a' : ''}` },
+        el('div', { class: `sbs-col-tag ${isA ? 'traj-model_a' : 'traj-model_b'}` }, isA ? 'Model A' : 'Model B'),
         g.user ? userBlock(model, g.user) : null,
         ...g.assistants.map((a) => assistantBlock(model, a)),
       );
-      const empty = el('div', { class: 'sbs-cell empty' }, '— no matching turn —');
-      grid.append(side === 'a' ? cell : empty, side === 'a' ? empty : cell);
+      const blank = el('div', { class: `sbs-col sbs-blank ${isA ? 'col-a' : ''}` },
+        el('div', { class: 'sbs-blank-note' }, `no matching turn on ${isA ? 'Model B' : 'Model A'}`),
+      );
+      rowsWrap.append(
+        el('div', { class: `sbs-row oneside ${model}` },
+          el('div', { class: 'sbs-oneside-head' },
+            el('span', { class: `sbs-oneside-badge ${model}` }, `${isA ? 'Model A' : 'Model B'} only`),
+            el('span', { class: 'sbs-oneside-note' }, 'extra / reactive turn — no matching prompt on the other side'),
+          ),
+          el('div', { class: 'sbs-cols' }, isA ? content : blank, isA ? blank : content),
+        ),
+      );
     }
   }
   return el('div', { class: 'sbs' },
@@ -816,7 +1139,7 @@ function buildSideBySide(A, B) {
       el('span', { class: 'traj-model_a' }, `Model A · ${A.count} msgs`),
       el('span', { class: 'traj-model_b' }, `Model B · ${B.count} msgs`),
     ),
-    grid,
+    rowsWrap,
   );
 }
 
@@ -853,7 +1176,7 @@ function alignPrompts(A, B) {
   return rows;
 }
 
-function jumpToMessage(model, index) {
+function jumpToMessage(model, index, phrase = null) {
   // exact message node, or (in A↔B) the shared anchor that folds this user prompt
   let node = document.getElementById(`msg-${model}-${index}`);
   if (!node) node = document.querySelector(`.sbs-anchor[data-${model === 'model_a' ? 'a' : 'b'}-user="${index}"]`);
@@ -861,6 +1184,8 @@ function jumpToMessage(model, index) {
   node.closest('.turn-body')?.classList.add('open');
   node.closest('.turn-group')?.querySelector('.turn-header .arrow')?.classList.add('open');
   node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // A phrase highlight (from a ?q= citation) supersedes the whole-block flash.
+  if (phrase && highlightPhraseIn(node, phrase)) return;
   node.classList.add('flash');
   setTimeout(() => node.classList.remove('flash'), 2500);
 }
@@ -879,8 +1204,11 @@ function userBlock(model, m) {
 function assistantBlock(model, a) {
   const blocks = [];
   for (const p of a.parts) {
-    if (p.type === 'text' && p.text.trim()) blocks.push(el('div', { class: 'asst-text' }, p.text));
-    else if (p.type === 'reasoning' && p.text.trim()) blocks.push(el('div', { class: 'asst-text reasoning' }, p.text));
+    if (p.type === 'text' && p.text.trim()) {
+      const d = el('div', { class: 'md asst-md' });
+      d.innerHTML = renderMarkdown(p.text);
+      blocks.push(d);
+    } else if (p.type === 'reasoning' && p.text.trim()) blocks.push(el('div', { class: 'asst-text reasoning' }, p.text));
     else if (p.type === 'tool') blocks.push(renderToolBlock(p));
   }
   if (!blocks.length) blocks.push(el('div', { class: 'empty-resp' }, '(no response content)'));
@@ -998,7 +1326,40 @@ const chatLog = document.getElementById('chat-log');
 const chatText = document.getElementById('chat-text');
 const chatStatus = document.getElementById('chat-status');
 
+// Empty-state greeting + clickable starter prompts (shown only when the log has
+// no messages; removed as soon as one arrives).
+const CHAT_SUGGESTIONS = [
+  'Summarize the A ↔ B decision and whether the ranking is defensible.',
+  'Verify the annotator\'s rank.json grading against the trajectories.',
+  'Were all milestones entered, in order, in both trajectories?',
+  'Find the strongest evidence for and against the winning model.',
+];
+
+function renderChatIntro() {
+  const chips = CHAT_SUGGESTIONS.map((s) =>
+    el('button', {
+      class: 'chat-suggest',
+      onclick: () => { setChatCollapsed(false); chatText.value = s; chatText.focus(); chatText.dispatchEvent(new Event('input')); },
+    }, s));
+  return el('div', { class: 'chat-intro' },
+    el('div', { class: 'chat-intro-title' }, '🔎 Audit copilot'),
+    el('div', { class: 'chat-intro-text' },
+      'I can read both trajectories, search them, and cross-check the annotator’s rank.json against what actually happened. ',
+      'I cite trajectory turns, QC rubric rows, and rank.json fields as clickable links. Ask anything, or start with:'),
+    el('div', { class: 'chat-suggests' }, ...chips),
+  );
+}
+
+// Show the intro when the log has no real messages; hide it otherwise.
+function refreshChatIntro() {
+  const hasMsg = chatLog.querySelector('.chat-msg, .tool-line');
+  const intro = chatLog.querySelector('.chat-intro');
+  if (hasMsg) intro?.remove();
+  else if (!intro) chatLog.append(renderChatIntro());
+}
+
 function appendChat(role, content) {
+  chatLog.querySelector('.chat-intro')?.remove();
   const bubble = el('div', { class: `bubble${role === 'assistant' ? ' md' : ''}` });
   if (role === 'assistant') bubble.innerHTML = renderMarkdown(content);
   else bubble.textContent = content;
@@ -1012,6 +1373,7 @@ function appendChat(role, content) {
 }
 
 function appendToolLine(text) {
+  chatLog.querySelector('.chat-intro')?.remove();
   chatLog.append(el('div', { class: 'tool-line' }, text));
   chatLog.scrollTop = chatLog.scrollHeight;
 }
@@ -1023,6 +1385,7 @@ async function loadChat() {
     if (m.role === 'tools') appendToolLine(`⚙ ${m.tools.join(', ')}`);
     else appendChat(m.role, m.content);
   }
+  refreshChatIntro();
 }
 
 async function send() {
@@ -1030,7 +1393,24 @@ async function send() {
   if (!message) return;
   chatText.value = '';
   chatText.style.height = '38px';
+  await sendMessage(message);
+}
+
+function removeContinueBtn() { chatLog.querySelector('.chat-continue')?.remove(); }
+
+// The copilot paused at the per-turn step ceiling — offer to resume with context.
+function showContinueBtn() {
+  removeContinueBtn();
+  chatLog.append(el('button', {
+    class: 'chat-continue',
+    onclick: () => { removeContinueBtn(); sendMessage('Continue from where you paused — pick up the same task and finish.'); },
+  }, 'Copilot paused at the step limit · Continue ▸'));
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+async function sendMessage(message) {
   appendChat('user', message);
+  removeContinueBtn();
   document.getElementById('chat-send').disabled = true;
   chatStatus.textContent = 'thinking…';
   chatStatus.classList.remove('error-line');
@@ -1041,6 +1421,7 @@ async function send() {
         chatStatus.textContent = `running ${m.name}…`;
       }
       if (m.type === 'assistant') { appendChat('assistant', m.content); chatStatus.textContent = ''; }
+      if (m.type === 'truncated') { chatStatus.textContent = ''; showContinueBtn(); }
       if (m.type === 'error') { chatStatus.textContent = m.message; chatStatus.classList.add('error-line'); }
       if (m.type === 'done') chatStatus.textContent = '';
     });
@@ -1063,6 +1444,7 @@ chatText.addEventListener('input', () => {
 document.getElementById('clear-chat').addEventListener('click', async () => {
   await api(`/task/${bucket}/${taskId}/chat`, { method: 'DELETE' });
   chatLog.replaceChildren();
+  refreshChatIntro();
 });
 
 // ---------- claim / decision / severity ----------
@@ -1080,7 +1462,7 @@ sevChip.addEventListener('click', () => {
           menu.remove();
           if (k === bucket) return;
           await api(`/task/${bucket}/${taskId}/move`, { method: 'POST', body: { to: k } });
-          location.href = `/task/${k}/${taskId}`;
+          location.href = `${window.__base__ || ''}/task/${k}/${taskId}`;
         },
       }, label + (k === bucket ? '  ✓' : '')),
     ),
@@ -1141,16 +1523,67 @@ claimBtn.addEventListener('click', async () => {
 
 // '' clears the decision; any value sets it
 verdictSelect.addEventListener('change', async () => {
-  await api(`/task/${bucket}/${taskId}/verdict`, {
-    method: 'POST',
-    body: { verdict: verdictSelect.value || null },
-  });
+  const v = verdictSelect.value || null;
+  await api(`/task/${bucket}/${taskId}/verdict`, { method: 'POST', body: { verdict: v } });
   refreshState();
+  // Second Opinion needs a "why" — jump to the checklist and focus the note box.
+  if (v === 'SECOND_OPINION') { focusNoteNext = true; setActive(findDocNav('Checklist')); showChecklist(); }
 });
 
 document.getElementById('logout-btn').addEventListener('click', async () => {
   await api('/logout', { method: 'POST' });
-  location.href = '/login.html';
+  location.href = (window.__base__ || '') + '/login.html';
+});
+
+// ---------- guided tour (interactive, on the sandbox task) ----------
+function postTourLog(entry) { api('/tour/log', { method: 'POST', body: entry }).catch(() => {}); }
+function endTaskTourCleanup() {
+  const active = sessionStorage.getItem('cwt_tour_task');
+  sessionStorage.removeItem('cwt_tour_task');
+  api('/tour/end', { method: 'POST' }).catch(() => {});
+  if (active) location.href = (window.__base__ || '') + '/'; // the sandbox we're viewing is gone — go back to the board
+}
+
+let copilotBaseline = 0;
+function primeCopilot() {
+  setChatCollapsed(false);
+  copilotBaseline = chatLog.querySelectorAll('.chat-msg.assistant').length;
+  if (!chatText.value.trim()) chatText.value = 'Did the winning model really pass all the tests it claims? Verify against the trajectory.';
+  chatText.focus();
+}
+const verifyCopilot = () => chatLog.querySelectorAll('.chat-msg.assistant').length > copilotBaseline;
+const verifyDecision = () => !!document.getElementById('verdict-select').value;
+
+const TASK_TOUR = [
+  { title: 'Inside a task — your sandbox 🧪', body: 'This is a private sandbox task: claim it, chat, decide, whatever you like — it\'s deleted when the tour ends, so nothing here is real. Everything you audit lives on this one screen.' },
+  { selector: '#nav-docs', title: 'Documents', body: 'Task definition & milestones, the V5 QC spec, and CB responses — the annotator\'s rank.json in a clean UI (summary, per-dimension grading, failure modes, and the A↔B decision). The generated Review, Remediation, and your Checklist live here too.' },
+  { selector: '#nav-trajs', title: 'Trajectory viewer', body: 'Read Model A or Model B on their own, or Compare A ↔ B side by side to see exactly where the two runs diverge — matching prompts line up, and one-sided turns are clearly called out.' },
+  { selector: '#viewer', title: 'Clickable citation "chips"', body: 'Everywhere you read — docs, CB responses, copilot answers — you\'ll see little chips. A traj:// chip jumps to an exact trajectory turn; a spec:// chip opens the QC rubric row that applies; a /rank.json field chip lands you in CB responses. Each one scrolls to the precise spot and highlights it — even a specific quoted phrase inside a response. See one? Click it.' },
+  { selector: '#chat-panel', title: 'Your audit copilot — try it 🚀', body: 'Ask anything about this task. It reads and searches both trajectories and cross-checks the rank.json, then answers with those same clickable chips so you can verify in one click. I\'ve dropped a starter question in the box — click a suggestion or hit Send, and I\'ll wait for the reply.',
+    onShow: primeCopilot, try: { action: 'copilot', hint: 'Waiting for the copilot to answer…', verify: verifyCopilot } },
+  { selector: '#verdict-select', title: 'Try it: record a decision ✅', body: 'Set a decision for this sandbox task — No Issues / Fixes made / SBQ / Second Opinion. Pick Second Opinion and it\'ll ask for the key issue, which then shows on the board card for the next reviewer.',
+    try: { action: 'decision', hint: 'Waiting for you to pick a decision…', verify: verifyDecision } },
+  { selector: '#claim-btn', title: 'Claim the task', body: 'Claim it so the team knows you\'re auditing it — your name then shows on the board for everyone. (Feel free to try it.)' },
+  { selector: '#sev-chip', title: 'Reclassify severity', body: 'Landed in the wrong bucket? Click here to move the task between Hard / Soft / Pass.' },
+  { title: 'You\'re all set 🎉', body: 'That\'s the full flow — board to decision. I\'ll clean up your sandbox now and take you back to the board. Replay anytime from the ✦ Tour button. Happy auditing!' },
+];
+
+function runTaskTour() { setChatCollapsed(false); startTour(TASK_TOUR, { onExit: endTaskTourCleanup, onLog: postTourLog }); }
+
+// ✦ Tour on a task page: spin up a fresh sandbox and go audit it there.
+async function launchTaskTour() {
+  let dummy = null;
+  try { dummy = await api('/tour/start', { method: 'POST' }); } catch { /* ignore */ }
+  if (dummy) {
+    sessionStorage.setItem('cwt_tour_task', JSON.stringify(dummy));
+    sessionStorage.setItem('cwt_tour_resume', '1');
+    location.href = `${window.__base__ || ''}/task/${dummy.bucket}/${dummy.id}`;
+  }
+}
+document.getElementById('tour-btn')?.addEventListener('click', launchTaskTour);
+// best-effort cleanup if they close the tab mid-tour (not while navigating to resume)
+window.addEventListener('beforeunload', () => {
+  if (sessionStorage.getItem('cwt_tour_task') && !sessionStorage.getItem('cwt_tour_resume')) navigator.sendBeacon?.('/api/tour/end');
 });
 
 // ---------- resizable / collapsible chat panel ----------
@@ -1211,7 +1644,7 @@ if (me.role === 'admin') {
   del.addEventListener('click', async () => {
     if (!confirm(`Delete task ${taskId} from the board? This removes its files, claim, decision, and generated docs.`)) return;
     await api(`/task/${bucket}/${taskId}`, { method: 'DELETE' });
-    location.href = '/';
+    location.href = (window.__base__ || '') + '/';
   });
 }
 await refreshState();
@@ -1227,3 +1660,9 @@ if (params.get('traj')) {
   openDoc(DOCS[0], findDocNav('Review'));
 }
 await loadChat();
+
+// Continue the single tour that started on the board (it opened this sandbox task).
+if (sessionStorage.getItem('cwt_tour_resume')) {
+  sessionStorage.removeItem('cwt_tour_resume');
+  runTaskTour();
+}

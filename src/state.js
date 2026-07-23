@@ -87,6 +87,30 @@ export function setVerdict(bucket, id, verdict, username) {
     state.verdict_by = username;
     state.verdict_at = new Date().toISOString();
   }
+  // The "why" note only applies to a Second Opinion — drop it when the verdict
+  // moves anywhere else (including cleared), so a stale reason can't linger.
+  if (verdict !== 'SECOND_OPINION') {
+    delete state.verdict_note;
+    delete state.verdict_note_by;
+    delete state.verdict_note_at;
+  }
+  saveState(bucket, id, state);
+  return state;
+}
+
+// The key-issue explanation attached to a Second Opinion verdict. Empty clears it.
+export function setVerdictNote(bucket, id, note, username) {
+  const state = getState(bucket, id);
+  const n = String(note || '').trim().slice(0, 4000);
+  if (n) {
+    state.verdict_note = n;
+    state.verdict_note_by = username;
+    state.verdict_note_at = new Date().toISOString();
+  } else {
+    delete state.verdict_note;
+    delete state.verdict_note_by;
+    delete state.verdict_note_at;
+  }
   saveState(bucket, id, state);
   return state;
 }

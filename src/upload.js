@@ -122,19 +122,29 @@ function bulkIngest(taskRoots, fields, forcedId = null) {
     // override any prior copy (in whatever bucket), carrying over reviewer state
     const priorBucket = findTaskBucket(taskId);
     let studio = null;
+    let reopened = false;
     if (priorBucket) {
       const priorDir = path.join(config.workspaceRoot, priorBucket, taskId);
-      try { studio = fs.readFileSync(path.join(priorDir, '_studio.json')); } catch { /* none */ }
+      try { studio = fs.readFileSync(path.join(priorDir, '_studio.json'), 'utf8'); } catch { /* none */ }
       fs.rmSync(priorDir, { recursive: true, force: true });
+    }
+    // A re-audited task left at SBQ or "Fixes made" must not silently stay
+    // resolved — reopen it (clear verdict + release claim) so it returns to the
+    // OPEN lane for re-review. NO_ISSUES (genuine pass) and SECOND_OPINION
+    // (already its own lane) are left untouched.
+    if (studio) {
+      const reset = reopenIfStale(studio);
+      studio = reset.json;
+      reopened = reset.reopened;
     }
     const dest = path.join(config.workspaceRoot, bucket, taskId);
     fs.cpSync(taskRoot, dest, { recursive: true });
-    if (studio) fs.writeFileSync(path.join(dest, '_studio.json'), studio); // keep claim/verdict/checklist
+    if (studio) fs.writeFileSync(path.join(dest, '_studio.json'), studio); // keeps checklist/delivered; verdict+claim reset if reopened
     let seeded = false;
     if (fs.existsSync(path.join(deliveryDir, '_audit'))) {
       seeded = writeAuditSeed(deliveryDir, taskId, dest);
     }
-    (priorBucket ? replaced : ingested).push({ taskId, bucket, seeded });
+    (priorBucket ? replaced : ingested).push({ taskId, bucket, seeded, reopened });
   }
 
   const all = [...ingested, ...replaced];
@@ -144,11 +154,30 @@ function bulkIngest(taskRoots, fields, forcedId = null) {
     bucket: first?.bucket || null,
     ingested,
     replaced,
+    reopened: all.filter((t) => t.reopened).map((t) => t.taskId),
     counts: countBy(all, (t) => t.bucket),
     skipped_bad_id: skippedBadId,
     seeded: all.some((t) => t.seeded),
     files: all.length === 1 ? countFiles(path.join(config.workspaceRoot, first.bucket, first.taskId)) : undefined,
   };
+}
+
+// Verdicts that mean "still needs work" — re-uploading such a task is a re-audit,
+// so we drop the reviewer's verdict and claim to send it back to the OPEN lane.
+const REOPEN_VERDICTS = new Set(['SBQ', 'FIXES_MADE']);
+
+function reopenIfStale(studioJson) {
+  let state;
+  try { state = JSON.parse(studioJson); } catch { return { json: studioJson, reopened: false }; }
+  if (!REOPEN_VERDICTS.has(state.verdict)) return { json: studioJson, reopened: false };
+  delete state.verdict;
+  delete state.verdict_by;
+  delete state.verdict_at;
+  delete state.claimed_by;
+  delete state.claimed_at;
+  state.reopened_at = new Date().toISOString();
+  state.reopened_reason = 're-audit upload';
+  return { json: JSON.stringify(state, null, 2), reopened: true };
 }
 
 function loadVerdicts(deliveryDir) {
