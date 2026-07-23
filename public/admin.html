@@ -13,6 +13,8 @@
     <div class="app-name">Admin Console <span>/ pull, deliver &amp; usage</span></div>
     <div class="spacer"></div>
     <span class="mono" id="rate-note" style="font-size:11px;color:var(--text-3)"></span>
+    <a class="back-home" href="/l12.html" title="delivery analytics dashboard">L12 Stats</a>
+    <a class="back-home" href="/archive.html" title="browse archived tasks">Archive</a>
     <a class="back-home" href="/api/admin/usage.csv">Export CSV</a>
     <div class="user-chip" id="user-chip" hidden>
       <span id="user-name"></span>
@@ -37,13 +39,17 @@
       <div class="l10-detail mono" id="pull-l10-detail"></div>
     </div>
 
-    <h2 class="admin-h2">Deliver tasks</h2>
+    <h2 class="admin-h2">Archive tasks</h2>
     <div class="l10-panel glass">
-      <div class="l10-hint">Mark tasks delivered — they're hidden from the board (kept on disk, reversible) and bundled into a backup zip that restores the feed if re-uploaded.</div>
+      <div class="l10-hint">Moving tasks to the archive marks them delivered — they leave the active board but stay fully viewable and searchable in the <a href="/archive.html">Archive</a> (visible to everyone). A restorable backup zip is built each time. Reversible here or from the Archive page.</div>
+      <div class="l10-row l10-archive-bulk">
+        <button class="primary" id="archive-completed-btn" title="archive every task that has a recorded decision (the Resolved lane)">Move all completed to archive</button>
+        <a class="back-home" href="/archive.html">Browse archive →</a>
+      </div>
       <div class="l10-row l10-ids-row">
         <input type="text" id="deliver-input" class="mono"
-               placeholder="task ids to deliver (24-hex, comma/space separated)" spellcheck="false" />
-        <button id="deliver-btn">Mark delivered</button>
+               placeholder="or archive specific task ids (24-hex, comma/space separated)" spellcheck="false" />
+        <button id="deliver-btn">Move to archive</button>
         <button id="undeliver-btn" class="quiet">Restore</button>
       </div>
       <div class="l10-row">

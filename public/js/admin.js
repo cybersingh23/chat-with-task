@@ -23,11 +23,37 @@ async function boot() {
   await load();
 }
 
-// --- Deliver tasks (soft-archive + backup zip) ---
+// A task is "completed" when it carries a recorded decision (the board's Resolved lane).
+const RESOLVED_VERDICTS = new Set(['NO_ISSUES', 'FIXES_MADE', 'SBQ']);
+
+// --- Archive tasks (soft-archive / deliver + backup zip) ---
 function initDeliver() {
   document.getElementById('deliver-btn').addEventListener('click', () => runDeliver('/admin/deliver'));
   document.getElementById('undeliver-btn').addEventListener('click', () => runDeliver('/admin/undeliver'));
+  document.getElementById('archive-completed-btn').addEventListener('click', archiveCompleted);
   refreshDeliver();
+}
+
+// Gather every not-yet-archived task with a resolved decision and archive them all.
+async function archiveCompleted() {
+  const btn = document.getElementById('archive-completed-btn');
+  const status = document.getElementById('deliver-status');
+  btn.disabled = true;
+  try {
+    const ws = await api('/workspace');
+    const ids = Object.values(ws).flat()
+      .filter((t) => !t.tour && !t.delivered && t.verdict && RESOLVED_VERDICTS.has(t.verdict))
+      .map((t) => t.id);
+    if (!ids.length) { status.textContent = 'No completed (Resolved) tasks to archive right now.'; return; }
+    if (!confirm(`Move ${ids.length} completed task${ids.length === 1 ? '' : 's'} to the archive? They'll leave the board but stay viewable in the Archive.`)) return;
+    status.textContent = `Archiving ${ids.length} completed task(s) + building backup…`;
+    const r = await api('/admin/deliver', { method: 'POST', body: { taskIds: ids } });
+    renderDeliver(r, 'deliver');
+  } catch (e) {
+    status.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function deliverIds() {

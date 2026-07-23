@@ -46,6 +46,18 @@ export function listWorkspace() {
   return out;
 }
 
+// The "Spelling/Grammar Issues" tag is inferred from the audit's writing check:
+// review.md's autoqc fence carries an "R23 — Writing Quality: …" line when Check 5 found
+// spelling/grammar defects. No review.md (un-audited) → no tag.
+function detectGrammarIssue(dir) {
+  try {
+    const md = fs.readFileSync(path.join(dir, 'review.md'), 'utf8');
+    const m = md.match(/```autoqc\s*\n([\s\S]*?)```/);
+    const block = m ? m[1] : md;
+    return /^\s*R2[34]\b/m.test(block) || /spelling\s*\/\s*grammar/i.test(block);
+  } catch { return false; }
+}
+
 export function taskMeta(bucket, id) {
   const dir = taskDir(bucket, id);
   const has = (f) => fs.existsSync(path.join(dir, f));
@@ -75,6 +87,7 @@ export function taskMeta(bucket, id) {
     meta.verdictNote = state.verdict_note || null;
     meta.delivered = !!state.delivered;
     meta.deliveredAt = state.delivered_at || null;
+    meta.deliveredBy = state.delivered_by || null;
     meta.tour = !!state.tour;
     meta.tourOwner = state.tour_owner || null;
   } catch {
@@ -83,9 +96,11 @@ export function taskMeta(bucket, id) {
     meta.verdictNote = null;
     meta.delivered = false;
     meta.deliveredAt = null;
+    meta.deliveredBy = null;
     meta.tour = false;
     meta.tourOwner = null;
   }
+  meta.grammar = detectGrammarIssue(dir);
   return meta;
 }
 

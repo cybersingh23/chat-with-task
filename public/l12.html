@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>L12 Stats — Chat with Task</title>
+  <link rel="stylesheet" href="/css/studio.css" />
+  <link rel="icon" href="/scale-icon.svg" />
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="back-home" title="back to board">‹ Board</a>
+    <div class="app-name">L12 Stats <span>/ delivery analytics</span></div>
+    <div class="spacer"></div>
+    <div class="l12-scope">
+      <label for="l12-scope-sel">Scope</label>
+      <select id="l12-scope-sel">
+        <option value="completed">Completed (Resolved, non-archived)</option>
+        <option value="active">Active board (non-archived)</option>
+        <option value="all">All tasks on disk</option>
+      </select>
+    </div>
+    <a class="back-home" href="/archive.html" title="browse archived tasks">Archive</a>
+    <div class="user-chip" id="user-chip" hidden>
+      <span class="avatar sm" id="user-avatar"></span>
+      <span id="user-name"></span>
+      <button id="logout-btn" title="sign out">Sign out</button>
+    </div>
+  </header>
+
+  <main class="index-main">
+    <div class="stat-cards" id="l12-cards"></div>
+
+    <h2 class="admin-h2">Verdict &amp; severity movement</h2>
+    <div class="l12-movement" id="l12-movement"></div>
+
+    <h2 class="admin-h2">Model performance leaderboard <span class="admin-sub">avg score per dimension (1–3) · click a column to re-rank</span></h2>
+    <div class="admin-table-wrap"><table class="admin-table l12-leaderboard" id="l12-leaderboard"></table></div>
+
+    <h2 class="admin-h2">Matchups &amp; win rates <span class="admin-sub">winner by rank · strength from preference rating</span></h2>
+    <div id="l12-matchups"></div>
+
+    <h2 class="admin-h2">Annotators <span class="admin-sub">tasks &amp; decisions per annotator ID</span></h2>
+    <div class="admin-table-wrap"><table class="admin-table" id="l12-annotators"></table></div>
+
+    <h2 class="admin-h2">Task instances <span class="admin-sub">how many tasks share each name</span></h2>
+    <div class="admin-table-wrap"><table class="admin-table" id="l12-tasknames"></table></div>
+  </main>
+
+  <script type="module" src="/js/l12.js"></script>
+</body>
+</html>

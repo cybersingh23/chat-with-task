@@ -1,7 +1,72 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { config } from './config.js';
 import { assertBucket, assertTaskId, ensureWorkspace, httpError } from './workspace.js';
+
+// Image magic bytes -> extension (null if the bytes aren't a real image — e.g. an
+// expired-CDS-URL S3 error body, which is exactly what makes proofs "not render").
+function imgExt(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return '.png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return '.jpg';
+  if (buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP') return '.webp';
+  const g = buf.slice(0, 6).toString('latin1');
+  if (g === 'GIF87a' || g === 'GIF89a') return '.gif';
+  return null;
+}
+
+// Does the task already have a valid (real-image, non-trivial) proof for this side?
+function hasProofImage(rpDir, side) {
+  if (!fs.existsSync(rpDir)) return false;
+  for (const f of fs.readdirSync(rpDir)) {
+    if (!f.startsWith(`${side}_proof`) || !/\.(png|jpe?g|webp|gif)$/i.test(f)) continue;
+    const p = path.join(rpDir, f);
+    try {
+      const st = fs.statSync(p);
+      if (st.size < 64) continue;
+      const fd = fs.openSync(p, 'r');
+      const head = Buffer.alloc(12);
+      fs.readSync(fd, head, 0, 12, 0);
+      fs.closeSync(fd);
+      if (imgExt(head)) return true;
+    } catch { /* unreadable */ }
+  }
+  return false;
+}
+
+// Self-healing proof extraction, run at ingest/upload time (when CDS URLs are freshest).
+// If a side's proof image is missing/invalid but a source URL was recorded by transform
+// (ranking_proof/_sources.json) or still lives in rank.json.ranking_proof, fetch it now.
+// Best-effort and synchronous (curl); a dead/expired URL just leaves the task as-is.
+export function ensureRankingProof(taskDir) {
+  const rpDir = path.join(taskDir, 'ranking_proof');
+  let sources = readJson(path.join(rpDir, '_sources.json')) || {};
+  if (!sources.a_proof && !sources.b_proof) {
+    const rp = readJson(path.join(taskDir, 'rank.json'))?.ranking_proof;
+    if (rp && typeof rp === 'object') sources = { a_proof: rp.a_proof, b_proof: rp.b_proof };
+  }
+  for (const side of ['a', 'b']) {
+    const url = sources[`${side}_proof`];
+    if (typeof url !== 'string' || !/^https?:\/\//.test(url)) continue;
+    if (hasProofImage(rpDir, side)) continue;
+    try {
+      fs.mkdirSync(rpDir, { recursive: true });
+      const tmp = path.join(rpDir, `.${side}_proof.download`);
+      execFileSync('curl', ['-fsSL', '--max-time', '120', '-A', 'Mozilla/5.0', '-o', tmp, url], { stdio: 'ignore' });
+      const head = fs.readFileSync(tmp).subarray(0, 12);
+      const ext = imgExt(head);
+      if (ext) {
+        for (const f of fs.readdirSync(rpDir)) {
+          if (f.startsWith(`${side}_proof`) && /\.(png|jpe?g|webp|gif)$/i.test(f)) fs.rmSync(path.join(rpDir, f), { force: true });
+        }
+        fs.renameSync(tmp, path.join(rpDir, `${side}_proof${ext}`));
+      } else {
+        fs.rmSync(tmp, { force: true });
+      }
+    } catch { /* URL expired or curl failed — leave the task unchanged */ }
+  }
+}
 
 // A claimed task ID is searched across every ACC_DELIVERY_* dir under the
 // configured delivery roots (plus the roots themselves) for <task_id>/rank.json.
@@ -37,6 +102,7 @@ export function ingestTask(taskId, bucket = 'UNSORTED', sourceDir = null) {
   const dest = path.join(config.workspaceRoot, bucket, taskId);
   if (fs.existsSync(dest)) throw httpError(409, `task ${taskId} already in workspace (${bucket})`);
   fs.cpSync(src, dest, { recursive: true });
+  ensureRankingProof(dest);
   writeAuditSeed(path.dirname(src), taskId, dest);
   return { taskId, bucket, source: src, candidates: sources };
 }

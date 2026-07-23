@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Archive — Chat with Task</title>
+  <link rel="stylesheet" href="/css/studio.css" />
+  <link rel="icon" href="/scale-icon.svg" />
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="back-home" title="back to board">‹ Board</a>
+    <div class="app-name">Archive <span>/ delivered tasks</span></div>
+    <div class="spacer"></div>
+    <a class="back-home" id="admin-link" href="/admin.html" hidden>Admin Console</a>
+    <div class="user-chip" id="user-chip" hidden>
+      <span class="avatar sm" id="user-avatar"></span>
+      <span id="user-name"></span><span class="role" id="user-role"></span>
+      <button id="logout-btn" title="sign out">Sign out</button>
+    </div>
+  </header>
+
+  <main class="index-main">
+    <div class="archive-intro">
+      Tasks moved to the archive are delivered and hidden from the active board, but stay fully
+      viewable here. Search a task ID (or annotator / problem text) to find one.
+    </div>
+
+    <div class="board-controls">
+      <div class="search-bar glass">
+        <input type="text" id="archive-search" placeholder="Search archive by task ID, annotator, or problem…" spellcheck="false" />
+      </div>
+      <span class="mono" id="archive-count"></span>
+    </div>
+
+    <div class="archive-grid" id="archive-grid"></div>
+    <div class="archive-empty" id="archive-empty" hidden></div>
+  </main>
+
+  <script type="module" src="/js/archive.js"></script>
+</body>
+</html>
