@@ -13,14 +13,23 @@ const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED
 const RESOLVED_VERDICTS = new Set(['NO_ISSUES', 'FIXES_MADE', 'SBQ']);
 const LANES = [
   { key: 'OPEN', name: 'Open', hint: 'Unclaimed, no decision yet.' },
+  {
+    key: 'GRAMMAR',
+    name: 'Grammar Fixes',
+    hint: 'Tasks whose only fail is spelling/grammar (R23/R24). Drop a task here when everything else is fixed.',
+  },
   { key: 'REVIEW', name: 'In review', hint: 'Claimed and being audited.' },
   { key: 'SECOND_OPINION', name: 'Needs 2nd opinion', hint: 'Flagged for another reviewer.' },
   { key: 'RESOLVED', name: 'Resolved', hint: 'A decision has been recorded.' },
 ];
 
+// Grammar Fixes sits ahead of the claim check on purpose: these are bulk-fixed
+// locally rather than claimed one at a time, so claiming one doesn't pull it out
+// of the lane. Recording a verdict does.
 function laneOf(t) {
   if (t.verdict === 'SECOND_OPINION') return 'SECOND_OPINION';
   if (t.verdict && RESOLVED_VERDICTS.has(t.verdict)) return 'RESOLVED';
+  if (t.inGrammarLane) return 'GRAMMAR';
   if (t.claimedBy) return 'REVIEW';
   return 'OPEN';
 }
@@ -63,7 +72,8 @@ let dragging = null;
 
 async function applyLaneChange(t, target, x, y) {
   const { bucket, id } = t;
-  if (laneOf(t) === target) return;
+  const from = laneOf(t);
+  if (from === target) return;
   // Decide the resulting state first (RESOLVED asks which decision).
   let verdict = null, claim = null;
   if (target === 'SECOND_OPINION') verdict = 'SECOND_OPINION';
@@ -71,17 +81,29 @@ async function applyLaneChange(t, target, x, y) {
   else if (target === 'REVIEW') { verdict = null; claim = 'claim'; }
   else if (target === 'OPEN') { verdict = null; claim = t.claimedBy ? 'release' : null; }
 
+  // Grammar Fixes membership is content-derived, so moving in or out needs an
+  // explicit override: without 'out', the automatic rule would pull an
+  // auto-detected task straight back into the lane on the next render.
+  let grammarMode;
+  if (target === 'GRAMMAR') grammarMode = 'in';
+  else if (from === 'GRAMMAR' && (target === 'OPEN' || target === 'REVIEW')) grammarMode = 'out';
+
   // Optimistically update the card in place + render once — no full refetch, no flash/jump.
   const orig = (currentWs[bucket] || []).find((x2) => x2.id === id);
   if (orig) {
     orig.verdict = verdict;
     if (claim === 'claim') orig.claimedBy = me?.username || orig.claimedBy;
     if (claim === 'release') orig.claimedBy = null;
+    if (grammarMode) {
+      orig.grammarLane = grammarMode;
+      orig.inGrammarLane = grammarMode === 'in';
+    }
   }
   render();
 
   // Persist in the background; only reload (to reconcile) if something failed.
   try {
+    if (grammarMode) await api(`/task/${bucket}/${id}/grammar-lane`, { method: 'POST', body: { mode: grammarMode } });
     await api(`/task/${bucket}/${id}/verdict`, { method: 'POST', body: { verdict } });
     if (claim === 'claim' && !t.claimedBy) await api(`/task/${bucket}/${id}/claim`, { method: 'POST' });
     if (claim === 'release') await api(`/task/${bucket}/${id}/release`, { method: 'POST' });
@@ -89,6 +111,26 @@ async function applyLaneChange(t, target, x, y) {
     toast(e.message);
     await load();
   }
+}
+
+// Bulk-complete the whole Grammar Fixes lane: these get fixed locally in one pass,
+// so the lane needs one action rather than 27 individual decisions.
+async function completeGrammarLane(items) {
+  if (!items.length) return;
+  const ids = items.map((t) => t.id);
+  if (!confirm(`Mark ${ids.length} grammar-fix task${ids.length === 1 ? '' : 's'} as Fixes made?\n\nThey move to Resolved. Undo by dragging a card back out.`)) return;
+  for (const t of items) {
+    const orig = (currentWs[t.bucket] || []).find((x) => x.id === t.id);
+    if (orig) orig.verdict = 'FIXES_MADE';
+  }
+  render();
+  try {
+    const r = await api('/verdict/bulk', { method: 'POST', body: { verdict: 'FIXES_MADE', ids } });
+    toast(`${r.moved} task${r.moved === 1 ? '' : 's'} marked Fixes made.`);
+  } catch (e) {
+    toast(e.message);
+  }
+  await load();
 }
 
 // Resolved is a 3-way decision — ask which one at the drop point.
@@ -186,7 +228,17 @@ function ticketCard(t) {
       : null,
     el('div', { class: 'ticket-foot' },
       t.claimedBy ? assignee(t.claimedBy) : claimAction(t),
-      t.grammar ? el('span', { class: 'chip grammar-chip', title: 'Spelling/Grammar Issues — flagged by the R23 writing check' }, '✎ Spelling/Grammar') : null,
+      t.grammar
+        ? el('span', {
+          class: 'chip grammar-chip',
+          title: t.grammarOnly
+            ? `Spelling/Grammar is the only fail (${(t.qcDims || []).join(', ')}) — auto-routed to Grammar Fixes`
+            : `Spelling/Grammar flagged, but not the only fail — also ${(t.otherDims || []).join(', ')}`,
+        }, '✎ Spelling/Grammar')
+        : null,
+      lane === 'GRAMMAR' && t.grammarLane === 'in'
+        ? el('span', { class: 'chip manual-chip', title: 'moved here by hand, not auto-detected' }, 'moved in')
+        : null,
       t.verdict ? el('span', { class: `chip v-${t.verdict}` }, VERDICT_LABELS[t.verdict] || t.verdict) : null,
     ),
   );
@@ -236,6 +288,12 @@ function render() {
         el('div', { class: 'lane-head' },
           el('span', { class: 'lane-name' }, lane.name),
           el('span', { class: 'lane-count' }, String(items.length)),
+          lane.key === 'GRAMMAR' && items.length
+            ? el('button', {
+              class: 'lane-action', title: 'Mark every task in this lane as Fixes made',
+              onclick: (e) => { e.preventDefault(); completeGrammarLane(items); },
+            }, 'Mark all fixed')
+            : null,
         ),
         items.length
           ? el('div', { class: 'lane-body' }, items.map(ticketCard))

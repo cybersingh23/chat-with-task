@@ -268,23 +268,36 @@ select option { background: #14161c; }
 .status-dot { display: none; }
 
 /* ── ticketing board: workflow lanes ─────────────────────────────────────── */
-.lanes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; align-items: start; }
+.lanes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; align-items: start; }
 .lane {
   background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-lg);
   padding: 12px; min-height: 120px;
 }
 .lane-SECOND_OPINION { border-color: rgba(185, 140, 245, 0.4); background: rgba(185, 140, 245, 0.05); }
+/* Grammar Fixes borrows the writing tag's yellow so lane and chip read as one thing */
+.lane-GRAMMAR { border-color: rgba(245, 200, 76, 0.34); background: rgba(245, 200, 76, 0.04); }
 .lane-head {
   display: flex; align-items: center; gap: 9px; padding: 2px 4px 12px;
-  border-bottom: 1px solid var(--edge); margin-bottom: 12px;
+  border-bottom: 1px solid var(--edge); margin-bottom: 12px; flex-wrap: wrap;
 }
-.lane-name { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
+.lane-name { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); white-space: nowrap; }
 .lane-SECOND_OPINION .lane-name { color: var(--purple); }
+.lane-GRAMMAR .lane-name { color: var(--yellow); }
 .lane-RESOLVED .lane-name { color: var(--text-3); }
 .lane-count {
   margin-left: auto; font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums;
   background: var(--surface-2); border-radius: 999px; padding: 1px 9px;
 }
+/* per-lane bulk action (Grammar Fixes → "Mark all fixed"). Its own full-width row
+   so the lane name never gets squeezed into wrapping at 5-across. */
+.lane-action {
+  flex: 0 0 100%; margin-top: 2px;
+  font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
+  color: var(--yellow); background: color-mix(in srgb, var(--yellow) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--yellow) 38%, transparent);
+  border-radius: 999px; padding: 4px 9px;
+}
+.lane-action:hover { background: color-mix(in srgb, var(--yellow) 22%, transparent); }
 .lane-body { display: flex; flex-direction: column; gap: 10px; }
 .lane-empty { padding: 20px 8px; font-size: 12px; color: var(--text-3); text-align: center; line-height: 1.5; }
 
@@ -1392,6 +1405,10 @@ a.cb-field-link:hover { background: rgba(111, 199, 232, 0.22); text-decoration: 
 .chip.grammar-chip {
   color: var(--yellow); background: color-mix(in srgb, var(--yellow) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--yellow) 42%, transparent);
+}
+/* a card put in Grammar Fixes by hand rather than by the audit */
+.chip.manual-chip {
+  color: var(--text-3); background: var(--surface-2); border: 1px dashed var(--edge-strong);
 }
 /* toolbar: keep the bulk control + text actions on one cleanly-aligned row */
 .toolbar { align-items: center; }

@@ -10,7 +10,7 @@ import { BUCKETS } from '../config.js';
 import { ingestTask, findTaskSources } from '../ingest.js';
 import { handleUpload } from '../upload.js';
 import { verifyLogin, createSession, destroySession, requireAuth, requireAdmin } from '../auth.js';
-import { claimTask, releaseTask, setVerdict, setVerdictNote, setChecklistItem, getState, VERDICTS } from '../state.js';
+import { claimTask, releaseTask, setVerdict, setVerdictNote, setChecklistItem, setGrammarLane, getState, VERDICTS } from '../state.js';
 import { runAgentLoop } from '../llm.js';
 import { TOOL_DEFS, makeExecutor } from '../tools.js';
 import { generateDoc, taskContext, CITATION_RULES } from '../docgen.js';
@@ -141,6 +141,11 @@ api.post('/verdict/bulk', wrap(async (req, res) => {
   res.json({ moved, verdict });
 }));
 
+// Move a task into / out of the Grammar Fixes lane by hand ({ mode: 'in'|'out'|null }).
+api.post('/task/:bucket/:id/grammar-lane', wrap(async (req, res) =>
+  res.json(setGrammarLane(req.params.bucket, req.params.id, req.body.mode ?? null, req.user.username))
+));
+
 // the "key issue" note behind a Second Opinion verdict
 api.post('/task/:bucket/:id/verdict-note', wrap(async (req, res) =>
   res.json(setVerdictNote(req.params.bucket, req.params.id, req.body.note ?? '', req.user.username))
@@ -168,6 +173,7 @@ api.get('/export/all.csv', wrap(async (req, res) => {
   const RESOLVED = new Set(['NO_ISSUES', 'FIXES_MADE', 'SBQ']);
   const laneOf = (t) => t.verdict === 'SECOND_OPINION' ? '2nd opinion'
     : (t.verdict && RESOLVED.has(t.verdict)) ? 'Resolved'
+    : t.inGrammarLane ? 'Grammar Fixes'
     : t.claimedBy ? 'In review' : 'Open';
   const csv = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const ws = listWorkspace();

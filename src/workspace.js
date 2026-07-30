@@ -46,16 +46,37 @@ export function listWorkspace() {
   return out;
 }
 
-// The "Spelling/Grammar Issues" tag is inferred from the audit's writing check:
-// review.md's autoqc fence carries an "R23 — Writing Quality: …" line when Check 5 found
-// spelling/grammar defects. No review.md (un-audited) → no tag.
-function detectGrammarIssue(dir) {
+// review.md's autoqc fence is a one-line-per-V11-dimension roll-up of everything
+// the task trips ("R23 — Spelling/grammar: three minor errors…"), or "NONE" for a
+// clean task. It's the only machine-readable per-task list of fails we have, so
+// both the writing tag and the grammar-only routing come from it.
+const GRAMMAR_DIMS = new Set(['R23', 'R24']);
+
+function auditDims(dir) {
   try {
     const md = fs.readFileSync(path.join(dir, 'review.md'), 'utf8');
     const m = md.match(/```autoqc\s*\n([\s\S]*?)```/);
-    const block = m ? m[1] : md;
-    return /^\s*R2[34]\b/m.test(block) || /spelling\s*\/\s*grammar/i.test(block);
-  } catch { return false; }
+    if (!m) return null; // un-audited, or an older doc without the fence
+    return [...new Set([...m[1].matchAll(/^\s*(R\d{1,2})\b/gm)].map((x) => x[1]))];
+  } catch { return null; }
+}
+
+// grammarOnly deliberately requires the fence: routing a task into a lane is a
+// workflow decision, so it only fires on the structured list, never on a loose
+// text match. The tag keeps the older heuristic so no chip disappears.
+function grammarInfo(dir) {
+  const dims = auditDims(dir);
+  if (!dims) {
+    let loose = false;
+    try {
+      const md = fs.readFileSync(path.join(dir, 'review.md'), 'utf8');
+      loose = /^\s*R2[34]\b/m.test(md) || /spelling\s*\/\s*grammar/i.test(md);
+    } catch { /* no review.md at all */ }
+    return { dims: null, grammar: loose, grammarOnly: false, otherDims: [] };
+  }
+  const grammar = dims.filter((d) => GRAMMAR_DIMS.has(d));
+  const otherDims = dims.filter((d) => !GRAMMAR_DIMS.has(d));
+  return { dims, grammar: grammar.length > 0, grammarOnly: grammar.length > 0 && otherDims.length === 0, otherDims };
 }
 
 export function taskMeta(bucket, id) {
@@ -90,6 +111,7 @@ export function taskMeta(bucket, id) {
     meta.deliveredBy = state.delivered_by || null;
     meta.tour = !!state.tour;
     meta.tourOwner = state.tour_owner || null;
+    meta.grammarLane = state.grammar_lane || null; // 'in' | 'out' — manual override
   } catch {
     meta.claimedBy = null;
     meta.verdict = null;
@@ -99,8 +121,16 @@ export function taskMeta(bucket, id) {
     meta.deliveredBy = null;
     meta.tour = false;
     meta.tourOwner = null;
+    meta.grammarLane = null;
   }
-  meta.grammar = detectGrammarIssue(dir);
+  const g = grammarInfo(dir);
+  meta.grammar = g.grammar;
+  meta.grammarOnly = g.grammarOnly;
+  meta.qcDims = g.dims;          // null = un-audited; [] = audited clean ("NONE")
+  meta.otherDims = g.otherDims;  // the non-grammar fails that disqualify it
+  // Grammar Fixes membership: auto for grammar-only tasks, with a manual override
+  // either way ('in' for "everything else is fixed, only grammar is left").
+  meta.inGrammarLane = meta.grammarLane === 'in' || (g.grammarOnly && meta.grammarLane !== 'out');
   return meta;
 }
 

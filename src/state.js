@@ -73,6 +73,31 @@ export function setDelivered(bucket, id, delivered, username) {
   return state;
 }
 
+// Manual Grammar Fixes membership. Tasks whose audit trips only R23/R24 land in
+// that lane on their own; this overrides the automatic call in both directions —
+// 'in' for "everything else is fixed, grammar is all that's left", 'out' to push
+// an auto-detected one back into the normal flow (without it, the auto rule would
+// just pull it straight back). null clears the override.
+const GRAMMAR_LANE_MODES = ['in', 'out'];
+
+export function setGrammarLane(bucket, id, mode, username) {
+  if (mode !== null && !GRAMMAR_LANE_MODES.includes(mode)) {
+    throw httpError(400, `mode must be one of ${GRAMMAR_LANE_MODES.join(', ')} (or null to clear)`);
+  }
+  const state = getState(bucket, id);
+  if (mode === null) {
+    delete state.grammar_lane;
+    delete state.grammar_lane_by;
+    delete state.grammar_lane_at;
+  } else {
+    state.grammar_lane = mode;
+    state.grammar_lane_by = username;
+    state.grammar_lane_at = new Date().toISOString();
+  }
+  saveState(bucket, id, state);
+  return state;
+}
+
 export function setVerdict(bucket, id, verdict, username) {
   if (verdict !== null && !VERDICTS.includes(verdict)) {
     throw httpError(400, `verdict must be one of ${VERDICTS.join(', ')} (or null to clear)`);

@@ -31,6 +31,15 @@ message in the built-in trajectory viewer.
 4. **Verdict** — the reviewer sets one of **No issues / SBQ / Fixes in progress / Second
    opinion** from the task header; it shows as a chip on the board.
 
+   **Grammar Fixes** is a lane that fills itself: a task lands there when its audit's only
+   tripped dimensions are the writing ones (R23/R24) — 3 spelling errors and nothing else
+   qualifies, 2 spelling plus a milestone issue does not. Read from `review.md`'s `autoqc`
+   fence, so un-audited tasks never land there. These get fixed in bulk rather than claimed
+   one at a time, so claiming leaves a task in the lane and **Mark all fixed** clears the
+   whole lane to *Fixes made*. Drag a card in when everything but grammar is done, or out to
+   put it back in the normal flow (the override is stored as `grammar_lane` in `_studio.json`,
+   so the automatic rule can't drag it back).
+
 5. **Export** — each bucket column has a **⬇ ids** button (one task_id per line), and
    **Export all (CSV)** gives `task_id,bucket,verdict,claimed_by,has_review,has_remediation`.
    Filtered export: `/api/export/ids/HARD_FAIL?verdict=SBQ`.
