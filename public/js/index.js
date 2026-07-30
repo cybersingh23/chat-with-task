@@ -81,32 +81,25 @@ async function applyLaneChange(t, target, x, y) {
   else if (target === 'REVIEW') { verdict = null; claim = 'claim'; }
   else if (target === 'OPEN') { verdict = null; claim = t.claimedBy ? 'release' : null; }
 
-  // Grammar Fixes membership is content-derived, so moving in or out needs an
-  // explicit override: without 'out', the automatic rule would pull an
-  // auto-detected task straight back into the lane on the next render.
-  let grammarMode;
-  if (target === 'GRAMMAR') grammarMode = 'in';
-  else if (from === 'GRAMMAR' && (target === 'OPEN' || target === 'REVIEW')) grammarMode = 'out';
-
   // Optimistically update the card in place + render once — no full refetch, no flash/jump.
+  // The server derives the same state from the target lane; this is just the preview.
   const orig = (currentWs[bucket] || []).find((x2) => x2.id === id);
   if (orig) {
     orig.verdict = verdict;
     if (claim === 'claim') orig.claimedBy = me?.username || orig.claimedBy;
     if (claim === 'release') orig.claimedBy = null;
-    if (grammarMode) {
-      orig.grammarLane = grammarMode;
-      orig.inGrammarLane = grammarMode === 'in';
-    }
+    if (target === 'GRAMMAR') { orig.grammarLane = 'in'; orig.inGrammarLane = true; }
+    else if (from === 'GRAMMAR') { orig.grammarLane = orig.grammarOnly ? 'out' : null; orig.inGrammarLane = false; }
   }
   render();
 
-  // Persist in the background; only reload (to reconcile) if something failed.
+  // One journaled call: the server works out verdict + claim + grammar override
+  // from the destination lane, so the drag is a single undoable action.
   try {
-    if (grammarMode) await api(`/task/${bucket}/${id}/grammar-lane`, { method: 'POST', body: { mode: grammarMode } });
-    await api(`/task/${bucket}/${id}/verdict`, { method: 'POST', body: { verdict } });
-    if (claim === 'claim' && !t.claimedBy) await api(`/task/${bucket}/${id}/claim`, { method: 'POST' });
-    if (claim === 'release') await api(`/task/${bucket}/${id}/release`, { method: 'POST' });
+    const r = await api(`/task/${bucket}/${id}/lane`, { method: 'POST', body: { lane: target, verdict } });
+    refreshBulkCount();
+    refreshActions();
+    if (r.action) toast(`Moved to ${LANES.find((l) => l.key === target)?.name || target}.`, { label: 'Undo', run: () => undo(r.action.id) });
   } catch (e) {
     toast(e.message);
     await load();
@@ -117,20 +110,23 @@ async function applyLaneChange(t, target, x, y) {
 // so the lane needs one action rather than 27 individual decisions.
 async function completeGrammarLane(items) {
   if (!items.length) return;
-  const ids = items.map((t) => t.id);
-  if (!confirm(`Mark ${ids.length} grammar-fix task${ids.length === 1 ? '' : 's'} as Fixes made?\n\nThey move to Resolved. Undo by dragging a card back out.`)) return;
+  if (!confirm(`Mark ${items.length} grammar-fix task${items.length === 1 ? '' : 's'} as Fixes made?\n\nThey move to Resolved. Undo from Recent actions.`)) return;
   for (const t of items) {
     const orig = (currentWs[t.bucket] || []).find((x) => x.id === t.id);
     if (orig) orig.verdict = 'FIXES_MADE';
   }
   render();
   try {
-    const r = await api('/verdict/bulk', { method: 'POST', body: { verdict: 'FIXES_MADE', ids } });
-    toast(`${r.moved} task${r.moved === 1 ? '' : 's'} marked Fixes made.`);
+    const r = await api('/bulk/lane', {
+      method: 'POST',
+      body: { fromLane: 'GRAMMAR', toLane: 'RESOLVED', verdict: 'FIXES_MADE' },
+    });
+    await load();
+    if (r.action) toast(`${r.moved} task${r.moved === 1 ? '' : 's'} marked Fixes made.`, { label: 'Undo', run: () => undo(r.action.id) });
   } catch (e) {
     toast(e.message);
+    await load();
   }
-  await load();
 }
 
 // Resolved is a 3-way decision — ask which one at the drop point.
@@ -154,13 +150,23 @@ function pickResolution(x, y) {
 }
 
 let toastTimer;
-function toast(msg) {
+// action: optional { label, run } — renders an inline button (used for Undo), and
+// holds the toast open longer so there's time to reach it.
+function toast(msg, action = null) {
   let t = document.getElementById('toast');
   if (!t) { t = el('div', { id: 'toast', class: 'toast' }); document.body.append(t); }
-  t.textContent = msg;
+  t.replaceChildren(
+    el('span', {}, msg),
+    action
+      ? el('button', {
+        class: 'toast-action',
+        onclick: () => { t.classList.remove('show'); action.run(); },
+      }, action.label)
+      : null,
+  );
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+  toastTimer = setTimeout(() => t.classList.remove('show'), action ? 9000 : 3200);
 }
 
 let me = null;
@@ -313,6 +319,7 @@ function render() {
     `${total} tasks · ` + LANES.map((l) => `${l.name.toLowerCase()} ${byLane.get(l.key).length}`).join(' · ');
   document.getElementById('search-count').textContent =
     q || sevFilter !== 'ALL' ? `${tickets.length} shown` : '';
+  refreshBulkCount();
 }
 
 // Show/hide the delivered toggle based on how many tasks are soft-archived.
@@ -406,31 +413,103 @@ document.getElementById('rubric-input')?.addEventListener('change', async (e) =>
 
 document.getElementById('export-csv').addEventListener('click', () => { location.href = (window.__base__ || '') + '/api/export/all.csv'; });
 
-// ---------- bulk workflow move (any reviewer): all tasks of a severity → a lane ----------
+// ---------- bulk lane move: {severity, source lane} → any lane ----------
+const bvSev = document.getElementById('bv-sev');
+const bvFrom = document.getElementById('bv-from');
+const bvTo = document.getElementById('bv-to');
+const bvCount = document.getElementById('bv-count');
+
+// "RESOLVED:FIXES_MADE" → the lane plus the verdict that lane needs.
+function bulkTarget() {
+  const [lane, verdict = null] = (bvTo?.value || '').split(':');
+  return { lane, verdict };
+}
+
+// Which tasks the current selection would actually move. Mirrors the server's
+// selectTasks + "skip anything already there", so the count matches what happens.
+function bulkMatches() {
+  const sev = bvSev?.value || 'ALL';
+  const from = bvFrom?.value || 'ANY';
+  const { lane: to } = bulkTarget();
+  return allTickets().filter((t) =>
+    !t.tour && !t.delivered &&
+    (sev === 'ALL' || t.bucket === sev) &&
+    (from === 'ANY' || laneOf(t) === from) &&
+    laneOf(t) !== to
+  );
+}
+
+function refreshBulkCount() {
+  if (!bvCount) return;
+  const n = bulkMatches().length;
+  bvCount.textContent = String(n);
+  bvCount.classList.toggle('zero', n === 0);
+  const apply = document.getElementById('bv-apply');
+  if (apply) apply.disabled = n === 0;
+}
+[bvSev, bvFrom, bvTo].forEach((s) => s?.addEventListener('change', refreshBulkCount));
+
 document.getElementById('bv-apply')?.addEventListener('click', async () => {
-  const src = document.getElementById('bv-src');
-  const dst = document.getElementById('bv-dst');
   const status = document.getElementById('bv-status');
-  const bucket = src.value;
-  const verdict = dst.value || null;
-  const srcLabel = src.selectedOptions[0].textContent.trim();
-  const dstLabel = dst.selectedOptions[0].textContent.trim();
-  // Count only tasks that would actually change lane (exclude ones already there + tour dummies).
-  const targetLane = verdict === 'SECOND_OPINION' ? 'SECOND_OPINION'
-    : (verdict && RESOLVED_VERDICTS.has(verdict)) ? 'RESOLVED' : 'OPEN';
-  const buckets = bucket === 'ALL' ? ORDER : [bucket];
-  const toMove = buckets.flatMap((b) => currentWs[b] || []).filter((t) => !t.tour && laneOf(t) !== targetLane);
-  const noun = bucket === 'ALL' ? 'task' : `${srcLabel.replace(/^all\s+/i, '')} task`;
-  if (!toMove.length) { status.textContent = 'nothing to move'; setTimeout(() => { status.textContent = ''; }, 2600); return; }
-  if (!confirm(`Move ${toMove.length} ${noun}${toMove.length === 1 ? '' : 's'} → “${dstLabel}”? This updates the workflow lane for everyone.`)) return;
+  const { lane, verdict } = bulkTarget();
+  const matches = bulkMatches();
+  const toLabel = bvTo.selectedOptions[0].textContent.trim();
+  const fromLabel = bvFrom.selectedOptions[0].textContent.trim().toLowerCase();
+  const sevLabel = bvSev.value === 'ALL' ? '' : `${bvSev.selectedOptions[0].textContent.trim()} `;
+  if (!matches.length) { status.textContent = 'nothing to move'; setTimeout(() => { status.textContent = ''; }, 2600); return; }
+  if (!confirm(`Move ${matches.length} ${sevLabel}task${matches.length === 1 ? '' : 's'} in ${fromLabel} → “${toLabel}”?\n\nThis changes the lane for everyone. Undo from Recent actions.`)) return;
   status.textContent = 'moving…';
   try {
-    const r = await api('/verdict/bulk', { method: 'POST', body: { ids: toMove.map((t) => t.id), verdict } });
+    const r = await api('/bulk/lane', {
+      method: 'POST',
+      body: { severity: bvSev.value, fromLane: bvFrom.value, toLane: lane, verdict },
+    });
     status.textContent = `moved ${r.moved}`;
     await load();
+    if (r.action) toast(`Moved ${r.moved} task${r.moved === 1 ? '' : 's'}.`, { label: 'Undo', run: () => undo(r.action.id) });
     setTimeout(() => { status.textContent = ''; }, 2600);
   } catch (e) { status.textContent = e.message; }
 });
+
+// ---------- action journal: recent actions + undo ----------
+async function undo(id) {
+  try {
+    const r = await api(`/actions/${id}/undo`, { method: 'POST' });
+    await load();
+    const skipped = r.skipped?.length
+      ? ` · ${r.skipped.length} skipped (changed since)`
+      : '';
+    toast(`Reverted ${r.undone} task${r.undone === 1 ? '' : 's'}${skipped}.`);
+  } catch (e) { toast(e.message); }
+}
+
+function ago(iso) {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d`;
+}
+
+async function refreshActions() {
+  const body = document.getElementById('acts-body');
+  if (!body || !document.getElementById('acts')?.open) return;
+  let actions;
+  try { ({ actions } = await api('/actions?limit=12')); } catch { return; }
+  body.replaceChildren(
+    ...(actions.length
+      ? actions.map((a) => el('div', { class: `act${a.undone ? ' is-undone' : ''}` },
+        el('span', { class: 'act-when' }, ago(a.at)),
+        el('span', { class: 'act-who' }, cap(a.by)),
+        el('span', { class: 'act-label' }, a.label),
+        a.undone
+          ? el('span', { class: 'act-undone' }, 'undone')
+          : el('button', { class: 'act-undo', onclick: () => undo(a.id) }, 'Undo'),
+      ))
+      : [el('div', { class: 'act-empty' }, 'No lane changes yet.')])
+  );
+}
+document.getElementById('acts')?.addEventListener('toggle', refreshActions);
 // generate review+remediation for every task missing them, as background jobs
 let genPoll = null;
 document.getElementById('gen-all').addEventListener('click', async () => {

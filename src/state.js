@@ -73,6 +73,54 @@ export function setDelivered(bucket, id, delivered, username) {
   return state;
 }
 
+// ---- lane state as one unit (for bulk moves + undo) ----
+// Everything that decides which lane a task sits in, in one object. Undo restores
+// exactly this, which is what makes reverting a heterogeneous selection correct —
+// "the previous lane" alone couldn't rebuild these three fields.
+export function laneSnapshot(bucket, id) {
+  const s = getState(bucket, id);
+  return {
+    verdict: s.verdict ?? null,
+    claimed_by: s.claimed_by ?? null,
+    grammar_lane: s.grammar_lane ?? null,
+  };
+}
+
+export function applySnapshot(bucket, id, snap, username) {
+  const state = getState(bucket, id);
+  const stamp = new Date().toISOString();
+
+  if (snap.verdict) {
+    state.verdict = snap.verdict;
+    state.verdict_by = username;
+    state.verdict_at = stamp;
+  } else {
+    delete state.verdict; delete state.verdict_by; delete state.verdict_at;
+  }
+  // The Second Opinion "why" note only makes sense on that verdict.
+  if (snap.verdict !== 'SECOND_OPINION') {
+    delete state.verdict_note; delete state.verdict_note_by; delete state.verdict_note_at;
+  }
+
+  if (snap.claimed_by) {
+    if (state.claimed_by !== snap.claimed_by) state.claimed_at = stamp;
+    state.claimed_by = snap.claimed_by;
+  } else {
+    delete state.claimed_by; delete state.claimed_at;
+  }
+
+  if (snap.grammar_lane) {
+    state.grammar_lane = snap.grammar_lane;
+    state.grammar_lane_by = username;
+    state.grammar_lane_at = stamp;
+  } else {
+    delete state.grammar_lane; delete state.grammar_lane_by; delete state.grammar_lane_at;
+  }
+
+  saveState(bucket, id, state);
+  return state;
+}
+
 // Manual Grammar Fixes membership. Tasks whose audit trips only R23/R24 land in
 // that lane on their own; this overrides the automatic call in both directions —
 // 'in' for "everything else is fixed, grammar is all that's left", 'out' to push

@@ -391,7 +391,45 @@ select option { background: #14161c; }
   opacity: 0; pointer-events: none; transition: opacity 180ms ease, transform 180ms ease;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
-.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+/* inline action (Undo) — the toast has to be clickable, hence pointer-events above */
+.toast { display: flex; align-items: center; gap: 14px; }
+.toast-action {
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  color: var(--blue); background: none; border: none; padding: 0;
+}
+.toast-action:hover { text-decoration: underline; }
+
+/* recent actions: the undo history for every lane change */
+.acts { position: relative; font-size: 12px; }
+.acts > summary {
+  cursor: pointer; color: var(--text-2); list-style: none; padding: 5px 11px;
+  border: 1px solid var(--edge); border-radius: 999px; background: var(--surface); white-space: nowrap;
+}
+.acts > summary::-webkit-details-marker { display: none; }
+.acts > summary::before { content: '↶ '; color: var(--text-3); }
+.acts > summary:hover { border-color: var(--edge-strong); color: var(--text); }
+.acts[open] > summary { border-color: var(--edge-strong); color: var(--text); }
+.acts-body {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 250; width: 420px;
+  max-height: 340px; overflow-y: auto; padding: 6px;
+  background: rgba(20, 22, 28, 0.97); backdrop-filter: blur(14px);
+  border: 1px solid var(--edge-strong); border-radius: var(--r-md);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+}
+.act { display: flex; align-items: center; gap: 10px; padding: 7px 9px; border-radius: var(--r-sm); }
+.act:hover { background: var(--surface); }
+.act-when { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); width: 52px; flex: none; }
+.act-who { color: var(--text-2); width: 62px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-label { flex: 1; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-undo {
+  font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; flex: none;
+  color: var(--blue); background: none; border: none; padding: 2px 4px;
+}
+.act-undo:hover { text-decoration: underline; }
+.act.is-undone .act-label { color: var(--text-3); text-decoration: line-through; }
+.act-undone { font-size: 10.5px; color: var(--text-3); flex: none; }
+.act-empty { padding: 14px 10px; color: var(--text-3); text-align: center; }
 
 /* seen (resolved) — dimmed + struck-through id, decision still legible */
 .ticket.seen { opacity: 0.58; }
@@ -1420,7 +1458,14 @@ a.cb-field-link:hover { background: rgba(111, 199, 232, 0.22); text-decoration: 
   padding: 4px 5px 4px 13px; border: 1px solid var(--edge); border-radius: 999px; background: var(--surface);
 }
 .bulk-verdict .bv-label { color: var(--text-2); font-weight: 600; white-space: nowrap; }
-.bulk-verdict .bv-arrow { color: var(--text-3); }
+.bulk-verdict .bv-arrow, .bulk-verdict .bv-in { color: var(--text-3); }
+/* live match count, so you know the size of the move before committing to it */
+.bulk-verdict .bv-count {
+  font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums;
+  color: var(--text); background: var(--surface-2); border-radius: 999px; padding: 2px 9px;
+}
+.bulk-verdict .bv-count.zero { color: var(--text-3); }
+.bulk-verdict #bv-apply:disabled { background: var(--surface-2); color: var(--text-3); cursor: not-allowed; filter: none; }
 .bulk-verdict select {
   font-size: 12px; font-weight: 500; color: var(--text); cursor: pointer;
   padding: 5px 26px 5px 11px; border: 1px solid var(--edge); border-radius: 8px; background-color: var(--surface-2);

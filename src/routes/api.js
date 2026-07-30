@@ -5,12 +5,15 @@ import { config } from '../config.js';
 import {
   listWorkspace, taskMeta, listFiles, readTaskFile, readTrajectory,
   readTaskDef, readRank, moveTask, findTaskBucket, taskDir, resolveSafe, deleteTask, clearWorkspace,
+  httpError,
 } from '../workspace.js';
+import { moveTaskToLane, selectTasks, laneOf, LANE_LABELS, SEV_LABELS, VERDICT_LABELS } from '../lanes.js';
+import { recordAction, listActions, undoAction } from '../actions.js';
 import { BUCKETS } from '../config.js';
 import { ingestTask, findTaskSources } from '../ingest.js';
 import { handleUpload } from '../upload.js';
 import { verifyLogin, createSession, destroySession, requireAuth, requireAdmin } from '../auth.js';
-import { claimTask, releaseTask, setVerdict, setVerdictNote, setChecklistItem, setGrammarLane, getState, VERDICTS } from '../state.js';
+import { claimTask, releaseTask, setVerdict, setVerdictNote, setChecklistItem, setGrammarLane, laneSnapshot, getState, VERDICTS } from '../state.js';
 import { runAgentLoop } from '../llm.js';
 import { TOOL_DEFS, makeExecutor } from '../tools.js';
 import { generateDoc, taskContext, CITATION_RULES } from '../docgen.js';
@@ -117,10 +120,72 @@ api.post('/task/:bucket/:id/release', wrap(async (req, res) =>
   res.json(releaseTask(req.params.bucket, req.params.id, req.user.username, req.user.role === 'admin'))
 ));
 
-api.post('/task/:bucket/:id/verdict', wrap(async (req, res) =>
-  res.json(setVerdict(req.params.bucket, req.params.id, req.body.verdict ?? null, req.user.username))
+api.post('/task/:bucket/:id/verdict', wrap(async (req, res) => {
+  const { bucket, id } = req.params;
+  const before = laneSnapshot(bucket, id);
+  const state = setVerdict(bucket, id, req.body.verdict ?? null, req.user.username);
+  const after = laneSnapshot(bucket, id);
+  // journal it so a decision made on the task page is undoable from the board too
+  if (before.verdict !== after.verdict) {
+    const v = after.verdict;
+    recordAction({
+      by: req.user.username, kind: 'verdict', items: [{ bucket, id, before, after }],
+      label: `${id.slice(0, 8)}… · ${v ? (VERDICT_LABELS[v] || v) : 'verdict cleared'}`,
+    });
+  }
+  res.json(state);
+}));
+
+// ---- lane moves (single + bulk), all journaled so they can be undone ----
+
+// Move one task to a lane in a single call. The board's drag-and-drop uses this so
+// a drag is one undoable action rather than three unrelated writes.
+api.post('/task/:bucket/:id/lane', wrap(async (req, res) => {
+  const { bucket, id } = req.params;
+  const lane = String(req.body.lane || '');
+  const item = moveTaskToLane(bucket, id, lane, { verdict: req.body.verdict ?? null, username: req.user.username });
+  if (!item) return res.json({ moved: 0, action: null }); // already in that lane
+  const act = recordAction({
+    by: req.user.username, kind: 'move',
+    label: `${id.slice(0, 8)}… · ${LANE_LABELS[laneOf(taskMeta(bucket, id))] || lane}`,
+    items: [item],
+  });
+  res.json({ moved: 1, action: act && { id: act.id, label: act.label } });
+}));
+
+// Bulk lane move: every task matching {severity, fromLane} (and/or an explicit id
+// list) → one destination lane. The selection is resolved server-side so it can't
+// drift from a stale client copy of the board.
+api.post('/bulk/lane', wrap(async (req, res) => {
+  const { severity = 'ALL', fromLane = 'ANY', toLane, verdict = null, ids = null } = req.body || {};
+  if (!toLane) throw httpError(400, 'toLane required');
+  const candidates = selectTasks({ severity, fromLane, ids });
+  const items = [];
+  for (const meta of candidates) {
+    const item = moveTaskToLane(meta.bucket, meta.id, toLane, { verdict, username: req.user.username });
+    if (item) items.push(item);
+  }
+  const sevLabel = severity === 'ALL' ? '' : `${SEV_LABELS[severity] || severity} · `;
+  const fromLabel = fromLane === 'ANY' ? 'any lane' : (LANE_LABELS[fromLane] || fromLane);
+  const toLabel = (LANE_LABELS[toLane] || toLane) + (toLane === 'RESOLVED' && verdict ? ` (${VERDICT_LABELS[verdict] || verdict})` : '');
+  const act = recordAction({
+    by: req.user.username, kind: 'bulk_move',
+    label: `${items.length} ${sevLabel}${fromLabel} → ${toLabel}`,
+    items,
+  });
+  res.json({ moved: items.length, action: act && { id: act.id, label: act.label } });
+}));
+
+api.get('/actions', wrap(async (req, res) =>
+  res.json({ actions: listActions(Math.min(Number(req.query.limit) || 12, 50)) })
 ));
 
+api.post('/actions/:id/undo', wrap(async (req, res) =>
+  res.json(undoAction(req.params.id, req.user.username))
+));
+
+// Superseded by /bulk/lane (which is journaled + undoable). Kept for any scripted
+// callers; it can only express verdict-shaped destinations.
 // Bulk workflow move: set a verdict (→ lane) across a whole severity bucket (or explicit ids).
 // Any reviewer can do this — it's a personal workflow action, not an admin edit.
 api.post('/verdict/bulk', wrap(async (req, res) => {

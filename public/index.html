@@ -108,26 +108,42 @@
     <div class="toolbar">
       <span class="summary" id="ws-summary"></span>
       <div class="right">
-        <div class="bulk-verdict" id="bulk-verdict" title="Move a whole group of tasks into a workflow lane at once">
+        <div class="bulk-verdict" id="bulk-verdict" title="Move every task matching a severity + lane into another lane">
           <span class="bv-label">Bulk move</span>
-          <select id="bv-src" aria-label="which tasks to move">
-            <option value="PASS">All Pass</option>
-            <option value="SOFT_FAIL">All Soft</option>
-            <option value="HARD_FAIL">All Hard</option>
-            <option value="UNSORTED">All Unsorted</option>
-            <option value="ALL">Everything</option>
+          <select id="bv-sev" aria-label="severity to match">
+            <option value="ALL">Any severity</option>
+            <option value="HARD_FAIL">Hard</option>
+            <option value="SOFT_FAIL">Soft</option>
+            <option value="PASS">Pass</option>
+            <option value="UNSORTED">Unsorted</option>
+          </select>
+          <span class="bv-in">in</span>
+          <select id="bv-from" aria-label="source lane">
+            <option value="ANY">Any lane</option>
+            <option value="OPEN">Open</option>
+            <option value="GRAMMAR">Grammar Fixes</option>
+            <option value="REVIEW">In review</option>
+            <option value="SECOND_OPINION">Needs 2nd opinion</option>
+            <option value="RESOLVED">Resolved</option>
           </select>
           <span class="bv-arrow">→</span>
-          <select id="bv-dst" aria-label="destination lane">
-            <option value="NO_ISSUES">Complete</option>
-            <option value="SECOND_OPINION">Needs 2nd Opinion</option>
-            <option value="FIXES_MADE">Fixes Made</option>
-            <option value="SBQ">SBQ</option>
-            <option value="">Reopen</option>
+          <select id="bv-to" aria-label="destination lane">
+            <option value="RESOLVED:NO_ISSUES">Resolved · No issues</option>
+            <option value="RESOLVED:FIXES_MADE">Resolved · Fixes made</option>
+            <option value="RESOLVED:SBQ">Resolved · SBQ</option>
+            <option value="SECOND_OPINION">Needs 2nd opinion</option>
+            <option value="GRAMMAR">Grammar Fixes</option>
+            <option value="REVIEW">In review</option>
+            <option value="OPEN">Open</option>
           </select>
+          <span class="bv-count" id="bv-count" title="how many tasks match right now">0</span>
           <button id="bv-apply">Move</button>
           <span class="mono" id="bv-status"></span>
         </div>
+        <details class="acts" id="acts">
+          <summary>Recent actions</summary>
+          <div class="acts-body" id="acts-body"></div>
+        </details>
         <button class="quiet" id="archive-completed" hidden title="Move every completed (Resolved-lane) task, any severity, into the Archive"></button>
         <button class="quiet" id="toggle-delivered" hidden></button>
         <button class="quiet" id="gen-all" hidden>Generate all docs</button>

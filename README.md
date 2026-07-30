@@ -40,7 +40,20 @@ message in the built-in trajectory viewer.
    put it back in the normal flow (the override is stored as `grammar_lane` in `_studio.json`,
    so the automatic rule can't drag it back).
 
-5. **Export** — each bucket column has a **⬇ ids** button (one task_id per line), and
+5. **Bulk move + undo** — `Bulk move [severity] in [source lane] → [destination lane]` moves
+   every matching task at once (any lane pair: *all Pass in Open → Resolved · No issues*, *all
+   Hard in Resolved → Needs 2nd opinion*, …) and shows a live match count before you commit.
+   The selection is resolved server-side, so it can't drift from a stale board.
+
+   Every lane change — bulk, drag, **Mark all fixed**, and verdicts set on the task page — is
+   appended to `DATA_DIR/actions.jsonl` with the **before and after state of each task**, so it
+   can be reverted from **Recent actions** (or the Undo in the toast). Per-task before-state is
+   what makes undo correct for a mixed selection: one "previous lane" value couldn't rebuild
+   `verdict` + `claimed_by` + `grammar_lane` per task. If a task changed after the action, undo
+   **skips it and says so** rather than clobbering the newer decision. An undo is itself
+   journaled, so undoing an undo is a redo.
+
+6. **Export** — each bucket column has a **⬇ ids** button (one task_id per line), and
    **Export all (CSV)** gives `task_id,bucket,verdict,claimed_by,has_review,has_remediation`.
    Filtered export: `/api/export/ids/HARD_FAIL?verdict=SBQ`.
 
