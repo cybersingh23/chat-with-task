@@ -1646,6 +1646,10 @@ async function loadChat() {
   chatLog.replaceChildren();
   for (const m of history) {
     if (m.role === 'tools') appendToolLine(`⚙ ${m.tools.join(', ')}`);
+    // A past walkthrough comes back as a guide bubble with its Replay button. It is
+    // NOT auto-played the way a fresh one is — opening a task shouldn't take over
+    // the screen; the reviewer starts the replay.
+    else if (m.role === 'guide') renderGuideBubble(m.guide, m.question || '');
     else appendChat(m.role, m.content);
   }
   refreshChatIntro();

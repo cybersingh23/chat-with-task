@@ -706,19 +706,36 @@ api.post('/task/:bucket/:id/guide/followup', wrap(async (req, res) => {
 }));
 
 api.get('/task/:bucket/:id/chat', wrap(async (req, res) => {
-  const history = loadChat(taskDir(req.params.bucket, req.params.id));
-  // Only what the UI renders: user text + assistant text + tool call markers.
-  res.json(
-    history
-      .map((m) => {
-        if (m.role === 'user') return { role: 'user', content: m.content };
-        if (m.role === 'assistant' && m.content) return { role: 'assistant', content: m.content };
-        if (m.role === 'assistant' && m.tool_calls?.length)
-          return { role: 'tools', tools: m.tool_calls.map((c) => c.function.name) };
-        return null;
-      })
-      .filter(Boolean)
-  );
+  const { bucket, id } = req.params;
+  const history = loadChat(taskDir(bucket, id));
+  // What the UI renders: user text + assistant text + tool markers — plus any
+  // dynamic walkthroughs, rebuilt so they stay replayable after a reload.
+  //
+  // A walkthrough's final answer is a present_guide tool call, and its arguments
+  // are in the saved history, so the guide is recovered by re-running the same
+  // validation the live path uses. That is deterministic and costs no tokens — and
+  // because it re-resolves every anchor against the task as it is NOW, a step whose
+  // evidence has since moved is dropped rather than replayed as a dead link.
+  const out = [];
+  let lastUser = '';
+  for (const m of history) {
+    if (m.role === 'user') { lastUser = m.content; out.push({ role: 'user', content: m.content }); continue; }
+    if (m.role === 'assistant' && m.content) { out.push({ role: 'assistant', content: m.content }); continue; }
+    if (m.role === 'assistant' && m.tool_calls?.length) {
+      const plain = [];
+      const guides = [];
+      for (const c of m.tool_calls) {
+        if (c.function?.name !== 'present_guide') { plain.push(c.function?.name); continue; }
+        let args = {};
+        try { args = JSON.parse(c.function.arguments || '{}'); } catch { /* unparseable → not answerable */ }
+        guides.push(validateGuide(bucket, id, args));
+      }
+      if (plain.length) out.push({ role: 'tools', tools: plain });
+      // the guide bubble replaces the bare "⚙ present_guide" marker
+      for (const guide of guides) out.push({ role: 'guide', guide, question: lastUser });
+    }
+  }
+  res.json(out);
 }));
 
 api.delete('/task/:bucket/:id/chat', wrap(async (req, res) => {
