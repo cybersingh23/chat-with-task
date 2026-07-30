@@ -13,13 +13,13 @@ const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED
 const RESOLVED_VERDICTS = new Set(['NO_ISSUES', 'FIXES_MADE', 'SBQ']);
 const LANES = [
   { key: 'OPEN', name: 'Open', hint: 'Unclaimed, no decision yet.' },
+  { key: 'REVIEW', name: 'In review', hint: 'Claimed and being audited.' },
+  { key: 'SECOND_OPINION', name: 'Needs 2nd opinion', hint: 'Flagged for another reviewer.' },
   {
     key: 'GRAMMAR',
     name: 'Grammar Fixes',
     hint: 'Tasks whose only fail is spelling/grammar (R23/R24). Drop a task here when everything else is fixed.',
   },
-  { key: 'REVIEW', name: 'In review', hint: 'Claimed and being audited.' },
-  { key: 'SECOND_OPINION', name: 'Needs 2nd opinion', hint: 'Flagged for another reviewer.' },
   { key: 'RESOLVED', name: 'Resolved', hint: 'A decision has been recorded.' },
 ];
 
