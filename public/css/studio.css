@@ -22,6 +22,7 @@
   --purple: #b98cf5;
   --teal: #6fc7e8;
   --yellow: #f5c84c;
+  --gold: #d9b072;   /* V11 score-4: a non-fail milder than 3, without the yellow's volume */
 
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
@@ -620,7 +621,7 @@ a.traj-link:hover { background: rgba(108, 165, 255, 0.2); text-decoration: none;
 .spec-band-row.fail { background: rgba(255, 97, 89, 0.07); border-left-color: var(--red); }
 .spec-band-row.nonfail { background: rgba(255, 161, 79, 0.07); border-left-color: var(--orange); }
 /* V11's score-4 band: a non-fail, one notch milder than 3 */
-.spec-band-row.nonfail.minor { background: rgba(245, 200, 76, 0.06); border-left-color: var(--yellow); }
+.spec-band-row.nonfail.minor { background: rgba(217, 176, 114, 0.055); border-left-color: var(--gold); }
 .spec-band-row.pass { background: rgba(67, 209, 124, 0.06); border-left-color: var(--green); }
 .spec-band-tag {
   font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.03em;
@@ -628,7 +629,7 @@ a.traj-link:hover { background: rgba(108, 165, 255, 0.2); text-decoration: none;
 }
 .fail .spec-band-tag { color: var(--red); }
 .nonfail .spec-band-tag { color: var(--orange); }
-.nonfail.minor .spec-band-tag { color: var(--yellow); }
+.nonfail.minor .spec-band-tag { color: var(--gold); }
 .pass .spec-band-tag { color: var(--green); }
 .spec-band-body { min-width: 0; }
 .spec-band-cat {
@@ -637,7 +638,7 @@ a.traj-link:hover { background: rgba(108, 165, 255, 0.2); text-decoration: none;
 }
 .fail .spec-band-cat { color: var(--red); opacity: 0.75; }
 .nonfail .spec-band-cat { color: var(--orange); opacity: 0.75; }
-.nonfail.minor .spec-band-cat { color: var(--yellow); opacity: 0.8; }
+.nonfail.minor .spec-band-cat { color: var(--gold); opacity: 0.8; }
 .spec-band-text { display: block; white-space: pre-wrap; color: var(--text); }
 .pass .spec-band-text { color: var(--text-2); }
 
