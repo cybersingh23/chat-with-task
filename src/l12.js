@@ -8,7 +8,7 @@ import { config, BUCKETS } from './config.js';
 
 const TASK_ID_RE = /^[0-9a-f]{24}$/;
 const DIMS = ['correctness', 'agent_behaviour', 'communications', 'code_style'];
-const RESOLVED_VERDICTS = new Set(['NO_ISSUES', 'FIXES_MADE', 'SBQ']);
+const RESOLVED_VERDICTS = new Set(['NO_ISSUES', 'FIXES_MADE', 'GRAMMAR_ONLY', 'SBQ']);
 const STRENGTH = { 1: 'slight', 2: 'moderate', 3: 'strong' };
 
 function readJson(p) {
@@ -78,10 +78,10 @@ export function computeL12(scope = 'completed') {
   const rows = collect(scope);
 
   const severity = { PASS: 0, SOFT_FAIL: 0, HARD_FAIL: 0, UNSORTED: 0 };
-  const verdicts = { NO_ISSUES: 0, FIXES_MADE: 0, SBQ: 0, SECOND_OPINION: 0, none: 0 };
+  const verdicts = { NO_ISSUES: 0, FIXES_MADE: 0, GRAMMAR_ONLY: 0, SBQ: 0, SECOND_OPINION: 0, none: 0 };
   const matchups = new Map();   // "A vs B" -> {a,b,total, perModel:{name:{wins,slight,moderate,strong,unrated}}}
   const models = new Map();     // name -> {appearances,wins,losses, dims:{dim:{sum,n}}}
-  const annotators = new Map(); // id -> {tasks,NO_ISSUES,FIXES_MADE,SBQ,SECOND_OPINION}
+  const annotators = new Map(); // id -> {tasks,NO_ISSUES,FIXES_MADE,GRAMMAR_ONLY,SBQ,SECOND_OPINION}
   const taskNames = new Map();  // title -> count
 
   const modelRec = (name) => {
@@ -93,7 +93,7 @@ export function computeL12(scope = 'completed') {
     severity[r.bucket] = (severity[r.bucket] || 0) + 1;
     verdicts[r.verdict || 'none'] = (verdicts[r.verdict || 'none'] || 0) + 1;
 
-    const a = annotators.get(r.annotator) || { id: r.annotator, tasks: 0, NO_ISSUES: 0, FIXES_MADE: 0, SBQ: 0, SECOND_OPINION: 0 };
+    const a = annotators.get(r.annotator) || { id: r.annotator, tasks: 0, NO_ISSUES: 0, FIXES_MADE: 0, GRAMMAR_ONLY: 0, SBQ: 0, SECOND_OPINION: 0 };
     a.tasks += 1;
     if (r.verdict && a[r.verdict] != null) a[r.verdict] += 1;
     annotators.set(r.annotator, a);

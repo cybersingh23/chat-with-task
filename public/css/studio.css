@@ -147,6 +147,8 @@ select option { background: #14161c; }
 .chip.v-NO_ISSUES { color: var(--green); } .chip.v-NO_ISSUES::before { background: var(--green); }
 .chip.v-SBQ { color: var(--red); } .chip.v-SBQ::before { background: var(--red); }
 .chip.v-FIXES_MADE { color: var(--blue); } .chip.v-FIXES_MADE::before { background: var(--blue); }
+/* Grammar-only: a resolution in its own right, in the writing tag's yellow */
+.chip.v-GRAMMAR_ONLY { color: var(--yellow); } .chip.v-GRAMMAR_ONLY::before { background: var(--yellow); }
 .chip.v-SECOND_OPINION { color: var(--purple); } .chip.v-SECOND_OPINION::before { background: var(--purple); }
 .chip.claimed { color: var(--yellow); } .chip.claimed::before { background: var(--yellow); }
 
@@ -299,6 +301,13 @@ select option { background: #14161c; }
 }
 .lane-action:hover { background: color-mix(in srgb, var(--yellow) 22%, transparent); }
 .lane-body { display: flex; flex-direction: column; gap: 10px; }
+/* Grammar Fixes: shows how "Mark all fixed" will split before you press it */
+.lane-split {
+  flex: 0 0 100%; font-size: 10.5px; font-family: var(--mono); color: var(--text-3);
+  margin: -4px 0 2px; line-height: 1.5;
+}
+.lane-split b { color: var(--yellow); font-weight: 600; }
+.lane-split i { color: var(--blue); font-style: normal; font-weight: 600; }
 .lane-empty { padding: 20px 8px; font-size: 12px; color: var(--text-3); text-align: center; line-height: 1.5; }
 
 .ticket {
@@ -509,6 +518,7 @@ select option { background: #14161c; }
 .verdict-select.set { color: var(--text); font-weight: 600; }
 .verdict-select.v-NO_ISSUES { color: var(--green); border-color: rgba(67, 209, 124, 0.4); }
 .verdict-select.v-FIXES_MADE { color: var(--blue); border-color: rgba(108, 165, 255, 0.4); }
+.verdict-select.v-GRAMMAR_ONLY { color: var(--yellow); border-color: rgba(245, 200, 76, 0.4); }
 .verdict-select.v-SBQ { color: var(--red); border-color: rgba(255, 97, 89, 0.4); }
 .verdict-select.v-SECOND_OPINION { color: var(--purple); border-color: rgba(185, 140, 245, 0.4); }
 
@@ -740,6 +750,7 @@ a.spec-link:hover { background: rgba(185, 140, 245, 0.22); text-decoration: none
 .vbtn { font-size: 12.5px; padding: 7px 14px; }
 .vbtn.active.v-NO_ISSUES { background: rgba(67, 209, 124, 0.16); color: var(--green); border-color: transparent; }
 .vbtn.active.v-FIXES_MADE { background: rgba(108, 165, 255, 0.16); color: var(--blue); border-color: transparent; }
+.vbtn.active.v-GRAMMAR_ONLY { background: rgba(245, 200, 76, 0.16); color: var(--yellow); border-color: transparent; }
 .vbtn.active.v-SBQ { background: rgba(255, 97, 89, 0.16); color: var(--red); border-color: transparent; }
 .vbtn.active.v-SECOND_OPINION { background: rgba(185, 140, 245, 0.16); color: var(--purple); border-color: transparent; }
 
@@ -1509,6 +1520,7 @@ a.cb-field-link:hover { background: rgba(111, 199, 232, 0.22); text-decoration: 
 .l12-legend-pct { color: var(--text-3); }
 .seg-v-NO_ISSUES { background: var(--green); } .seg-v-FIXES_MADE { background: var(--blue); }
 .seg-v-SBQ { background: var(--red); } .seg-v-SECOND_OPINION { background: var(--purple); }
+.seg-v-GRAMMAR_ONLY { background: var(--yellow); }
 .seg-v-none { background: var(--edge-strong); }
 .seg-s-PASS { background: var(--green); } .seg-s-SOFT_FAIL { background: var(--orange); }
 .seg-s-HARD_FAIL { background: var(--red); } .seg-s-UNSORTED { background: var(--teal); }

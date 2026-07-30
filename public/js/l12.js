@@ -7,7 +7,7 @@ const DIM_LABEL = {
   code_style: 'Code style',
 };
 const VERDICT_LABEL = {
-  NO_ISSUES: 'No fixes', FIXES_MADE: 'Fixes made', SBQ: 'SBQ',
+  NO_ISSUES: 'No fixes', FIXES_MADE: 'Fixes made', GRAMMAR_ONLY: 'Grammar-only', SBQ: 'SBQ',
   SECOND_OPINION: '2nd opinion', none: 'Undecided',
 };
 const SEV_LABEL = { PASS: 'Pass', SOFT_FAIL: 'Soft fail', HARD_FAIL: 'Hard fail', UNSORTED: 'Unsorted' };
@@ -67,7 +67,7 @@ function breakdownCard(title, counts, order, labels, cls) {
 function renderMovement() {
   document.getElementById('l12-movement').replaceChildren(
     breakdownCard('Reviewer decisions', data.verdicts,
-      ['NO_ISSUES', 'FIXES_MADE', 'SBQ', 'SECOND_OPINION', 'none'], VERDICT_LABEL, 'v'),
+      ['NO_ISSUES', 'FIXES_MADE', 'GRAMMAR_ONLY', 'SBQ', 'SECOND_OPINION', 'none'], VERDICT_LABEL, 'v'),
     breakdownCard('Severity (eval buckets)', data.severity,
       ['PASS', 'SOFT_FAIL', 'HARD_FAIL', 'UNSORTED'], SEV_LABEL, 's'),
   );
@@ -164,13 +164,14 @@ function renderMatchups() {
 
 // ---- annotators + task names ----
 function renderAnnotators() {
-  const head = el('tr', {}, ...['Annotator ID', 'Tasks', 'No fixes', 'Fixes made', 'SBQ', '2nd opinion'].map((h) => el('th', {}, h)));
+  const head = el('tr', {}, ...['Annotator ID', 'Tasks', 'No fixes', 'Fixes made', 'Grammar-only', 'SBQ', '2nd opinion'].map((h) => el('th', {}, h)));
   const body = data.annotators.map((a) =>
     el('tr', {},
       el('td', {}, el('span', { class: 'mono', title: a.id }, a.id)),
       el('td', {}, String(a.tasks)),
       el('td', {}, String(a.NO_ISSUES)),
       el('td', {}, String(a.FIXES_MADE)),
+      el('td', {}, String(a.GRAMMAR_ONLY || 0)),
       el('td', {}, String(a.SBQ)),
       el('td', {}, String(a.SECOND_OPINION))));
   const t = document.getElementById('l12-annotators');

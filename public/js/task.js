@@ -833,6 +833,7 @@ function buildRankingProof(files) {
 const CHECK_VERDS = [
   ['NO_ISSUES', 'No Issues'],
   ['FIXES_MADE', 'Fixes made'],
+  ['GRAMMAR_ONLY', 'Grammar-only'],
   ['SBQ', 'SBQ'],
   ['SECOND_OPINION', 'Second Opinion Needed'],
 ];

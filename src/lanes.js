@@ -6,7 +6,7 @@ import { laneSnapshot, applySnapshot } from './state.js';
 // implies. The board, the bulk mover, and undo all go through here so a lane can
 // never mean two different things in two places.
 export const LANES = ['OPEN', 'GRAMMAR', 'REVIEW', 'SECOND_OPINION', 'RESOLVED'];
-export const RESOLVED_VERDICTS = ['NO_ISSUES', 'FIXES_MADE', 'SBQ'];
+export const RESOLVED_VERDICTS = ['NO_ISSUES', 'FIXES_MADE', 'GRAMMAR_ONLY', 'SBQ'];
 const RESOLVED = new Set(RESOLVED_VERDICTS);
 
 // REOPEN is a destination, not a lane: it clears the verdict and touches nothing
@@ -26,7 +26,8 @@ export const LANE_LABELS = {
 };
 export const SEV_LABELS = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
 export const VERDICT_LABELS = {
-  NO_ISSUES: 'No issues', FIXES_MADE: 'Fixes made', SBQ: 'SBQ', SECOND_OPINION: 'Second opinion',
+  NO_ISSUES: 'No issues', FIXES_MADE: 'Fixes made', GRAMMAR_ONLY: 'Grammar-only',
+  SBQ: 'SBQ', SECOND_OPINION: 'Second opinion',
 };
 
 // Mirrors laneOf() on the board: a verdict decides first, then Grammar Fixes

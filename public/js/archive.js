@@ -4,6 +4,7 @@ const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED
 const VERDICT_LABELS = {
   NO_ISSUES: 'No Issues',
   FIXES_MADE: 'Fixes made',
+  GRAMMAR_ONLY: 'Grammar-only',
   SBQ: 'SBQ',
   SECOND_OPINION: 'Second Opinion Needed',
 };

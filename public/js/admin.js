@@ -24,7 +24,7 @@ async function boot() {
 }
 
 // A task is "completed" when it carries a recorded decision (the board's Resolved lane).
-const RESOLVED_VERDICTS = new Set(['NO_ISSUES', 'FIXES_MADE', 'SBQ']);
+const RESOLVED_VERDICTS = new Set(['NO_ISSUES', 'FIXES_MADE', 'GRAMMAR_ONLY', 'SBQ']);
 
 // --- Archive tasks (soft-archive / deliver + backup zip) ---
 function initDeliver() {

@@ -4,13 +4,14 @@ const ORDER = ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'];
 const VERDICT_LABELS = {
   NO_ISSUES: 'No Issues',
   FIXES_MADE: 'Fixes made',
+  GRAMMAR_ONLY: 'Grammar-only',
   SBQ: 'SBQ',
   SECOND_OPINION: 'Second Opinion Needed',
 };
 const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
 // Workflow lanes — derived from claim + decision state. A decision marks a
 // ticket "seen" (Resolved), except Second Opinion which stays in its own lane.
-const RESOLVED_VERDICTS = new Set(['NO_ISSUES', 'FIXES_MADE', 'SBQ']);
+const RESOLVED_VERDICTS = new Set(['NO_ISSUES', 'FIXES_MADE', 'GRAMMAR_ONLY', 'SBQ']);
 const LANES = [
   { key: 'OPEN', name: 'Open', hint: 'Unclaimed, no decision yet.' },
   { key: 'REVIEW', name: 'In review', hint: 'Claimed and being audited.' },
@@ -106,23 +107,32 @@ async function applyLaneChange(t, target, x, y) {
   }
 }
 
-// Bulk-complete the whole Grammar Fixes lane: these get fixed locally in one pass,
-// so the lane needs one action rather than 27 individual decisions.
+// Bulk-complete the whole Grammar Fixes lane in one pass, SPLIT by what the audit
+// found: tasks whose only fail was spelling/grammar resolve as Grammar-only, ones
+// that also had other fails (moved in here once those were fixed) as Fixes made.
+// Tracking them apart is the point — the lane is the common source of both.
 async function completeGrammarLane(items) {
   if (!items.length) return;
-  if (!confirm(`Mark ${items.length} grammar-fix task${items.length === 1 ? '' : 's'} as Fixes made?\n\nThey move to Resolved. Undo from Recent actions.`)) return;
+  const only = items.filter((t) => t.grammarOnly);
+  const mixed = items.filter((t) => !t.grammarOnly);
+  const lines = [
+    only.length ? `· ${only.length} → Grammar-only (grammar was the only fail)` : null,
+    mixed.length ? `· ${mixed.length} → Fixes made (also had other fails)` : null,
+  ].filter(Boolean).join('\n');
+  if (!confirm(`Complete ${items.length} task${items.length === 1 ? '' : 's'} in Grammar Fixes?\n\n${lines}\n\nUndo from Recent actions.`)) return;
   for (const t of items) {
     const orig = (currentWs[t.bucket] || []).find((x) => x.id === t.id);
-    if (orig) orig.verdict = 'FIXES_MADE';
+    if (orig) orig.verdict = t.grammarOnly ? 'GRAMMAR_ONLY' : 'FIXES_MADE';
   }
   render();
   try {
-    const r = await api('/bulk/lane', {
-      method: 'POST',
-      body: { fromLane: 'GRAMMAR', toLane: 'RESOLVED', verdict: 'FIXES_MADE' },
-    });
+    const r = await api('/bulk/grammar-complete', { method: 'POST' });
     await load();
-    if (r.action) toast(`${r.moved} task${r.moved === 1 ? '' : 's'} marked Fixes made.`, { label: 'Undo', run: () => undo(r.action.id) });
+    const summary = [
+      r.counts.GRAMMAR_ONLY ? `${r.counts.GRAMMAR_ONLY} Grammar-only` : null,
+      r.counts.FIXES_MADE ? `${r.counts.FIXES_MADE} Fixes made` : null,
+    ].filter(Boolean).join(' · ');
+    if (r.action) toast(`Completed ${r.moved}: ${summary}.`, { label: 'Undo', run: () => undo(r.action.id) });
   } catch (e) {
     toast(e.message);
     await load();
@@ -137,6 +147,7 @@ function pickResolution(x, y) {
       el('div', { class: 'drop-menu-title' }, 'Mark resolved as'),
       el('button', { onclick: () => choose('NO_ISSUES') }, 'No Issues'),
       el('button', { onclick: () => choose('FIXES_MADE') }, 'Fixes made'),
+      el('button', { onclick: () => choose('GRAMMAR_ONLY') }, 'Grammar-only'),
       el('button', { onclick: () => choose('SBQ') }, 'SBQ'),
       el('button', { class: 'cancel', onclick: () => choose(null) }, 'Cancel'),
     );
@@ -296,9 +307,19 @@ function render() {
           el('span', { class: 'lane-count' }, String(items.length)),
           lane.key === 'GRAMMAR' && items.length
             ? el('button', {
-              class: 'lane-action', title: 'Mark every task in this lane as Fixes made',
+              class: 'lane-action',
+              title: 'Complete this lane — grammar-only tasks resolve as Grammar-only, the rest as Fixes made',
               onclick: (e) => { e.preventDefault(); completeGrammarLane(items); },
-            }, 'Mark all fixed')
+            }, 'Complete lane')
+            : null,
+          // show the split up front, so the two kinds of task in here are visible
+          // before you commit to completing them
+          lane.key === 'GRAMMAR' && items.length
+            ? el('div', { class: 'lane-split' },
+              el('b', {}, `${items.filter((t) => t.grammarOnly).length} grammar-only`),
+              ' · ',
+              el('i', {}, `${items.filter((t) => !t.grammarOnly).length} had other fails`),
+            )
             : null,
         ),
         items.length

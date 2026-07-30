@@ -176,6 +176,35 @@ api.post('/bulk/lane', wrap(async (req, res) => {
   res.json({ moved: items.length, action: act && { id: act.id, label: act.label } });
 }));
 
+// Complete the Grammar Fixes lane, SPLIT by what the audit actually found.
+//
+// The lane holds two different kinds of task and they must not be tracked as one
+// thing: those whose audit tripped only R23/R24 (grammar was the entire problem),
+// and those that had other fails too and were moved in by hand once those were
+// fixed. The first group resolves as GRAMMAR_ONLY, the second as FIXES_MADE.
+//
+// The discriminator is grammarOnly — the audit's own dimension list — not how the
+// task entered the lane. A task whose review.md still lists R13 alongside R23 had
+// more than a grammar problem, however it got here.
+api.post('/bulk/grammar-complete', wrap(async (req, res) => {
+  const candidates = selectTasks({ severity: req.body?.severity || 'ALL', fromLane: 'GRAMMAR', ids: req.body?.ids ?? null });
+  const items = [];
+  const counts = { GRAMMAR_ONLY: 0, FIXES_MADE: 0 };
+  for (const meta of candidates) {
+    const verdict = meta.grammarOnly ? 'GRAMMAR_ONLY' : 'FIXES_MADE';
+    const item = moveTaskToLane(meta.bucket, meta.id, 'RESOLVED', { verdict, username: req.user.username });
+    if (item) { items.push(item); counts[verdict]++; }
+  }
+  const parts = [];
+  if (counts.GRAMMAR_ONLY) parts.push(`${counts.GRAMMAR_ONLY} Grammar-only`);
+  if (counts.FIXES_MADE) parts.push(`${counts.FIXES_MADE} Fixes made`);
+  const act = recordAction({
+    by: req.user.username, kind: 'bulk_move', items,
+    label: `Grammar Fixes → ${parts.join(' · ') || 'nothing'}`,
+  });
+  res.json({ moved: items.length, counts, action: act && { id: act.id, label: act.label } });
+}));
+
 api.get('/actions', wrap(async (req, res) =>
   res.json({ actions: listActions(Math.min(Number(req.query.limit) || 12, 50)) })
 ));
