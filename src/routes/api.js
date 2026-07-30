@@ -222,6 +222,23 @@ api.post('/task/:bucket/:id/checklist', wrap(async (req, res) =>
   res.json(setChecklistItem(req.params.bucket, req.params.id, String(req.body.key || ''), req.body.status || '', req.user.username))
 ));
 
+// Exports are generated fresh on every request, but without an explicit directive
+// a browser is allowed to reuse a stored response WITHOUT revalidating (heuristic
+// caching — there is no Cache-Control or Last-Modified here). For an `attachment`
+// fetched by navigation that means the old bytes get written to disk and the export
+// looks like it never updated. no-store forbids that.
+function freshDownload(res, filename) {
+  res.setHeader('cache-control', 'no-store, must-revalidate');
+  res.setHeader('content-disposition', `attachment; filename="${filename}"`);
+}
+
+// Local-time stamp in the filename, so a re-export is a NEW file rather than
+// "export (1).csv" sitting next to a stale "export.csv" you might reopen instead.
+function stamp() {
+  const d = new Date(); const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
 // One task_id per line for a bucket column, or ?verdict=SBQ for a verdict group.
 api.get('/export/ids/:bucket', wrap(async (req, res) => {
   const ws = listWorkspace();
@@ -230,28 +247,31 @@ api.get('/export/ids/:bucket', wrap(async (req, res) => {
   tasks = tasks.filter((t) => !t.tour);
   if (req.query.verdict) tasks = tasks.filter((t) => t.verdict === req.query.verdict);
   res.setHeader('content-type', 'text/plain');
-  res.setHeader('content-disposition', `attachment; filename="${req.params.bucket}${req.query.verdict ? '_' + req.query.verdict : ''}_task_ids.txt"`);
+  freshDownload(res, `${req.params.bucket}${req.query.verdict ? '_' + req.query.verdict : ''}_task_ids_${stamp()}.txt`);
   res.send(tasks.map((t) => t.id).join('\n') + (tasks.length ? '\n' : ''));
 }));
 
 api.get('/export/all.csv', wrap(async (req, res) => {
-  const RESOLVED = new Set(['NO_ISSUES', 'FIXES_MADE', 'SBQ']);
-  const laneOf = (t) => t.verdict === 'SECOND_OPINION' ? '2nd opinion'
-    : (t.verdict && RESOLVED.has(t.verdict)) ? 'Resolved'
-    : t.inGrammarLane ? 'Grammar Fixes'
-    : t.claimedBy ? 'In review' : 'Open';
+  // Lane comes from the shared laneOf() rather than a copy of the rules. The copy
+  // that used to live here is exactly how this column drifted from the board — it
+  // had no Grammar Fixes case, so 27 tasks exported as the wrong lane.
   const csv = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const ws = listWorkspace();
-  const lines = ['task_id,bucket,lane,verdict,claimed_by,tags,has_review,has_remediation'];
+  const lines = ['task_id,bucket,lane,verdict,claimed_by,tags,has_review,has_remediation,grammar_only,delivered'];
   for (const [bucket, tasks] of Object.entries(ws)) {
     for (const t of tasks) {
       if (t.tour) continue;   // dummy tour tasks aren't real audit tasks
       const tags = t.grammar ? 'Spelling/Grammar Issues' : '';
-      lines.push([t.id, bucket, laneOf(t), t.verdict || '', t.claimedBy || '', tags, t.hasReview, t.hasRemediation].map(csv).join(','));
+      // `delivered` is included so the row count can be reconciled with the board,
+      // which hides delivered tasks behind a toggle.
+      lines.push([
+        t.id, bucket, LANE_LABELS[laneOf(t)], t.verdict || '', t.claimedBy || '',
+        tags, t.hasReview, t.hasRemediation, !!t.grammarOnly, !!t.delivered,
+      ].map(csv).join(','));
     }
   }
   res.setHeader('content-type', 'text/csv');
-  res.setHeader('content-disposition', 'attachment; filename="audit_studio_export.csv"');
+  freshDownload(res, `audit_studio_export_${stamp()}.csv`);
   res.send(lines.join('\n') + '\n');
 }));
 

@@ -431,11 +431,13 @@ function bulkMatches() {
   const sev = bvSev?.value || 'ALL';
   const from = bvFrom?.value || 'ANY';
   const { lane: to } = bulkTarget();
+  // Reopen isn't a lane — it clears the verdict, so the no-op test is "has no verdict".
+  const noop = (t) => (to === 'REOPEN' ? !t.verdict : laneOf(t) === to);
   return allTickets().filter((t) =>
     !t.tour && !t.delivered &&
     (sev === 'ALL' || t.bucket === sev) &&
     (from === 'ANY' || laneOf(t) === from) &&
-    laneOf(t) !== to
+    !noop(t)
   );
 }
 

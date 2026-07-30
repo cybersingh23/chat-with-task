@@ -9,12 +9,20 @@ export const LANES = ['OPEN', 'GRAMMAR', 'REVIEW', 'SECOND_OPINION', 'RESOLVED']
 export const RESOLVED_VERDICTS = ['NO_ISSUES', 'FIXES_MADE', 'SBQ'];
 const RESOLVED = new Set(RESOLVED_VERDICTS);
 
+// REOPEN is a destination, not a lane: it clears the verdict and touches nothing
+// else, so each task falls back to wherever the automatic rules put it (a
+// grammar-only task returns to Grammar Fixes, a claimed one to In review). That is
+// what "undo the decision" means, and it can't be expressed as a lane — moving to
+// Open would also force grammar tasks out with an 'out' override.
+export const DESTINATIONS = [...LANES, 'REOPEN'];
+
 export const LANE_LABELS = {
   OPEN: 'Open',
   GRAMMAR: 'Grammar Fixes',
   REVIEW: 'In review',
   SECOND_OPINION: 'Needs 2nd opinion',
   RESOLVED: 'Resolved',
+  REOPEN: 'Reopened',
 };
 export const SEV_LABELS = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
 export const VERDICT_LABELS = {
@@ -39,10 +47,12 @@ export function laneOf(meta) {
 //   - SECOND_OPINION/RESOLVED leave the grammar override alone: a verdict outranks
 //     it, so clearing the verdict later correctly returns the task to the lane.
 export function snapshotForLane(lane, { meta, verdict, username }) {
-  if (!LANES.includes(lane)) throw httpError(400, `unknown lane ${lane} — one of ${LANES.join(', ')}`);
+  if (!DESTINATIONS.includes(lane)) throw httpError(400, `unknown destination ${lane} — one of ${DESTINATIONS.join(', ')}`);
   const cur = { verdict: meta.verdict ?? null, claimed_by: meta.claimedBy ?? null, grammar_lane: meta.grammarLane ?? null };
   const leaveGrammar = meta.grammarOnly ? 'out' : null;
   switch (lane) {
+    case 'REOPEN':
+      return { verdict: null, claimed_by: cur.claimed_by, grammar_lane: cur.grammar_lane };
     case 'OPEN':
       return { verdict: null, claimed_by: null, grammar_lane: leaveGrammar };
     case 'REVIEW':
@@ -66,7 +76,10 @@ export function snapshotForLane(lane, { meta, verdict, username }) {
 // or null when the task is already there (nothing recorded, nothing written).
 export function moveTaskToLane(bucket, id, lane, { verdict, username }) {
   const meta = taskMeta(bucket, id);
-  if (laneOf(meta) === lane) return null;
+  // Nothing to do: already in the target lane, or asked to reopen something that
+  // has no verdict. Returning null keeps it out of the action log.
+  const noop = lane === 'REOPEN' ? !meta.verdict : laneOf(meta) === lane;
+  if (noop) return null;
   const before = laneSnapshot(bucket, id);
   const after = snapshotForLane(lane, { meta, verdict, username });
   applySnapshot(bucket, id, after, username);

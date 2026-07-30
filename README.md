@@ -53,9 +53,21 @@ message in the built-in trajectory viewer.
    **skips it and says so** rather than clobbering the newer decision. An undo is itself
    journaled, so undoing an undo is a redo.
 
+   Destinations include **Reopen · clear verdict**, which clears the decision and touches
+   nothing else, so each task falls back to wherever the automatic rules put it — a grammar-only
+   task returns to Grammar Fixes rather than being forced into Open.
+
 6. **Export** — each bucket column has a **⬇ ids** button (one task_id per line), and
-   **Export all (CSV)** gives `task_id,bucket,verdict,claimed_by,has_review,has_remediation`.
+   **Export all (CSV)** gives
+   `task_id,bucket,lane,verdict,claimed_by,tags,has_review,has_remediation,grammar_only,delivered`.
    Filtered export: `/api/export/ids/HARD_FAIL?verdict=SBQ`.
+
+   Exports send `Cache-Control: no-store` and a timestamped filename. Both matter: without an
+   explicit directive a browser may reuse a stored response *without revalidating*, so an
+   `attachment` fetched by navigation writes stale bytes to disk; and a fixed filename leaves a
+   stale `audit_studio_export.csv` next to `… (1).csv` that's easy to reopen by mistake. The
+   `lane` column comes from the shared `laneOf()` in `src/lanes.js` rather than a local copy of
+   the rules — a copy is how it previously drifted from the board.
 
 ## Pull tasks from Redash
 
