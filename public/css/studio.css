@@ -617,28 +617,27 @@ a.traj-link:hover { background: rgba(108, 165, 255, 0.2); text-decoration: none;
   padding: 8px 11px; border-radius: var(--r-sm); border-left: 2px solid transparent;
   font-size: 12.5px; line-height: 1.55;
 }
-/* Only the fail bar is filled; the rest of the ramp rides on the left border, so
-   a card of mostly non-fails reads as text rather than a warning. Score 4 is
-   V11's milder non-fail — the same amber as 3, one step down in weight. */
-.spec-band-row.fail { background: rgba(255, 97, 89, 0.055); border-left-color: var(--red); }
-.spec-band-row.nonfail { border-left-color: rgba(255, 161, 79, 0.55); }
-.spec-band-row.nonfail.minor { border-left-color: rgba(255, 161, 79, 0.28); }
-.spec-band-row.pass { border-left-color: rgba(67, 209, 124, 0.45); }
+.spec-band-row.fail { background: rgba(255, 97, 89, 0.07); border-left-color: var(--red); }
+.spec-band-row.nonfail { background: rgba(255, 161, 79, 0.07); border-left-color: var(--orange); }
+/* V11's score-4 band: a non-fail, one notch milder than 3 */
+.spec-band-row.nonfail.minor { background: rgba(245, 200, 76, 0.06); border-left-color: var(--yellow); }
+.spec-band-row.pass { background: rgba(67, 209, 124, 0.06); border-left-color: var(--green); }
 .spec-band-tag {
   font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 0.03em;
   text-transform: uppercase; padding-top: 1px; white-space: nowrap;
 }
 .fail .spec-band-tag { color: var(--red); }
 .nonfail .spec-band-tag { color: var(--orange); }
-.nonfail.minor .spec-band-tag { color: rgba(255, 161, 79, 0.62); }
+.nonfail.minor .spec-band-tag { color: var(--yellow); }
 .pass .spec-band-tag { color: var(--green); }
 .spec-band-body { min-width: 0; }
-/* The error-category label the annotator applies — identifying, not severity,
-   so it stays neutral instead of doubling the band colour. */
 .spec-band-cat {
   display: block; font-family: var(--mono); font-size: 10px; font-weight: 600;
   letter-spacing: 0.02em; color: var(--text-3); margin-bottom: 3px;
 }
+.fail .spec-band-cat { color: var(--red); opacity: 0.75; }
+.nonfail .spec-band-cat { color: var(--orange); opacity: 0.75; }
+.nonfail.minor .spec-band-cat { color: var(--yellow); opacity: 0.8; }
 .spec-band-text { display: block; white-space: pre-wrap; color: var(--text); }
 .pass .spec-band-text { color: var(--text-2); }
 
