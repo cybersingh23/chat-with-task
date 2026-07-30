@@ -76,7 +76,7 @@ Citation rules (mandatory):
 - To point at a phrase in a model's responses without a specific index, use a cb:// link:
   [Model B said "…"](cb://model_b?q=the%20exact%20phrase) — the UI searches that model's responses and
   highlights the first match. Prefer traj://<model>/<N>?q= when you know the index; use cb:// otherwise.
-- Whenever a V5 rubric dimension decides a severity or verdict, cite it as a spec:// link:
+- Whenever a V11 rubric dimension decides a severity or verdict, cite it as a spec:// link:
   [R12 Summaries · Accuracy](spec://R12). The UI turns these into buttons that open the QC spec
   at that exact rubric row. Use the R-keys from the canon (R1-R25).
 - Whenever you cite a rank.json field (the annotator's grading/summary/decision), write the field
@@ -103,7 +103,7 @@ markdown document (no preamble) with EXACTLY this structure:
 # Review — <task_id>
 
 \`\`\`autoqc
-One line per V5 QC dimension this task trips, worst first: "<R-key> — <dimension>: <one-phrase reason>".
+One line per V11 QC dimension this task trips, worst first: "<R-key> — <dimension>: <one-phrase reason>".
 \`\`\`
 This renders as the "Auto-QC read" panel at the very top — a scannable index of EVERY QC failure
 detected (each R-key is a clickable chip that opens that rubric card). Be comprehensive: list
@@ -138,7 +138,7 @@ Block format:
 ### [HARD|SOFT|INFO] F<n> — <short title>
 - **Claim:** "<verbatim quote>" — \`<rank.json field path>\`
 - **Evidence:** search hits / quoted trajectory text, with traj:// citations
-- **Rule:** the ONE V5 QC dimension this violates, as a spec:// link with its name —
+- **Rule:** the ONE V11 QC dimension this violates, as a spec:// link with its name —
   e.g. [R12 Summaries · Accuracy](spec://R12). MANDATORY on every HARD and SOFT finding.
 - **Impact:** which side, whether rank/scores are affected
 Keep each block under ~8 lines. Do NOT merge multiple problems into one block — one error,
@@ -190,7 +190,7 @@ One sentence: which defect and the single required action (e.g. "Greeting-stub o
 \`\`\`
 
 ## Trajectory defect
-- **What's wrong:** the defect + the side(s), with a traj:// citation, and the deciding V5 link ([R6 Trajectory Completeness](spec://R6)).
+- **What's wrong:** the defect + the side(s), with a traj:// citation, and the deciding V11 link ([R6 Trajectory Completeness](spec://R6)).
 - **Which case:** state "genuinely incomplete" vs "not pulled correctly" and the evidence — quote/summarize both models' responses you inspected (well-formed vs stunted) that led to the call.
 - **Action (the only path):**
   - If *not pulled correctly*: "Find the trajectory in another version card for this task on agent-env, manually backfill it into this delivery, and log the backfill in the team Google Sheet (task id, version card used, who/when)." Nothing in rank.json should be edited until the real trajectory is in place.
@@ -213,7 +213,7 @@ One block per fix, in the order they must be done, separated by --- . Block form
 - **Go to:** the exact location — file + field path for rank.json edits
   (e.g. \`rank.json /results/<codename>/grading/correctness/rationale\`), or the trajectory
   point as a traj:// citation, or the exact artifact file (e.g. \`ranking_proof/a_proof_justification.txt\`)
-- **Problem:** one line, ending with the violated V5 dimension as a spec:// link —
+- **Problem:** one line, ending with the violated V11 dimension as a spec:// link —
   e.g. [R6 Trajectory Completeness](spec://R6).
 - **Fix:** the concrete change. For text edits give before → after: quote the current wrong
   text, then give replacement text the owner can paste or adapt. For re-exports/re-runs give

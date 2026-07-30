@@ -131,7 +131,7 @@ Or without Docker: `npm ci && npm start` (needs Node 22+ and `unzip` on PATH).
 |---|---|
 | `/app/workspace` (`WORKSPACE_ROOT`) | uploaded tasks, chats, claims/verdicts |
 | `/app/data` (`DATA_DIR`) | `users.json` (seeded on first boot) |
-| `/app/spec` (`SPEC_DIR`, read-only) | customer spec docs incl. `V5_RUBRIC.csv` |
+| `/app/spec` (`SPEC_DIR`, read-only) | customer spec docs incl. `V11_RUBRIC.csv` |
 
 `GET /healthz` is the unauthenticated liveness probe. Change the seeded passwords in
 `data/users.json` before sharing the URL (set `"password": "newpass"` on an entry — it re-hashes

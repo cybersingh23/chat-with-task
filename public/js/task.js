@@ -145,7 +145,7 @@ async function buildSidebar() {
     ),
     el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showQcSpec(); } },
       el('span', {}, 'QC spec'),
-      el('span', { class: 'missing' }, 'V5'),
+      el('span', { class: 'missing' }, 'V11'),
     ),
     el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showCbResponses(); } },
       el('span', {}, 'CB responses'),
@@ -532,12 +532,12 @@ function askCopilotAboutMilestone(m) {
   chatText.focus();
 }
 
-// ---------- QC spec (V5 rubric) ----------
+// ---------- QC spec (V11 rubric) ----------
 let rubricPromise = null;
 
 async function showQcSpec(focusKey = null) {
   hideTrajToolbar();
-  viewerTitle.textContent = 'QC spec — V5 rubric';
+  viewerTitle.textContent = 'QC spec — V11 rubric';
   document.querySelector('.viewer-head .regen')?.remove();
   viewReopeners.set('qcspec', { label: 'QC spec', reopen: () => { setActive(findDocNav('QC spec')); showQcSpec(); } });
   rubricPromise ||= api('/spec/rubric');
@@ -567,9 +567,12 @@ function buildQcSpecView(dimensions) {
     if (!groups.has(d.group)) groups.set(d.group, []);
     groups.get(d.group).push(d);
   }
+  // V11 added a milder score-4 band ("single minor slip") alongside 3 — both are
+  // non-fails, so 4 shares the non-fail treatment in a softer shade.
   const SCORE = {
     2: { label: 'Fail', cls: 'fail' },
     3: { label: 'Non-fail', cls: 'nonfail' },
+    4: { label: 'Non-fail', cls: 'nonfail minor' },
     5: { label: 'Pass', cls: 'pass' },
   };
 
@@ -584,7 +587,10 @@ function buildQcSpecView(dimensions) {
           const s = SCORE[o.score] || { label: String(o.score), cls: '' };
           return el('div', { class: `spec-band-row ${s.cls}` },
             el('span', { class: 'spec-band-tag' }, `${o.score} · ${s.label}`),
-            el('span', { class: 'spec-band-text' }, o.text),
+            el('span', { class: 'spec-band-body' },
+              o.category ? el('span', { class: 'spec-band-cat' }, o.category) : null,
+              el('span', { class: 'spec-band-text' }, o.text),
+            ),
           );
         }),
       ),
@@ -593,7 +599,7 @@ function buildQcSpecView(dimensions) {
   return el('div', { class: 'qcspec' },
     el('h1', {}, 'QC spec'),
     el('p', { class: 'hint-line' },
-      `V5 rubric · ${dimensions.length} failure modes across ${byCategory.size} categories. `,
+      `V11 rubric · ${dimensions.length} failure modes across ${byCategory.size} categories. `,
       'Cited as R-keys throughout reviews, remediations, and Acey — click any citation to land on its card.'),
     ...[...byCategory.entries()].flatMap(([category, groups]) => [
       el('h2', { class: 'spec-cat' }, category),
@@ -1814,7 +1820,7 @@ const verifyDecision = () => !!document.getElementById('verdict-select').value;
 
 const TASK_TOUR = [
   { title: 'Inside a task — your sandbox 🧪', body: 'This is a private sandbox task: claim it, chat, decide, whatever you like — it\'s deleted when the tour ends, so nothing here is real. Everything you audit lives on this one screen.' },
-  { selector: '#nav-docs', title: 'Documents', body: 'Task definition & milestones, the V5 QC spec, and CB responses — the annotator\'s rank.json in a clean UI (summary, per-dimension grading, failure modes, and the A↔B decision). The generated Review, Remediation, and your Checklist live here too.' },
+  { selector: '#nav-docs', title: 'Documents', body: 'Task definition & milestones, the V11 QC spec, and CB responses — the annotator\'s rank.json in a clean UI (summary, per-dimension grading, failure modes, and the A↔B decision). The generated Review, Remediation, and your Checklist live here too.' },
   { selector: '#nav-trajs', title: 'Trajectory viewer', body: 'Read Model A or Model B on their own, or Compare A ↔ B side by side to see exactly where the two runs diverge — matching prompts line up, and one-sided turns are clearly called out.' },
   { selector: '#viewer', title: 'Clickable citation "chips"', body: 'Everywhere you read — docs, CB responses, copilot answers — you\'ll see little chips. A traj:// chip jumps to an exact trajectory turn; a spec:// chip opens the QC rubric row that applies; a /rank.json field chip lands you in CB responses. Each one scrolls to the precise spot and highlights it — even a specific quoted phrase inside a response. See one? Click it.' },
   { selector: '#chat-panel', title: 'Meet Acey — try it 🚀', body: 'Ask Acey anything about this task. It reads and searches both trajectories and cross-checks the rank.json, then answers with those same clickable chips so you can verify in one click. I\'ve dropped a starter question in the box — click a suggestion or hit Send, and I\'ll wait for the reply.',

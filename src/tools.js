@@ -52,7 +52,7 @@ export const TOOL_DEFS = [
     function: {
       name: 'read_spec',
       description:
-        'Read the full text of a customer program spec document when you need exact wording beyond the embedded canon: v5_rubric (AUTHORITATIVE QC rubric — 25 dimensions R1-R25 with 2/3/5 bands), nwr_checklist (the 29 ONL-* check codes + customer report format), gap_analysis (evidence base: canonical fabrication/fairness cases), qc_rubric_v2_legacy (superseded prose rubric, background only).',
+        'Read the full text of a customer program spec document when you need exact wording beyond the embedded canon: v11_rubric (AUTHORITATIVE QC rubric — 25 dimensions R1-R25 with 2=Fail / 3-4=Non-Fail / 5=Pass bands), nwr_checklist (the 29 ONL-* check codes + customer report format), gap_analysis (evidence base: canonical fabrication/fairness cases), qc_rubric_v2_legacy (superseded prose rubric, background only).',
       parameters: {
         type: 'object',
         properties: {
