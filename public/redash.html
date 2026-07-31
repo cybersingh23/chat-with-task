@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Redash — Chat with Task</title>
+  <link rel="stylesheet" href="/css/studio.css" />
+  <link rel="icon" href="/scale-icon.svg" />
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="back-home" title="back to board">‹ Board</a>
+    <div class="app-name">Redash <span>/ query browser</span></div>
+    <div class="spacer"></div>
+    <span class="rq-conn" id="rq-conn"></span>
+    <a class="back-home" href="/l12.html" title="delivery analytics dashboard">L12 Stats</a>
+    <div class="user-chip" id="user-chip" hidden>
+      <span class="avatar sm" id="user-avatar"></span>
+      <span id="user-name"></span>
+      <button id="logout-btn" title="sign out">Sign out</button>
+    </div>
+  </header>
+
+  <main class="index-main">
+    <div class="rq-tabs" id="rq-tabs">
+      <button data-tab="curated" class="active">Curated</button>
+      <button data-tab="browse">Browse Redash</button>
+      <button data-tab="sql" id="rq-tab-sql" hidden>SQL</button>
+    </div>
+
+    <!-- curated registry -->
+    <section class="rq-pane" id="pane-curated">
+      <div class="l10-hint">
+        Queries this app ships and version-controls (<span class="mono">sql/redash/</span>), plus any
+        entry pointed at a saved Redash query. Task-scoped ones take a list of 24-hex task ids.
+      </div>
+      <div class="rq-cards" id="rq-registry"></div>
+    </section>
+
+    <!-- browse all of Redash -->
+    <section class="rq-pane" id="pane-browse" hidden>
+      <div class="board-controls">
+        <div class="search-bar glass">
+          <input type="text" id="rq-search" placeholder="Search Redash queries by name…" spellcheck="false" />
+        </div>
+        <button id="rq-search-btn">Search</button>
+        <label class="rq-mine"><input type="checkbox" id="rq-mine" /> only mine</label>
+      </div>
+      <div class="admin-table-wrap"><table class="admin-table" id="rq-results"></table></div>
+      <div class="rq-pager" id="rq-pager"></div>
+    </section>
+
+    <!-- ad-hoc SQL (admin) -->
+    <section class="rq-pane" id="pane-sql" hidden>
+      <div class="l10-hint">
+        Read-only: single <span class="mono">SELECT</span>/<span class="mono">WITH</span> statement only.
+        Runs as the server's Redash user against the chosen data source.
+      </div>
+      <div class="l10-row">
+        <select id="rq-ds" class="rq-ds"></select>
+        <button class="primary" id="rq-run-sql">Run</button>
+      </div>
+      <textarea id="rq-sql" class="rq-sql mono" spellcheck="false" placeholder="SELECT 1 AS ok"></textarea>
+    </section>
+
+    <!-- shared query detail + results -->
+    <section id="rq-detail" hidden>
+      <h2 class="admin-h2" id="rq-detail-title"></h2>
+      <div class="rq-panel glass" id="rq-detail-body"></div>
+    </section>
+
+    <section id="rq-out" hidden>
+      <h2 class="admin-h2">Results
+        <span class="admin-sub" id="rq-out-meta"></span>
+        <button class="rd-refresh" id="rq-csv">download CSV</button>
+      </h2>
+      <div class="admin-table-wrap rq-scroll"><table class="admin-table rq-table" id="rq-table"></table></div>
+    </section>
+  </main>
+
+  <script type="module" src="/js/redash.js"></script>
+</body>
+</html>

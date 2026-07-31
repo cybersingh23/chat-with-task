@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { listFilesIn, readFileIn, readTrajectoryIn, resolveSafe, taskDir } from './workspace.js';
 import { readSpec, SPEC_FILES } from './spec.js';
+import { redashEnabled } from './redash.js';
+import { REGISTRY, runRegistryQuery } from './redash_registry.js';
 
 // Tools the audit copilot can call against the claimed task's folder.
 export const TOOL_DEFS = [
@@ -80,6 +82,37 @@ export const TOOL_DEFS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'redash_query',
+      description:
+        'Run a curated live query against Redash (Snowflake) for UPSTREAM PIPELINE facts that are not in the task folder: which review levels this task passed through, who worked it at each level and on which team, how many hours each level took, and where the task sits right now. ' +
+        'Task-scoped queries default to THIS task, so task_ids is usually unnecessary. ' +
+        'Use it for questions about pipeline position, reviewer/annotator identity, worker team, handling time, or project-wide layer counts. ' +
+        'It CANNOT see trajectories, rank.json, or anything the annotator wrote — those live in the task files, so keep using read_file/search/read_trajectory for audit evidence. ' +
+        'Treat every number it returns as pipeline metadata, never as evidence about model behaviour.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            enum: Object.keys(REGISTRY),
+            description: Object.entries(REGISTRY)
+              .map(([k, v]) => `${k}: ${v.description}`)
+              .join(' | '),
+          },
+          task_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional 24-hex task ids. Task-scoped queries default to the current task.',
+          },
+          days: { type: 'integer', description: 'Trailing window for project_aht / throughput (default 30).' },
+        },
+        required: ['query'],
+      },
+    },
+  },
 ];
 
 export function makeExecutor(bucket, id) {
@@ -118,10 +151,54 @@ export function makeExecutorForDir(dir) {
         for (const m of page) lines.push(renderMessage(args.model, m));
         return lines.join('\n');
       }
+      case 'redash_query':
+        return runRedashTool(dir, args);
       default:
         return `ERROR: unknown tool ${name}`;
     }
   };
+}
+
+// The task folder is named for the task id in both the workspace and a delivery
+// folder, so the copilot never has to be told which task it is looking at.
+const TASK_ID_RE = /^[0-9a-f]{24}$/;
+
+async function runRedashTool(dir, args = {}) {
+  if (!redashEnabled()) return 'ERROR: Redash is not configured on this server (REDASH_API_KEY unset).';
+  const name = String(args.query || '');
+  const entry = REGISTRY[name];
+  if (!entry) return `ERROR: unknown query ${JSON.stringify(name)}. Available: ${Object.keys(REGISTRY).join(', ')}`;
+
+  const params = {};
+  if (entry.params?.task_ids) {
+    const supplied = Array.isArray(args.task_ids) ? args.task_ids.filter(Boolean) : [];
+    const self = path.basename(dir);
+    const ids = supplied.length ? supplied : (TASK_ID_RE.test(self) ? [self] : []);
+    if (!ids.length) return 'ERROR: this query needs task_ids and the current folder is not a task id.';
+    params.task_ids = ids;
+  }
+  if (entry.params?.days && args.days) params.days = args.days;
+
+  try {
+    const out = await runRegistryQuery(name, params);
+    if (!out.rowCount) return `[redash ${name}] 0 rows.`;
+    return `[redash ${name} — ${out.rowCount} row(s)${out.cached ? ', cached' : ''}]\n` + asTable(out);
+  } catch (e) {
+    return `ERROR running ${name}: ${e.message}`;
+  }
+}
+
+// Compact fixed-width table — far cheaper in tokens than JSON, and the model
+// reads columns more reliably than nested objects.
+function asTable(out, maxRows = 60) {
+  const cols = out.columns.map((c) => c.name);
+  const cell = (v) => (v == null ? '' : String(v).replace(/\s+/g, ' ').slice(0, 60));
+  const rows = out.rows.slice(0, maxRows).map((r) => cols.map((c) => cell(r[c])));
+  const widths = cols.map((c, i) => Math.max(c.length, ...rows.map((r) => r[i].length), 1));
+  const line = (parts) => parts.map((p, i) => p.padEnd(widths[i])).join('  ').trimEnd();
+  const body = [line(cols), line(widths.map((w) => '-'.repeat(w))), ...rows.map(line)];
+  if (out.rowCount > maxRows) body.push(`… ${out.rowCount - maxRows} more row(s)`);
+  return body.join('\n');
 }
 
 function renderMessage(model, m) {

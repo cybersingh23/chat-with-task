@@ -37,6 +37,27 @@ export const config = {
     apiKey: process.env.LITELLM_API_KEY,
     model: process.env.LITELLM_MODEL || 'claude-opus-5',
   },
+  // Live Redash integration (src/redash.js): pipeline panels on L12 Stats, the
+  // per-task Pipeline tab, the copilot's redash_query tool, and the in-app query
+  // browser. Same REDASH_API_KEY as the pull below — it must be a Redash USER
+  // key, since ad-hoc SQL (the sql/redash/*.sql half of the hybrid registry) is
+  // rejected for query-scoped keys.
+  redash: {
+    baseUrl: (process.env.REDASH_BASE_URL || 'https://redash.scale.com').replace(/\/+$/, ''),
+    apiKey: process.env.REDASH_API_KEY,
+    // Data source the analytics SQL runs against. Distinct from the pull's
+    // REDASH_DATA_SOURCE_ID (30) — the ACC pipeline queries live on 22.
+    dataSourceId: Number(process.env.REDASH_ANALYTICS_DATA_SOURCE_ID || 22),
+    // ACC project whose pipeline the dashboards describe.
+    projectId: process.env.ACC_PROJECT_ID || '69979ab5a4b6d80af7b7d1c8',
+    cacheTtlMs: Number(process.env.REDASH_CACHE_TTL_SECONDS || 300) * 1000,
+    pollIntervalMs: Number(process.env.REDASH_POLL_INTERVAL_MS || 1500),
+    requestTimeoutMs: Number(process.env.REDASH_REQUEST_TIMEOUT_MS || 30_000),
+    queryTimeoutMs: Number(process.env.REDASH_QUERY_TIMEOUT_SECONDS || 180) * 1000,
+    // Ad-hoc SQL typed into the in-app browser is admin-only and off by default;
+    // the curated registry and saved queries work either way.
+    allowAdhoc: process.env.REDASH_ALLOW_ADHOC !== 'false',
+  },
   // On-demand pull of tasks from Redash (a whole review level, or an explicit id
   // list) into a downloadable zip. Needs REDASH_API_KEY in the environment, read
   // by tools/get_tasks/pull_l10.py. No schedule — admin-button triggered only.
