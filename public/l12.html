@@ -20,6 +20,7 @@
         <option value="all">All tasks on disk</option>
       </select>
     </div>
+    <a class="back-home" href="/redash.html" title="run Redash queries in-app">Redash</a>
     <a class="back-home" href="/archive.html" title="browse archived tasks">Archive</a>
     <div class="user-chip" id="user-chip" hidden>
       <span class="avatar sm" id="user-avatar"></span>
@@ -33,6 +34,21 @@
 
     <h2 class="admin-h2">Verdict &amp; severity movement</h2>
     <div class="l12-movement" id="l12-movement"></div>
+
+    <section id="rd-section" hidden>
+      <h2 class="admin-h2">Live pipeline
+        <span class="admin-sub">upstream truth from Redash — the whole ACC project, not just what's on the board</span>
+        <button class="rd-refresh" id="rd-refresh" title="bypass the cache and re-query Redash">refresh</button>
+        <span class="rd-stamp mono" id="rd-stamp"></span>
+      </h2>
+      <div class="rd-panel glass" id="rd-ladder"></div>
+
+      <h2 class="admin-h2">Board vs pipeline
+        <span class="admin-sub">where the tasks on this board actually sit upstream right now</span>
+      </h2>
+      <div class="rd-split" id="rd-split"></div>
+      <div class="admin-table-wrap"><table class="admin-table rd-board" id="rd-board"></table></div>
+    </section>
 
     <h2 class="admin-h2">Model performance leaderboard <span class="admin-sub">avg score per dimension (1–3) · click a column to re-rank</span></h2>
     <div class="admin-table-wrap"><table class="admin-table l12-leaderboard" id="l12-leaderboard"></table></div>

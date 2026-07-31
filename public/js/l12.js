@@ -1,4 +1,5 @@
 import { api, el } from './common.js';
+import { initPipelinePanels } from './redash_panels.js';
 
 const DIM_LABEL = {
   correctness: 'Correctness',
@@ -214,3 +215,7 @@ const s0 = new URLSearchParams(location.search).get('scope');
 if (s0 && ['completed', 'active', 'all'].includes(s0)) sel.value = s0;
 sel.addEventListener('change', () => loadScope(sel.value));
 await loadScope(sel.value);
+
+// Redash panels load last and independently — a slow or unreachable Redash must
+// never delay or break the disk-computed sections above.
+initPipelinePanels().catch((e) => console.error('pipeline panels:', e));

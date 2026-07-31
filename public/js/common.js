@@ -215,6 +215,14 @@ export function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+// replaceChildren() renders a null child as the literal text "null" — unlike
+// el(), which skips it. Use this whenever the child list is built conditionally
+// (`cond ? node : null`), which is exactly where that bug hides.
+export function mount(host, ...children) {
+  host.replaceChildren(...children.flat().filter((c) => c != null));
+  return host;
+}
+
 export function fmtTime(ms) {
   return ms ? new Date(ms).toISOString().replace('T', ' ').slice(0, 19) + 'Z' : '';
 }
