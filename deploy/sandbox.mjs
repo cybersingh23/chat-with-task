@@ -18,7 +18,7 @@
  * Environment variables:
  *   LITELLM_API_KEY     LiteLLM proxy key  (REQUIRED — from ../.env or the environment)
  *   LITELLM_BASE_URL    LiteLLM proxy URL  (default: https://litellm-proxy.ml.scale.com/v1)
- *   LITELLM_MODEL       Model to use       (default: claude-opus-4-8)
+ *   LITELLM_MODEL       Model to use       (default: claude-opus-5)
  *   SANDBOX_TIMEOUT     TTL in seconds     (default: 1209600 = 14 days)
  *   SANDBOX_CPU         CPU cores          (default: 4)
  *   SANDBOX_MEMORY      Memory in MiB      (default: 8192)
@@ -74,7 +74,7 @@ const fromEnv = (k, fallback) => process.env[k] || dotEnv[k] || fallback;
 const APP_ENV = {
   LITELLM_API_KEY:  fromEnv('LITELLM_API_KEY'),
   LITELLM_BASE_URL: fromEnv('LITELLM_BASE_URL', 'https://litellm-proxy.ml.scale.com/v1'),
-  LITELLM_MODEL:    fromEnv('LITELLM_MODEL', 'claude-opus-4-8'),
+  LITELLM_MODEL:    fromEnv('LITELLM_MODEL', 'claude-opus-5'),
   PORT: String(APP_PORT),
 };
 

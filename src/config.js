@@ -35,7 +35,7 @@ export const config = {
   litellm: {
     baseURL: (process.env.LITELLM_BASE_URL || 'http://localhost:4000').replace(/\/+$/, ''),
     apiKey: process.env.LITELLM_API_KEY,
-    model: process.env.LITELLM_MODEL || 'claude-opus-4-6',
+    model: process.env.LITELLM_MODEL || 'claude-opus-5',
   },
   // On-demand pull of tasks from Redash (a whole review level, or an explicit id
   // list) into a downloadable zip. Needs REDASH_API_KEY in the environment, read

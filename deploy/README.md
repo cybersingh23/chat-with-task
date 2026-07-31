@@ -40,7 +40,7 @@ variable overrides it. The key is deliberately **not** committed; rotating it in
 |---|---|---|
 | `LITELLM_API_KEY` | from `../.env` — **required** | LiteLLM proxy API key. Deploy aborts if absent |
 | `LITELLM_BASE_URL` | `https://litellm-proxy.ml.scale.com/v1` | LiteLLM proxy URL |
-| `LITELLM_MODEL` | `claude-opus-4-8` | Model for the copilot |
+| `LITELLM_MODEL` | `claude-opus-5` | Model for the copilot |
 | `SANDBOX_TIMEOUT` | `1209600` (14 days) | Sandbox TTL in seconds |
 | `SANDBOX_CPU` | `4` | CPU cores |
 | `SANDBOX_MEMORY` | `8192` | Memory in MiB |

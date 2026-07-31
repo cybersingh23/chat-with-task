@@ -2,18 +2,23 @@ import { config } from './config.js';
 
 // One non-streaming chat-completion call against the LiteLLM proxy
 // (OpenAI-compatible; same proxy + key as trajectory-viewer-v2).
-export async function chatCompletion({ messages, tools, maxTokens = 4096, onUsage }) {
+// max_tokens has to cover thinking AND the reply — they share one budget. At
+// effort "high" the old 4096 ceiling was consumed entirely by thinking on a
+// docgen-sized prompt: finish_reason "length" with an EMPTY response body. 16000
+// leaves room (a full review doc measured ~7k) and stays under the proxy's
+// non-streaming timeout.
+export async function chatCompletion({ messages, tools, maxTokens = 16000, onUsage }) {
   if (!config.litellm.apiKey) throw new Error('LITELLM_API_KEY is not set — copy .env.example to .env');
   const body = {
     model: config.litellm.model,
     messages,
     max_tokens: maxTokens,
-    // Opus 4.8 controls thinking via adaptive mode + effort ("medium" here).
-    // It rejects `temperature` (and LiteLLM's reasoning_effort→thinking.enabled
-    // mapping) whenever thinking is on, so we pass the native params and send no
-    // temperature.
+    // Opus 5 controls thinking via adaptive mode + effort. It rejects
+    // `temperature` (and LiteLLM's reasoning_effort→thinking.enabled mapping)
+    // whenever thinking is on, so we pass the native Anthropic params straight
+    // through the OpenAI-compatible proxy and send no temperature.
     thinking: { type: 'adaptive' },
-    output_config: { effort: 'medium' },
+    output_config: { effort: 'high' },
   };
   if (tools?.length) body.tools = tools;
 
