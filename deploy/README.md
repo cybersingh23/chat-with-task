@@ -31,11 +31,14 @@ The script takes ~3 minutes. When it finishes, it prints the app URL and termina
 
 ## Environment variables
 
-All optional — defaults are baked in:
+`LITELLM_*` are read from the repo's gitignored `.env` — the same file the app reads
+locally — so a deploy carries whatever key currently works. A real environment
+variable overrides it. The key is deliberately **not** committed; rotating it in
+`.env` is all the next deploy needs.
 
 | Variable | Default | Description |
 |---|---|---|
-| `LITELLM_API_KEY` | `sk-18Or...` | LiteLLM proxy API key |
+| `LITELLM_API_KEY` | from `../.env` — **required** | LiteLLM proxy API key. Deploy aborts if absent |
 | `LITELLM_BASE_URL` | `https://litellm-proxy.ml.scale.com/v1` | LiteLLM proxy URL |
 | `LITELLM_MODEL` | `claude-opus-4-8` | Model for the copilot |
 | `SANDBOX_TIMEOUT` | `1209600` (14 days) | Sandbox TTL in seconds |

@@ -10,8 +10,13 @@
  *   - Cloudflare WARP connected (resolves sandbox.ml-serving-internal.scale.com)
  *   - Node.js 18+ on your local machine
  *
- * Environment variables (all optional — sensible defaults baked in):
- *   LITELLM_API_KEY     LiteLLM proxy key  (default: sk-18Or4fkafO15kPPlHVB72Q)
+ * The LiteLLM settings come from the repo's own gitignored .env (the same file the
+ * app reads locally), or from the environment, which wins. Rotating the key in .env
+ * is therefore all it takes for the next deploy to carry the new one — and the key
+ * never has to live in the repo.
+ *
+ * Environment variables:
+ *   LITELLM_API_KEY     LiteLLM proxy key  (REQUIRED — from ../.env or the environment)
  *   LITELLM_BASE_URL    LiteLLM proxy URL  (default: https://litellm-proxy.ml.scale.com/v1)
  *   LITELLM_MODEL       Model to use       (default: claude-opus-4-8)
  *   SANDBOX_TIMEOUT     TTL in seconds     (default: 1209600 = 14 days)
@@ -49,12 +54,35 @@ const CPU = Number(process.env.SANDBOX_CPU) || 4;
 const MEMORY = Number(process.env.SANDBOX_MEMORY) || 8192;
 const PROJECT_ID = process.env.SANDBOX_PROJECT_ID || '682bdbff5ed4cd9b2516cc6a';
 
+// Read the repo's gitignored .env, the same file the app itself reads, so a deploy
+// carries whatever key is working locally. A real environment variable still wins.
+// Nothing here is committed: the previous hardcoded default was a live credential in
+// the repo, and it had already been revoked, so every deploy shipped a dead key.
+function readDotEnv() {
+  const out = {};
+  const p = resolve(REPO_ROOT, '.env');
+  if (!existsSync(p)) return out;
+  for (const line of readFileSync(p, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+    if (m) out[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+  }
+  return out;
+}
+const dotEnv = readDotEnv();
+const fromEnv = (k, fallback) => process.env[k] || dotEnv[k] || fallback;
+
 const APP_ENV = {
-  LITELLM_API_KEY:  process.env.LITELLM_API_KEY  || 'sk-18Or4fkafO15kPPlHVB72Q',
-  LITELLM_BASE_URL: process.env.LITELLM_BASE_URL || 'https://litellm-proxy.ml.scale.com/v1',
-  LITELLM_MODEL:    process.env.LITELLM_MODEL    || 'claude-opus-4-8',
+  LITELLM_API_KEY:  fromEnv('LITELLM_API_KEY'),
+  LITELLM_BASE_URL: fromEnv('LITELLM_BASE_URL', 'https://litellm-proxy.ml.scale.com/v1'),
+  LITELLM_MODEL:    fromEnv('LITELLM_MODEL', 'claude-opus-4-8'),
   PORT: String(APP_PORT),
 };
+
+if (!APP_ENV.LITELLM_API_KEY) {
+  console.error('✗ No LITELLM_API_KEY found in ../.env or the environment.');
+  console.error('  The copilot will not work without it. Set it in the repo\'s .env (gitignored) and re-run.');
+  process.exit(1);
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
