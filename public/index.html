@@ -142,6 +142,30 @@
           <button id="bv-apply">Move</button>
           <span class="mono" id="bv-status"></span>
         </div>
+        <details class="idmove" id="idmove" title="Paste task IDs and move them all into one lane">
+          <summary>Move by ID</summary>
+          <div class="idmove-body">
+            <textarea id="idmove-input" spellcheck="false"
+              placeholder="Paste 24-hex task IDs — comma, space or newline separated"></textarea>
+            <div class="idmove-summary" id="idmove-summary">Paste some IDs to begin.</div>
+            <div class="idmove-row">
+              <span class="bv-arrow">→</span>
+              <select id="idmove-to" aria-label="destination lane">
+                <option value="RESOLVED:NO_ISSUES">Resolved · No issues</option>
+                <option value="RESOLVED:FIXES_MADE">Resolved · Fixes made</option>
+                <option value="RESOLVED:GRAMMAR_ONLY">Resolved · Grammar-only</option>
+                <option value="RESOLVED:SBQ">Resolved · SBQ</option>
+                <option value="SECOND_OPINION">Needs 2nd opinion</option>
+                <option value="GRAMMAR">Grammar Fixes</option>
+                <option value="REVIEW">In review</option>
+                <option value="OPEN">Open</option>
+                <option value="REOPEN">Reopen · clear verdict</option>
+              </select>
+              <button id="idmove-apply">Move</button>
+              <span class="mono" id="idmove-status"></span>
+            </div>
+          </div>
+        </details>
         <details class="acts" id="acts">
           <summary>Recent actions</summary>
           <div class="acts-body" id="acts-body"></div>

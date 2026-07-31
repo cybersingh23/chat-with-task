@@ -409,6 +409,42 @@ select option { background: #14161c; }
 }
 .toast-action:hover { text-decoration: underline; }
 
+/* move-by-ID: paste a list, see exactly what resolves, move them in one action */
+.idmove { position: relative; font-size: 12px; }
+.idmove > summary {
+  cursor: pointer; color: var(--text-2); list-style: none; padding: 5px 11px;
+  border: 1px solid var(--edge); border-radius: 999px; background: var(--surface); white-space: nowrap;
+}
+.idmove > summary::-webkit-details-marker { display: none; }
+.idmove > summary::before { content: '⌗ '; color: var(--text-3); }
+.idmove > summary:hover, .idmove[open] > summary { border-color: var(--edge-strong); color: var(--text); }
+.idmove-body {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 250; width: 460px; padding: 12px;
+  background: rgba(20, 22, 28, 0.97); backdrop-filter: blur(14px);
+  border: 1px solid var(--edge-strong); border-radius: var(--r-md);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+}
+#idmove-input {
+  width: 100%; height: 96px; resize: vertical; box-sizing: border-box;
+  font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--text);
+  background: var(--surface); border: 1px solid var(--edge); border-radius: var(--r-sm); padding: 8px 10px;
+}
+#idmove-input:focus { border-color: var(--blue); outline: none; }
+.idmove-summary { font-size: 11.5px; color: var(--text-2); margin: 8px 0; line-height: 1.5; }
+.idmove-summary.has-bad { color: var(--text); }
+.idmove-bad { font-family: var(--mono); font-size: 10.5px; color: var(--orange); margin-top: 4px; word-break: break-all; }
+.idmove-row { display: flex; align-items: center; gap: 8px; }
+.idmove-row select {
+  flex: 1; font-size: 12px; color: var(--text); cursor: pointer;
+  padding: 5px 11px; border: 1px solid var(--edge); border-radius: 8px; background-color: var(--surface-2);
+}
+#idmove-apply {
+  font-size: 12px; font-weight: 600; cursor: pointer; padding: 6px 16px;
+  border-radius: 999px; border: none; background: var(--blue); color: var(--bg);
+}
+#idmove-apply:disabled { background: var(--surface-2); color: var(--text-3); cursor: not-allowed; }
+#idmove-status { color: var(--text-3); font-size: 11px; }
+
 /* recent actions: the undo history for every lane change */
 .acts { position: relative; font-size: 12px; }
 .acts > summary {

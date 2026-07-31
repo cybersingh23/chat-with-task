@@ -57,6 +57,13 @@ message in the built-in trajectory viewer.
    nothing else, so each task falls back to wherever the automatic rules put it — a grammar-only
    task returns to Grammar Fixes rather than being forced into Open.
 
+   **Move by ID** takes a pasted list (comma, space or newline separated) and moves them all
+   into one lane. It classifies the paste against the board before you commit — how many will
+   move, how many are already in the destination, how many aren't on the board, how many aren't
+   task IDs — and names the bad entries, so nothing is silently dropped from a 20-line paste.
+   A task whose state wouldn't change is skipped, which includes re-applying the verdict it
+   already has; changing an SBQ task to No issues *is* a change and does move.
+
 6. **Export** — each bucket column has a **⬇ ids** button (one task_id per line), and
    **Export all (CSV)** gives
    `task_id,bucket,lane,verdict,claimed_by,tags,has_review,has_remediation,grammar_only,delivered`.

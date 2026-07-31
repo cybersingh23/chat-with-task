@@ -74,15 +74,20 @@ export function snapshotForLane(lane, { meta, verdict, username }) {
 }
 
 // Move one task to a lane. Returns the before/after pair the action journal needs,
-// or null when the task is already there (nothing recorded, nothing written).
+// or null when the move would change nothing (nothing written, nothing logged).
+//
+// The no-op test compares the resulting STATE, not just the lane. Comparing lanes
+// missed same-lane verdict changes: a task already Resolved·SBQ sent to
+// Resolved·No issues has an unchanged lane, so it was skipped and the verdict
+// silently stayed SBQ.
 export function moveTaskToLane(bucket, id, lane, { verdict, username }) {
   const meta = taskMeta(bucket, id);
-  // Nothing to do: already in the target lane, or asked to reopen something that
-  // has no verdict. Returning null keeps it out of the action log.
-  const noop = lane === 'REOPEN' ? !meta.verdict : laneOf(meta) === lane;
-  if (noop) return null;
   const before = laneSnapshot(bucket, id);
   const after = snapshotForLane(lane, { meta, verdict, username });
+  const same = before.verdict === after.verdict
+    && before.claimed_by === after.claimed_by
+    && before.grammar_lane === after.grammar_lane;
+  if (same) return null;
   applySnapshot(bucket, id, after, username);
   return { bucket, id, before, after };
 }

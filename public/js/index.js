@@ -341,6 +341,7 @@ function render() {
   document.getElementById('search-count').textContent =
     q || sevFilter !== 'ALL' ? `${tickets.length} shown` : '';
   refreshBulkCount();
+  refreshIdmoveSummary();
 }
 
 // Show/hide the delivered toggle based on how many tasks are soft-archived.
@@ -452,8 +453,12 @@ function bulkMatches() {
   const sev = bvSev?.value || 'ALL';
   const from = bvFrom?.value || 'ANY';
   const { lane: to } = bulkTarget();
-  // Reopen isn't a lane — it clears the verdict, so the no-op test is "has no verdict".
-  const noop = (t) => (to === 'REOPEN' ? !t.verdict : laneOf(t) === to);
+  // Reopen isn't a lane — it clears the verdict, so the no-op test is "has no
+  // verdict". Inside Resolved the verdict decides, matching the server.
+  const { verdict: toVerdict } = bulkTarget();
+  const noop = (t) => (to === 'REOPEN' ? !t.verdict
+    : to === 'RESOLVED' ? t.verdict === toVerdict
+    : laneOf(t) === to);
   return allTickets().filter((t) =>
     !t.tour && !t.delivered &&
     (sev === 'ALL' || t.bucket === sev) &&
@@ -490,6 +495,98 @@ document.getElementById('bv-apply')?.addEventListener('click', async () => {
     status.textContent = `moved ${r.moved}`;
     await load();
     if (r.action) toast(`Moved ${r.moved} task${r.moved === 1 ? '' : 's'}.`, { label: 'Undo', run: () => undo(r.action.id) });
+    setTimeout(() => { status.textContent = ''; }, 2600);
+  } catch (e) { status.textContent = e.message; }
+});
+
+// ---------- move a pasted list of task IDs into one lane ----------
+const idmoveInput = document.getElementById('idmove-input');
+const idmoveTo = document.getElementById('idmove-to');
+
+// Comma / space / newline separated, order-preserving, de-duplicated.
+function parsePastedIds(text) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of String(text || '').split(/[\s,]+/)) {
+    const id = raw.trim().toLowerCase();
+    if (id && !seen.has(id)) { seen.add(id); out.push(id); }
+  }
+  return out;
+}
+
+// Classify the paste against the board so the outcome is visible BEFORE moving —
+// pasting 20 ids and silently acting on 17 of them is the thing to avoid.
+function classifyPastedIds() {
+  const ids = parsePastedIds(idmoveInput?.value);
+  const [lane, verdict = null] = (idmoveTo?.value || '').split(':');
+  const known = new Map(allTickets().filter((t) => !t.tour).map((t) => [t.id, t]));
+  const malformed = ids.filter((id) => !/^[a-f0-9]{24}$/.test(id));
+  const valid = ids.filter((id) => /^[a-f0-9]{24}$/.test(id));
+  const missing = valid.filter((id) => !known.has(id));
+  const found = valid.filter((id) => known.has(id)).map((id) => known.get(id));
+  // Mirror the server: inside Resolved the verdict decides, so re-resolving an
+  // SBQ task as No issues is a real change, not "already there".
+  const noop = (t) => (lane === 'REOPEN' ? !t.verdict
+    : lane === 'RESOLVED' ? t.verdict === verdict
+    : laneOf(t) === lane);
+  return { ids, malformed, missing, found, willMove: found.filter((t) => !noop(t)), lane, verdict };
+}
+
+function refreshIdmoveSummary() {
+  // NB: not named `el` — that would shadow the imported el() DOM helper used below.
+  const box = document.getElementById('idmove-summary');
+  const apply = document.getElementById('idmove-apply');
+  if (!box) return;
+  const c = classifyPastedIds();
+  if (!c.ids.length) {
+    box.textContent = 'Paste some IDs to begin.';
+    box.className = 'idmove-summary';
+    if (apply) apply.disabled = true;
+    return;
+  }
+  const bits = [`${c.willMove.length} will move`];
+  const already = c.found.length - c.willMove.length;
+  if (already) bits.push(`${already} already there`);
+  if (c.missing.length) bits.push(`${c.missing.length} not on the board`);
+  if (c.malformed.length) bits.push(`${c.malformed.length} not a task ID`);
+  box.replaceChildren(
+    el('span', {}, `${c.ids.length} pasted · ${bits.join(' · ')}`),
+    c.missing.length || c.malformed.length
+      ? el('div', { class: 'idmove-bad' },
+        [...c.malformed, ...c.missing].slice(0, 6).join(', ')
+        + (c.malformed.length + c.missing.length > 6 ? ` … +${c.malformed.length + c.missing.length - 6}` : ''))
+      : null,
+  );
+  box.className = `idmove-summary${c.missing.length || c.malformed.length ? ' has-bad' : ''}`;
+  if (apply) apply.disabled = c.willMove.length === 0;
+}
+idmoveInput?.addEventListener('input', refreshIdmoveSummary);
+idmoveTo?.addEventListener('change', refreshIdmoveSummary);
+document.getElementById('idmove')?.addEventListener('toggle', refreshIdmoveSummary);
+
+document.getElementById('idmove-apply')?.addEventListener('click', async () => {
+  const status = document.getElementById('idmove-status');
+  const c = classifyPastedIds();
+  if (!c.willMove.length) return;
+  const toLabel = idmoveTo.selectedOptions[0].textContent.trim();
+  const skipped = c.missing.length + c.malformed.length;
+  if (!confirm(
+    `Move ${c.willMove.length} task${c.willMove.length === 1 ? '' : 's'} → “${toLabel}”?`
+    + (skipped ? `\n\n${skipped} pasted ID${skipped === 1 ? '' : 's'} will be ignored (not on the board).` : '')
+    + '\n\nUndo from Recent actions.'
+  )) return;
+  status.textContent = 'moving…';
+  try {
+    // Send only the ids that resolve — the server re-checks, but this keeps the
+    // journal entry's count honest rather than padded with ids that never moved.
+    const r = await api('/bulk/lane', {
+      method: 'POST',
+      body: { toLane: c.lane, verdict: c.verdict, ids: c.found.map((t) => t.id) },
+    });
+    status.textContent = `moved ${r.moved}`;
+    await load();
+    refreshIdmoveSummary();
+    if (r.action) toast(`Moved ${r.moved} task${r.moved === 1 ? '' : 's'} by ID.`, { label: 'Undo', run: () => undo(r.action.id) });
     setTimeout(() => { status.textContent = ''; }, 2600);
   } catch (e) { status.textContent = e.message; }
 });
