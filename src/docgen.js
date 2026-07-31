@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runAgentLoop } from './llm.js';
 import { TOOL_DEFS, makeExecutor, makeExecutorForDir } from './tools.js';
-import { readTaskDef, readTaskDefIn, taskDir, writeTaskFile, writeFileIn } from './workspace.js';
+import { readTaskDef, readTaskDefIn, taskDir, writeTaskFile, writeFileIn, grammarInfo } from './workspace.js';
 import { QUALITY_CANON } from './spec.js';
 
 // Shared context block: rank.json digest + audit seed, prepended to every
@@ -37,6 +37,26 @@ export function taskContextForDir(dir, { id = path.basename(dir), bucket = '?' }
   } catch {
     parts.push('(rank.json missing or unparseable — flag this immediately, it is a packaging defect)');
   }
+  // The Spelling/Grammar tag the board shows on the card, derived from review.md's
+  // autoqc fence. grammarOnly is what auto-routes a task into the Grammar Fixes
+  // lane, so the distinction between "flagged" and "the only fail" is the whole
+  // point — a task with other fails alongside R23/R24 does NOT belong there.
+  const g = grammarInfo(dir);
+  if (g.dims === null) {
+    parts.push('Writing/QC tag: un-audited — review.md has no autoqc fence, so no dimensions are known. '
+      + (g.grammar ? 'A loose text match suggests spelling/grammar is mentioned, but that is not authoritative.' : ''));
+  } else if (g.grammarOnly) {
+    parts.push(`Writing/QC tag: GRAMMAR-ONLY — spelling/grammar (${g.dims.join(', ')}) is the ONLY tripped dimension, `
+      + 'so this task auto-routes to the Grammar Fixes lane and resolves as GRAMMAR_ONLY.');
+  } else if (g.grammar) {
+    parts.push(`Writing/QC tag: spelling/grammar flagged, but NOT the only fail — also ${g.otherDims.join(', ')}. `
+      + 'It does not belong in Grammar Fixes on its own, and resolves as FIXES_MADE rather than GRAMMAR_ONLY.');
+  } else if (g.dims.length) {
+    parts.push(`Writing/QC tag: no spelling/grammar fail. Tripped dimensions: ${g.dims.join(', ')}.`);
+  } else {
+    parts.push('Writing/QC tag: audited clean — the autoqc fence lists NONE.');
+  }
+
   const def = readTaskDefIn(dir);
   if (def.missing) {
     parts.push('Task definition: MISSING (informational only per customer policy 2026-06-09 — never a finding).');

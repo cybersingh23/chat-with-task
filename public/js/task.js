@@ -1,4 +1,4 @@
-import { api, apiSSE, renderMarkdown, el, fmtTime, cap, startTour } from './common.js';
+import { api, apiSSE, renderMarkdown, el, mount, fmtTime, cap, startTour } from './common.js';
 
 const pathRelative = location.pathname.slice((window.__base__ || '').length);
 const [, , bucket, taskId] = pathRelative.split('/');
@@ -165,6 +165,14 @@ async function buildSidebar() {
   navDocs.append(
     el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showChecklist(); } },
       el('span', {}, 'Checklist'),
+    )
+  );
+  // Upstream pipeline context. Shown unconditionally — whether Redash has a row
+  // for this task is only known after querying, and the view says so itself.
+  navDocs.append(
+    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showPipeline(); } },
+      el('span', {}, 'Pipeline'),
+      el('span', { class: 'missing' }, 'live'),
     )
   );
   if (meta.hasRankingProof) {
@@ -827,6 +835,108 @@ function buildRankingProof(files) {
     container.append(section);
   }
   return container;
+}
+
+// ---------- pipeline (live upstream context from Redash) ----------
+// The task folder is a snapshot of one attempt; this is where the task actually
+// sits in the ACC pipeline, who worked it at each layer, and what it has cost.
+
+const LVL_LABEL = {
+  '-1': 'L-1 · Tasking', 0: 'L0 · Review', 1: 'L1 · Review', 4: 'L4 · Review',
+  8: 'L8 · Review', 10: 'L10 · QM', 12: 'L12 · Final',
+};
+const lvlLabel = (l) => LVL_LABEL[String(l)] ?? `L${l}`;
+const fmtDate = (s) => (s ? new Date(s).toISOString().slice(0, 16).replace('T', ' ') : '—');
+
+async function showPipeline() {
+  hideTrajToolbar();
+  viewerTitle.textContent = 'Pipeline';
+  document.querySelector('.viewer-head .regen')?.remove();
+  viewReopeners.set('pipeline', { label: 'Pipeline', reopen: () => { setActive(findDocNav('Pipeline')); showPipeline(); } });
+
+  const host = el('div', { class: 'pipeline' }, el('div', { class: 'pl-loading' }, 'Querying Redash…'));
+  mountView('pipeline', () => host, { refresh: true });
+  try {
+    const data = await api(`/redash/task/${taskId}`);
+    host.replaceChildren(...buildPipeline(data));
+  } catch (e) {
+    host.replaceChildren(el('div', { class: 'callout info' }, `Could not load pipeline data: ${e.message}`));
+  }
+}
+
+function buildPipeline(d) {
+  const out = [el('h1', {}, 'Pipeline')];
+
+  if (!d.history.length) {
+    out.push(el('div', { class: 'callout info' },
+      'This task has no pipeline nodes in Redash. That is normal for an older delivery whose nodes have been archived.'));
+    return out;
+  }
+
+  // Where it is now + what it cost.
+  const cur = d.current;
+  out.push(el('div', { class: 'pl-cards' },
+    plCard(cur ? lvlLabel(cur.reviewLevel) : '—', 'Current level', cur ? `status: ${cur.status}` : ''),
+    plCard(`${d.totals.hours} h`, 'Billable time', `${d.totals.activeHours} h active · ${d.totals.attempts} attempts`),
+    plCard(String(d.workers.length), 'People involved', d.workers.some((w) => w.suspectTeam) ? 'flagged team present' : ''),
+    plCard(String(d.history.length), 'Pipeline nodes', cur ? `updated ${fmtDate(cur.endedAt)}` : ''),
+  ));
+
+  // A flagged worker team is audit-relevant, so it is called out rather than
+  // left for the reviewer to notice in the table.
+  const flagged = d.workers.filter((w) => w.suspectTeam);
+  if (flagged.length) {
+    out.push(el('div', { class: 'pl-flag' },
+      el('b', {}, flagged.length === 1 ? 'Worker on a flagged team: ' : 'Workers on flagged teams: '),
+      flagged.map((w) => `${w.name} (${w.team}, at ${lvlLabel(w.reviewLevel)})`).join('; '),
+      el('div', { class: 'pl-flag-sub' },
+        'Team path only — it is context for the audit, not a finding on its own.'),
+    ));
+  }
+
+  // Time per level.
+  if (d.time.length) {
+    out.push(el('h2', {}, 'Time per level'));
+    const maxH = Math.max(...d.time.map((t) => t.hours), 0.01);
+    out.push(el('div', { class: 'pl-time' },
+      ...d.time.map((t) => el('div', { class: 'pl-time-row' },
+        el('div', { class: 'pl-time-name' }, lvlLabel(t.reviewLevel)),
+        el('div', { class: 'pl-time-bar' },
+          el('div', { class: 'pl-time-fill', style: `width:${(t.hours / maxH) * 100}%` }),
+          el('div', { class: 'pl-time-fill active', style: `width:${(t.activeHours / maxH) * 100}%` })),
+        el('div', { class: 'pl-time-val' }, `${t.hours} h`,
+          el('span', { class: 'pl-dim' }, ` · ${t.activeHours} active`)),
+        el('div', { class: 'pl-dim' }, `${t.attempts} attempt${t.attempts === 1 ? '' : 's'}`),
+      ))));
+  }
+
+  // Full node history, newest last (reading order matches the task's life).
+  out.push(el('h2', {}, 'History'));
+  const rows = d.history.map((n) => el('tr', { class: n.isCurrent ? 'pl-current' : '' },
+    el('td', {}, el('span', { class: 'pl-lvl' }, lvlLabel(n.reviewLevel))),
+    el('td', {}, el('span', { class: `pl-status s-${n.status}` }, n.status || '—')),
+    el('td', {}, n.workerName
+      ? el('span', { class: n.suspectTeam ? 'pl-worker flagged' : 'pl-worker', title: n.workerTeam || '' }, n.workerName)
+      : el('span', { class: 'pl-dim' }, 'unassigned')),
+    el('td', { class: 'pl-dim' }, n.workerTeam || ''),
+    el('td', { class: 'mono pl-dim' }, fmtDate(n.startedAt)),
+    el('td', { class: 'mono pl-dim' }, fmtDate(n.endedAt)),
+  ));
+  out.push(el('div', { class: 'admin-table-wrap' },
+    el('table', { class: 'admin-table pl-table' },
+      el('tr', {}, ...['Level', 'Status', 'Worker', 'Team', 'Entered', 'Left'].map((h) => el('th', {}, h))),
+      ...rows)));
+
+  out.push(el('div', { class: 'pl-foot' },
+    `Live from Redash${d.cached ? ' (cached)' : ''} · ${fmtDate(d.retrievedAt)}`));
+  return out;
+}
+
+function plCard(value, label, sub) {
+  return el('div', { class: 'pl-card' },
+    el('div', { class: 'pl-card-val' }, value),
+    el('div', { class: 'pl-card-label' }, label),
+    sub ? el('div', { class: 'pl-card-sub' }, sub) : null);
 }
 
 // ---------- checklist (adjudicate review findings → decision) ----------
@@ -1655,6 +1765,119 @@ async function loadChat() {
   refreshChatIntro();
 }
 
+// ---------- copilot board actions ----------
+// A single-task move is already applied when we hear about it, so it renders as a
+// result chip with Undo. A bulk move is only a PROPOSAL until the reviewer clicks
+// Apply — so it must never be phrased as though it happened.
+
+function undoButton(action) {
+  if (!action?.id) return null;
+  return el('button', {
+    class: 'act-undo',
+    onclick: async (ev) => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'undoing…';
+      try {
+        const r = await api(`/actions/${action.id}/undo`, { method: 'POST' });
+        btn.replaceWith(el('span', { class: 'act-undone' },
+          `undone${r.skipped?.length ? ` · ${r.skipped.length} skipped (changed since)` : ''}`));
+        await refreshState();
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Undo';
+        btn.title = e.message;
+        alert(e.message);
+      }
+    },
+  }, 'Undo');
+}
+
+function appendActionChip(summary, action) {
+  const chip = el('div', { class: 'act-chip' },
+    el('span', { class: 'act-ico' }, '✓'),
+    el('span', { class: 'act-text' }, summary),
+    undoButton(action));
+  chatLog.append(chip);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function appendActionProposal({ token, plan }) {
+  const card = el('div', { class: 'act-card' });
+  const actions = el('div', { class: 'act-card-actions' });
+
+  const apply = el('button', {
+    class: 'primary',
+    onclick: async () => {
+      apply.disabled = true;
+      cancel.disabled = true;
+      apply.textContent = 'applying…';
+      try {
+        const r = await api('/copilot/action/confirm', { method: 'POST', body: { token } });
+        card.classList.add('done');
+        mount(card,
+          el('div', { class: 'act-chip inline' },
+            el('span', { class: 'act-ico' }, '✓'),
+            el('span', { class: 'act-text' }, `Moved ${r.moved} task${r.moved === 1 ? '' : 's'} → ${plan.target}`),
+            undoButton(r.action)),
+          // The plan is re-resolved at confirm time, so the board may have moved
+          // between the proposal and the click. Say so rather than hiding it.
+          r.drifted
+            ? el('div', { class: 'act-card-note warn' }, 'The board changed after the proposal — the count applied differs from what was shown.')
+            : null,
+        );
+        await refreshState();
+      } catch (e) {
+        apply.disabled = false;
+        cancel.disabled = false;
+        apply.textContent = `Apply ${plan.counts.change} change${plan.counts.change === 1 ? '' : 's'}`;
+        card.append(el('div', { class: 'act-card-note warn' }, e.message));
+      }
+    },
+  }, `Apply ${plan.counts.change} change${plan.counts.change === 1 ? '' : 's'}`);
+
+  const cancel = el('button', {
+    class: 'quiet',
+    onclick: async () => {
+      await api('/copilot/action/cancel', { method: 'POST', body: { token } }).catch(() => {});
+      card.classList.add('cancelled');
+      card.replaceChildren(el('div', { class: 'act-card-note' }, 'Cancelled — nothing was changed.'));
+    },
+  }, 'Cancel');
+
+  actions.append(apply, cancel);
+  const notes = [];
+  if (plan.counts.unchanged) notes.push(`${plan.counts.unchanged} already there`);
+  if (plan.counts.missing) notes.push(`${plan.counts.missing} not on the board`);
+
+  mount(card,
+    el('div', { class: 'act-card-head' }, 'Confirm bulk move'),
+    el('div', { class: 'act-card-sum' }, plan.summary),
+    // FULL task ids, not 8-char prefixes: prefixes collide in this data (three
+    // different tasks rendered as "6a0b7b88…" in one proposal), and this is the
+    // card the reviewer approves a write from — it has to be unambiguous.
+    el('div', { class: 'act-sample' },
+      ...plan.sample.map((t) => el('span', { class: 'act-sample-id mono', title: `${t.id} · ${t.severity}` },
+        `${t.id} · ${t.from}`)),
+      plan.counts.change > plan.sample.length
+        ? el('span', { class: 'act-sample-more' }, `+${plan.counts.change - plan.sample.length} more`)
+        : null),
+    notes.length ? el('div', { class: 'act-card-note' }, notes.join(' · ')) : null,
+    actions,
+  );
+  chatLog.append(card);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function handleActionEvent(m) {
+  if (m.kind === 'applied') {
+    appendActionChip(m.summary, m.action);
+    if (m.isCurrentTask) refreshState();
+  } else if (m.kind === 'proposal') {
+    appendActionProposal(m);
+  }
+}
+
 async function send() {
   const message = chatText.value.trim();
   if (!message) return;
@@ -1690,6 +1913,7 @@ async function sendMessage(message) {
       if (m.type === 'tool' && m.name === 'present_guide') chatStatus.textContent = 'building walkthrough…';
       if (m.type === 'assistant') { appendChat('assistant', m.content); chatStatus.textContent = ''; }
       if (m.type === 'guide') { chatStatus.textContent = ''; renderGuideBubble(m.guide, message); if (m.guide.dynamic) playGuide(m.guide, message); }
+      if (m.type === 'action') { chatStatus.textContent = ''; handleActionEvent(m); }
       if (m.type === 'truncated') { chatStatus.textContent = ''; showContinueBtn(); }
       if (m.type === 'error') { chatStatus.textContent = m.message; chatStatus.classList.add('error-line'); }
       if (m.type === 'done') chatStatus.textContent = '';

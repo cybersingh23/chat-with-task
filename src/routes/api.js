@@ -24,6 +24,8 @@ import { startPull, pullStatus, currentDownload } from '../l10.js';
 import { markDelivered, markUndelivered, deliverStatus, currentBackup } from '../deliver.js';
 import { computeL12 } from '../l12.js';
 import { createDummyTask, removeTourTasks, logTour } from '../tour.js';
+import { redashApi } from './redash.js';
+import { ACTION_TOOL_DEFS, makeActionExecutor, confirmPlan, cancelPlan } from '../copilot_actions.js';
 
 export const api = express.Router();
 api.use(express.json({ limit: '2mb' }));
@@ -56,6 +58,9 @@ api.post('/tour/log', wrap(async (req, res) => {
   logTour({ user: req.user.username, at: new Date().toISOString(), step: req.body?.step, action: req.body?.action, success: !!req.body?.success });
   res.json({ ok: true });
 }));
+
+// Live Redash: pipeline panels, per-task upstream context, query browser.
+api.use('/redash', redashApi);
 
 api.get('/spec/rubric', (req, res) => res.json({ dimensions: getRubric() }));
 
@@ -211,6 +216,16 @@ api.get('/actions', wrap(async (req, res) =>
 
 api.post('/actions/:id/undo', wrap(async (req, res) =>
   res.json(undoAction(req.params.id, req.user.username))
+));
+
+// Confirm / cancel a bulk move Acey proposed. The plan is re-resolved against the
+// CURRENT board at confirm time, so a proposal can't apply a stale selection.
+api.post('/copilot/action/confirm', wrap(async (req, res) =>
+  res.json(confirmPlan(String(req.body?.token || ''), req.user.username))
+));
+
+api.post('/copilot/action/cancel', wrap(async (req, res) =>
+  res.json(cancelPlan(String(req.body?.token || ''), req.user.username))
 ));
 
 // Superseded by /bulk/lane (which is journaled + undoable). Kept for any scripted
@@ -459,6 +474,32 @@ Answer discipline (strict):
 - When judging severity, give the bucket (HARD / SOFT / INFO) and the one rule that decides it.
   When the reviewer asks "what should I look for", give a checklist of concrete searches/places
   ordered by expected yield, not an essay.
+
+Taking action on the board (move_task, propose_bulk_move, list_board):
+- You act AS this reviewer, with their permissions. Every action is journaled and undoable.
+- ONLY act when they actually ask you to. Analysis never authorises a move: if your read is
+  that a task is a hard fail, SAY SO — do not set the verdict. "Should this be SBQ?" is a
+  question, not an instruction; answer it and offer to make the move.
+- If the instruction is ambiguous about destination or verdict, ask ONE short question rather
+  than guessing. Moving to Resolved always needs an explicit verdict — never invent one.
+- move_task applies immediately to a single task, and is capped at ONE per turn. The moment the
+  operator names two or more tasks — however they phrase it — use propose_bulk_move with
+  task_ids instead. Do not issue repeated move_task calls to work around the cap.
+  After a move, confirm what changed in one short sentence; don't re-describe or re-justify.
+- propose_bulk_move applies NOTHING — it shows the reviewer a card they must click. Never say
+  or imply a bulk move has happened. Say what the plan covers in one sentence and stop.
+- Call list_board before any bulk proposal so the selection reflects the real board, and
+  before answering questions about lanes, counts or what is left to review.
+- Earlier turns are NOT evidence of current state. The board is shared and mutable — moves get
+  undone, and other reviewers act on it between your turns. Never answer "that's already done"
+  from your own history: check list_board first, then answer.
+- The Spelling/Grammar tag is not a yes/no. "only" (R23/R24 and nothing else) is what routes a
+  task to Grammar Fixes and resolves it GRAMMAR_ONLY; "flagged" means writing errors PLUS other
+  fails, which resolves FIXES_MADE and does not belong in that lane. Never collapse the two, and
+  never resolve a task GRAMMAR_ONLY whose otherDims are non-empty. "unaudited" means review.md
+  has no autoqc fence — say so rather than reporting the task as clean.
+- Never chain a bulk proposal into further action in the same turn, and never propose a move
+  the reviewer did not ask for.
 `.trim();
 
 // --- dynamic copilot: a conversational, clickable guided walkthrough ---
@@ -621,7 +662,17 @@ api.post('/task/:bucket/:id/chat', wrap(async (req, res) => {
   const onUsage = (u) => { acc.prompt_tokens += u.prompt_tokens || 0; acc.completion_tokens += u.completion_tokens || 0; };
   // In dynamic mode the model's final answer is a present_guide tool call: validate its anchors
   // against real task data and push the built guide straight to the client.
-  const baseExec = makeExecutor(bucket, id);
+  const readExec = makeExecutor(bucket, id);
+  // Board-writing tools are composed in HERE and nowhere else, so the offline doc
+  // generator (which shares TOOL_DEFS) can never mutate task state. Acey acts as
+  // the signed-in operator and inherits exactly their permissions.
+  const actionExec = makeActionExecutor({
+    bucket, id, username: req.user.username, onAction: (e) => sendSSE(res, e),
+  });
+  const ACTION_NAMES = new Set(ACTION_TOOL_DEFS.map((t) => t.function.name));
+  const baseExec = async (name, args) =>
+    (ACTION_NAMES.has(name) ? actionExec : readExec)(name, args);
+
   const executor = !dynamic ? baseExec : async (name, args) => {
     if (name !== 'present_guide') return baseExec(name, args);
     const guide = validateGuide(bucket, id, args);
@@ -634,7 +685,9 @@ api.post('/task/:bucket/:id/chat', wrap(async (req, res) => {
   try {
     const { messages } = await runAgentLoop({
       messages: [{ role: 'system', content: system }, ...history, userMsg],
-      tools: dynamic ? [...TOOL_DEFS, PRESENT_GUIDE_TOOL] : TOOL_DEFS,
+      tools: dynamic
+        ? [...TOOL_DEFS, ...ACTION_TOOL_DEFS, PRESENT_GUIDE_TOOL]
+        : [...TOOL_DEFS, ...ACTION_TOOL_DEFS],
       executor,
       onEvent: (e) => sendSSE(res, e),
       maxSteps: 50,

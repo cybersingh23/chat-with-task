@@ -76,6 +76,75 @@ message in the built-in trajectory viewer.
    `lane` column comes from the shared `laneOf()` in `src/lanes.js` rather than a local copy of
    the rules — a copy is how it previously drifted from the board.
 
+## Acey can act on the board
+
+The copilot can move tasks on the reviewer's behalf when asked — `move_task`,
+`propose_bulk_move` and the read-only `list_board` (which is also how it answers
+"what's left in Open?"). It acts **as the signed-in reviewer** and inherits exactly
+their permissions; there is no copilot service account.
+
+**Apply one, confirm many.** A single-task move applies immediately and renders a
+result chip with **Undo**. Anything touching two or more tasks becomes a proposal
+card — full task ids, source lanes, and counts — that does nothing until the
+reviewer clicks **Apply**.
+
+That rule is enforced on the **number of tasks a turn writes**, not on which tool
+was called: `move_task` is capped at one applied move per turn and refuses the
+second. Without that cap the model simply calls it N times and never trips the
+gate — which is exactly what it did when first tested with "move these two tasks".
+
+Every copilot action goes through the same `moveTaskToLane` → `recordAction` path
+as a drag or a bulk move, so it lands in **Recent actions** (labelled `(Acey)`) and
+is undoable like anything else. A staged proposal is **re-resolved against the live
+board at confirm time** rather than replaying the stored list — between the proposal
+and the click, someone else may have moved those tasks. The stored plan is the
+*intent* (selection + destination); what gets written is derived fresh from it, and
+the card says so if the count drifted. Proposals are single-use and expire after
+10 minutes.
+
+Acey is told never to act on its own analysis: if it thinks a task is a hard fail it
+says so, it does not set the verdict. `RESOLVED` always requires an explicit verdict —
+it will ask rather than invent one.
+
+## Redash (live pipeline data)
+
+The board only knows what was uploaded to it. Redash knows where every task actually
+sits in the ACC pipeline, who worked it at each layer, and what it cost. Four surfaces
+join the two:
+
+- **Live pipeline panels** on `/l12.html` — a level ladder (how much work is pending at
+  each layer, hours worked in the trailing window) plus **Board vs pipeline**, which
+  cross-joins the board's local verdicts against each task's current upstream level.
+- **Pipeline tab** on a task page — where this task is now, billable vs active time per
+  level, everyone who touched it, and the full node history. A worker whose team path
+  contains `Banned`/`Cheating`/`Fraud` is called out as audit context (not a finding).
+- **`redash_query` copilot tool** — the copilot can answer upstream questions
+  ("how long did this sit at L10?", "who reviewed it?") from live data. Task-scoped
+  queries default to the task being audited.
+- **`/redash.html` query browser** — run the curated registry, search and run any saved
+  Redash query with its parameters, and (admin) run read-only ad-hoc SQL. Results render
+  as a table with CSV export.
+
+**Hybrid query registry** (`src/redash_registry.js`). Each entry is *either* SQL
+version-controlled in `sql/redash/*.sql` and run ad-hoc, *or* a published Redash query id
+that you can edit in Redash without redeploying. Swap the keys to move an entry between
+the two — nothing else changes.
+
+Ad-hoc entries interpolate `{{param}}` placeholders, so **every parameter is validated
+against a declared type first** (`taskIdList`, `objectId`, `int`) and rejected if it
+doesn't match. Those types only ever emit 24-hex ids or bounded integers, so there is no
+path from user input to arbitrary SQL. The ad-hoc box is admin-only and additionally
+requires a single `SELECT`/`WITH` statement — checked against a copy with comments and
+string literals blanked, so a keyword inside them can't false-trip it, while the
+*original* text is what actually runs.
+
+The API key is server-side only and is scrubbed from every error message. Results are
+memoized in-process with single-flight dedup (concurrent identical queries collapse into
+one upstream call) on top of Redash's own `max_age` cache.
+
+> Requests must send a browser-like `User-Agent` — `redash.scale.com` sits behind a WAF
+> that 403s default client agents. `src/redash.js` and `pull_l10.py` both do.
+
 ## Pull tasks from Redash
 
 Admins can pull tasks straight from Redash and **download them as a zip** — nothing is ingested

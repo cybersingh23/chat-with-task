@@ -64,7 +64,10 @@ function auditDims(dir) {
 // grammarOnly deliberately requires the fence: routing a task into a lane is a
 // workflow decision, so it only fires on the structured list, never on a loose
 // text match. The tag keeps the older heuristic so no chip disappears.
-function grammarInfo(dir) {
+// Exported so the copilot's per-task context and the offline doc generator can
+// read the same tag the board chip shows, straight from a directory — both also
+// run over delivery folders that were never in a workspace bucket.
+export function grammarInfo(dir) {
   const dims = auditDims(dir);
   if (!dims) {
     let loose = false;

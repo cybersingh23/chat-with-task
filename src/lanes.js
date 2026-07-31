@@ -81,15 +81,25 @@ export function snapshotForLane(lane, { meta, verdict, username }) {
 // Resolved·No issues has an unchanged lane, so it was skipped and the verdict
 // silently stayed SBQ.
 export function moveTaskToLane(bucket, id, lane, { verdict, username }) {
+  const plan = planTaskLaneMove(bucket, id, lane, { verdict, username });
+  if (!plan.changes) return null;
+  applySnapshot(bucket, id, plan.after, username);
+  return { bucket, id, before: plan.before, after: plan.after };
+}
+
+// The same computation WITHOUT writing, so a caller can show what a move would do
+// before committing to it (the copilot stages bulk moves for confirmation this
+// way). Deliberately shares snapshotForLane + the no-op test with the writing
+// path above — a separate dry-run implementation is exactly how a preview drifts
+// from what the apply actually does.
+export function planTaskLaneMove(bucket, id, lane, { verdict, username }) {
   const meta = taskMeta(bucket, id);
   const before = laneSnapshot(bucket, id);
   const after = snapshotForLane(lane, { meta, verdict, username });
   const same = before.verdict === after.verdict
     && before.claimed_by === after.claimed_by
     && before.grammar_lane === after.grammar_lane;
-  if (same) return null;
-  applySnapshot(bucket, id, after, username);
-  return { bucket, id, before, after };
+  return { bucket, id, meta, before, after, changes: !same };
 }
 
 // Resolve a bulk selection server-side rather than trusting the client's copy of
