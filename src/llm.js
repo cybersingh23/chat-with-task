@@ -4,10 +4,17 @@ import { config } from './config.js';
 // (OpenAI-compatible; same proxy + key as trajectory-viewer-v2).
 // max_tokens has to cover thinking AND the reply — they share one budget. At
 // effort "high" the old 4096 ceiling was consumed entirely by thinking on a
-// docgen-sized prompt: finish_reason "length" with an EMPTY response body. 16000
-// leaves room (a full review doc measured ~7k) and stays under the proxy's
-// non-streaming timeout.
-export async function chatCompletion({ messages, tools, maxTokens = 16000, onUsage }) {
+// docgen-sized prompt: finish_reason "length" with an EMPTY response body.
+// 32000 leaves generous room for a long review doc plus its thinking; this is a
+// non-streaming call, so it is bounded by the proxy's request timeout rather
+// than by the ceiling itself.
+// Just under Node's undici default header timeout (300s), so we abort with our
+// own message rather than its opaque one. A realistic docgen prompt at 32000 /
+// high measured ~200s; a deliberately maximal one ran past 9 minutes and would
+// blow either ceiling.
+const REQUEST_TIMEOUT_MS = 290_000;
+
+export async function chatCompletion({ messages, tools, maxTokens = 32000, onUsage }) {
   if (!config.litellm.apiKey) throw new Error('LITELLM_API_KEY is not set — copy .env.example to .env');
   const body = {
     model: config.litellm.model,
@@ -25,14 +32,30 @@ export async function chatCompletion({ messages, tools, maxTokens = 16000, onUsa
   // The proxy throws transient 429/5xx under load — retry with backoff.
   let res;
   for (let attempt = 0; ; attempt++) {
-    res = await fetch(`${config.litellm.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${config.litellm.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
+    try {
+      res = await fetch(`${config.litellm.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${config.litellm.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        // A big max_tokens at high effort can generate for minutes. Without an
+        // explicit signal this hits Node's undici default (300s) and throws an
+        // opaque UND_ERR_HEADERS_TIMEOUT that skips the retry logic below —
+        // which only inspects res.ok. Fail with something a reader can act on.
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (e) {
+      if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+        throw new Error(
+          `LiteLLM request exceeded ${REQUEST_TIMEOUT_MS / 1000}s (model ${config.litellm.model}, `
+          + `max_tokens ${maxTokens}, effort ${body.output_config.effort}). The generation was still `
+          + 'running — lower max_tokens or effort for this call.'
+        );
+      }
+      throw e;
+    }
     if (res.ok) break;
     const retryable = res.status === 429 || res.status >= 500;
     const detail = await res.text().catch(() => '');
