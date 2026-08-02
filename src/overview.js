@@ -347,20 +347,33 @@ export function buildAssignments(brief) {
       }
     }
 
-    if (b.hardNoRemediation > 0) {
-      // Highest-stakes board work, so it goes out first and to the fewest people
-      // that can absorb it — split across two, not smeared across four.
-      const takers = roster.slice(0, Math.min(2, roster.length));
-      splitEvenly(b.hardNoRemediation, takers.length).forEach((n, i) => {
-        if (n > 0) add(takers[i], 'board', `Write remediation for ${n} hard fail${n === 1 ? '' : 's'}`,
-          `${b.hardNoRemediation} hard fails have no remediation.md. Reshipped unchanged, each becomes a failure-to-remediate finding.`);
-      });
-    }
-
-    if (b.unsortedOpen > 0) {
-      splitEvenly(b.unsortedOpen, roster.length).forEach((n, i) => {
-        if (n > 0) add(roster[i], 'board', `Triage ${n} of the ${b.unsortedOpen} unclaimed unsorted`,
-          'Claim before you start so the four of you do not open the same task.');
+    // Every per-task pool splits across the WHOLE roster. An earlier version sent
+    // hard fails to just two people on a "highest stakes, fewest hands" theory,
+    // which was only tolerable while the pool was small: at 29 outstanding it
+    // handed two people 15 each and left a third reviewer with nothing to do.
+    // This work parallelises per task, so there is no reason to concentrate it.
+    const pools = [
+      {
+        n: b.hardNoRemediation,
+        label: (n) => `Write remediation for ${n} hard fail${n === 1 ? '' : 's'}`,
+        detail: `${b.hardNoRemediation} hard fails have no remediation.md. Reshipped unchanged, each becomes a failure-to-remediate finding — this is the highest-stakes queue on the board.`,
+      },
+      {
+        n: b.unsortedOpen,
+        label: (n) => `Triage ${n} of the ${b.unsortedOpen} unclaimed unsorted`,
+        detail: 'Claim before you start so two of you do not open the same task.',
+      },
+      {
+        // Computed but previously never assigned, so it was invisible work.
+        n: b.unauditedSoft,
+        label: (n) => `Review ${n} soft fail${n === 1 ? '' : 's'} with no review.md`,
+        detail: `${b.unauditedSoft} soft fails are unclaimed and un-audited. Each needs a review doc before it can be resolved.`,
+      },
+    ];
+    for (const pool of pools) {
+      if (pool.n <= 0) continue;
+      splitEvenly(pool.n, roster.length).forEach((n, i) => {
+        if (n > 0) add(roster[i], 'board', pool.label(n), pool.detail);
       });
     }
 
