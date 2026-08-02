@@ -10,15 +10,24 @@
  *   - Cloudflare WARP connected (resolves sandbox.ml-serving-internal.scale.com)
  *   - Node.js 18+ on your local machine
  *
- * The LiteLLM settings come from the repo's own gitignored .env (the same file the
- * app reads locally), or from the environment, which wins. Rotating the key in .env
- * is therefore all it takes for the next deploy to carry the new one — and the key
- * never has to live in the repo.
+ * Settings come from the repo's own gitignored .env (the same file the app reads
+ * locally), or from the environment, which wins. Rotating a key in .env is therefore
+ * all it takes for the next deploy to carry the new one — and the key never has to
+ * live in the repo. The .env file itself is NOT shipped: the values are injected as
+ * real environment variables at start, so no secret lands on the sandbox disk (which
+ * also hosts a web terminal).
  *
  * Environment variables:
  *   LITELLM_API_KEY     LiteLLM proxy key  (REQUIRED — from ../.env or the environment)
  *   LITELLM_BASE_URL    LiteLLM proxy URL  (default: https://litellm-proxy.ml.scale.com/v1)
  *   LITELLM_MODEL       Model to use       (default: claude-opus-5)
+ *   REDASH_API_KEY      Redash USER key    (optional — without it every Redash surface
+ *                                           reads "not configured"; a query-scoped key
+ *                                           403s on the registry's ad-hoc SQL)
+ *   REDASH_ANALYTICS_DATA_SOURCE_ID        (default: 22 — ACC pipeline tables)
+ *   ACC_PROJECT_ID      Project to describe (default: 69979ab5a4b6d80af7b7d1c8)
+ *   SANDBOX_INCLUDE_BOARD  "true" ships workspace/ + data/ (default: off — the sandbox
+ *                                           starts with an empty board and seeded logins)
  *   SANDBOX_TIMEOUT     TTL in seconds     (default: 1209600 = 14 days)
  *   SANDBOX_CPU         CPU cores          (default: 4)
  *   SANDBOX_MEMORY      Memory in MiB      (default: 8192)
@@ -54,6 +63,12 @@ const CPU = Number(process.env.SANDBOX_CPU) || 4;
 const MEMORY = Number(process.env.SANDBOX_MEMORY) || 8192;
 const PROJECT_ID = process.env.SANDBOX_PROJECT_ID || '682bdbff5ed4cd9b2516cc6a';
 
+// Ship the local board (workspace/ + data/) to the sandbox. Off by default: it is
+// real customer task data going to a shared host, and it dominates the upload.
+// A fresh deploy comes up with an empty board and re-seeded logins, which is what
+// you want for a demo or a review of the UI itself.
+const INCLUDE_BOARD = process.env.SANDBOX_INCLUDE_BOARD === 'true';
+
 // Read the repo's gitignored .env, the same file the app itself reads, so a deploy
 // carries whatever key is working locally. A real environment variable still wins.
 // Nothing here is committed: the previous hardcoded default was a live credential in
@@ -71,10 +86,19 @@ function readDotEnv() {
 const dotEnv = readDotEnv();
 const fromEnv = (k, fallback) => process.env[k] || dotEnv[k] || fallback;
 
+// Keys with no value are dropped before the env string is built, so an unset
+// optional var stays unset in the sandbox rather than arriving as "undefined".
 const APP_ENV = {
   LITELLM_API_KEY:  fromEnv('LITELLM_API_KEY'),
   LITELLM_BASE_URL: fromEnv('LITELLM_BASE_URL', 'https://litellm-proxy.ml.scale.com/v1'),
   LITELLM_MODEL:    fromEnv('LITELLM_MODEL', 'claude-opus-5'),
+  // Without these three, every Redash surface in a deployed sandbox — the L12
+  // live panels, the per-task Pipeline tab, the copilot's redash_query tool and
+  // /redash.html — renders "not configured". The two non-key vars mirror the
+  // defaults in src/config.js; they're forwarded so a .env override travels too.
+  REDASH_API_KEY:                  fromEnv('REDASH_API_KEY'),
+  REDASH_ANALYTICS_DATA_SOURCE_ID: fromEnv('REDASH_ANALYTICS_DATA_SOURCE_ID', '22'),
+  ACC_PROJECT_ID:                  fromEnv('ACC_PROJECT_ID', '69979ab5a4b6d80af7b7d1c8'),
   PORT: String(APP_PORT),
 };
 
@@ -82,6 +106,23 @@ if (!APP_ENV.LITELLM_API_KEY) {
   console.error('✗ No LITELLM_API_KEY found in ../.env or the environment.');
   console.error('  The copilot will not work without it. Set it in the repo\'s .env (gitignored) and re-run.');
   process.exit(1);
+}
+
+// Not fatal — the rest of the app is fine without it, but the whole Redash half
+// of the product goes dark, and that is worth saying out loud before a deploy.
+if (!APP_ENV.REDASH_API_KEY) {
+  console.warn('⚠ No REDASH_API_KEY found in ../.env or the environment.');
+  console.warn('  The deploy will boot, but every Redash surface will read "not configured".');
+}
+
+// Say which one you're getting — an unexpectedly empty board is otherwise a
+// confusing thing to land on, and an unexpectedly full one is a data leak.
+if (INCLUDE_BOARD) {
+  console.warn('⚠ SANDBOX_INCLUDE_BOARD=true — shipping workspace/ and data/ to the sandbox.');
+  console.warn('  That is real customer task data on a shared host, and a much slower upload.');
+} else {
+  console.log('  Board excluded (workspace/, data/). The sandbox starts empty; logins re-seed');
+  console.log('  to the defaults in src/auth.js. Set SANDBOX_INCLUDE_BOARD=true to ship yours.');
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -178,9 +219,22 @@ async function installAndDeploy(sandboxId) {
   const ver = await exec(sandboxId, 'node --version', 10_000);
   console.log(`    Node.js ${ver.trim()}`);
 
-  // Create tarball from the repo (excluding .git and node_modules)
+  // Create tarball from the repo. Beyond .git and node_modules:
+  //   .env      — it held both live keys, and the deploy also exposes a web
+  //               terminal, so the file was a second copy of the secret sitting
+  //               on a reachable disk. The keys now travel in APP_ENV instead.
+  //   workspace/, data/ — the operator's local board (~900MB of real customer
+  //               tasks) and their action/usage logs. Shipping them made the
+  //               tarball ~177MB, which is ~4,000 sequential 60KB exec
+  //               round-trips, and put customer data on a shared sandbox.
+  // spec/ still ships: getRubric() falls back to spec/V11_RUBRIC.csv, which is
+  // how a boardless deploy still knows the rubric.
+  const excludes = ['.git', 'node_modules', 'deploy/node_modules', '.env'];
+  if (!INCLUDE_BOARD) excludes.push('workspace', 'data');
+
   const tarball = '/tmp/cwt-deploy.tar.gz';
-  execSync(`tar czf ${tarball} --exclude="${REPO_NAME}/.git" --exclude="${REPO_NAME}/node_modules" --exclude="${REPO_NAME}/deploy/node_modules" -C "${resolve(REPO_ROOT, '..')}" "${REPO_NAME}"`);
+  const excludeArgs = excludes.map((e) => `--exclude="${REPO_NAME}/${e}"`).join(' ');
+  execSync(`tar czf ${tarball} ${excludeArgs} -C "${resolve(REPO_ROOT, '..')}" "${REPO_NAME}"`);
   const b64 = readFileSync(tarball).toString('base64');
   console.log(`    Tarball: ${Math.round(b64.length * 3 / 4 / 1024)}KB`);
 
@@ -210,7 +264,12 @@ async function installAndDeploy(sandboxId) {
 
 async function startApp(sandboxId) {
   console.log('[6/6] Starting app...');
-  const envStr = Object.entries(APP_ENV).map(([k, v]) => `${k}="${v}"`).join(' ');
+  // Single-quote so nothing in a key is expanded by the remote shell, and drop
+  // unset optionals so they don't arrive as the string "undefined".
+  const envStr = Object.entries(APP_ENV)
+    .filter(([, v]) => v !== undefined && v !== '')
+    .map(([k, v]) => `${k}='${String(v).replace(/'/g, `'\\''`)}'`)
+    .join(' ');
   // setsid detaches from the exec session; fire-and-forget with a short timeout
   exec(sandboxId, `cd /home/sandbox/app && env ${envStr} setsid nohup node server.js < /dev/null > /tmp/app.log 2>&1 &`, 8_000).catch(() => {});
   await sleep(5000);
