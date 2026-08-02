@@ -1,30 +1,86 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin Console — Chat with Task</title>
+  <title>Admin — Audit Studio</title>
   <link rel="stylesheet" href="/css/studio.css" />
   <link rel="icon" href="/scale-icon.svg" />
+  <script src="/js/theme.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <a href="/" class="back-home" title="back to board">‹ Board</a>
-    <div class="app-name">Admin Console <span>/ pull, deliver &amp; usage</span></div>
-    <div class="spacer"></div>
-    <span class="mono" id="rate-note" style="font-size:11px;color:var(--text-3)"></span>
-    <a class="back-home" href="/l12.html" title="delivery analytics dashboard">L12 Stats</a>
-    <a class="back-home" href="/redash.html" title="run Redash queries in-app">Redash</a>
-    <a class="back-home" href="/archive.html" title="browse archived tasks">Archive</a>
-    <a class="back-home" href="/api/admin/usage.csv">Export CSV</a>
-    <div class="user-chip" id="user-chip" hidden>
-      <span id="user-name"></span>
-      <button id="logout-btn">sign out</button>
-    </div>
-  </header>
+  <header class="topbar" id="app-header"></header>
 
   <main class="index-main">
     <div class="stat-cards" id="stat-cards"></div>
+
+
+    <h2 class="admin-h2">Ingest a delivery</h2>
+    <div class="l10-panel glass">
+      <div class="l10-hint">Moved here from the board with the redesign: uploading is an
+        occasional admin action, and it was costing the top of the screen reviewers work in.</div>
+      <div class="drop-zone" id="drop-zone">
+        <div class="drop-title">Upload a delivery</div>
+        <div class="drop-sub">
+          Drag a tasks .zip or a <span class="mono">&lt;task_id&gt;</span> folder here — tasks are
+          auto-sorted into Hard / Soft / Pass from the bundled audit verdicts.
+        </div>
+        <div class="drop-actions">
+          <button class="primary" id="pick-zip">Select .zip…</button>
+          <button id="pick-folder">Select folder…</button>
+          <select id="upload-bucket" title="bucket used only when the upload carries no verdicts">
+            <option value="UNSORTED">no verdicts → UNSORTED</option>
+            <option value="HARD_FAIL">no verdicts → HARD_FAIL</option>
+            <option value="SOFT_FAIL">no verdicts → SOFT_FAIL</option>
+            <option value="PASS">no verdicts → PASS</option>
+          </select>
+        </div>
+        <div class="progress" id="upload-progress" hidden><div class="progress-bar" id="upload-bar"></div></div>
+        <div class="mono drop-status" id="upload-status"></div>
+        <input type="file" id="folder-input" webkitdirectory multiple hidden />
+        <input type="file" id="zip-input" accept=".zip" hidden />
+      </div>
+      <div class="rubric-admin">
+        <span class="rubric-label">QC rubric</span>
+        <span class="mono" id="rubric-status">checking…</span>
+        <button id="rubric-upload-btn">Upload CSV</button>
+        <input type="file" id="rubric-input" accept=".csv" hidden />
+      </div>
+      <div class="l10-row l10-ids-row">
+        <input type="text" id="claim-input" class="mono" placeholder="or ingest one task by 24-char task_id" maxlength="24" spellcheck="false" />
+        <button id="claim-btn">Ingest</button>
+        <span class="mono" id="claim-status"></span>
+      </div>
+    </div>
+
+    <h2 class="admin-h2">Move between severity buckets</h2>
+    <div class="l10-panel glass">
+      <div class="l10-hint">Re-sorts a task's severity (Hard / Soft / Pass / Unsorted) or marks it
+        delivered. Distinct from the board's Actions → Move, which changes workflow <em>lanes</em>.</div>
+      <textarea id="bulk-ids" class="mono" placeholder="Paste 24-hex task IDs (comma / space / newline separated) — optional"></textarea>
+      <div class="l10-row">
+        <label>move all in
+          <select id="bulk-from">
+            <option value="">— none —</option>
+            <option value="HARD_FAIL">Hard</option>
+            <option value="SOFT_FAIL">Soft</option>
+            <option value="PASS">Pass</option>
+            <option value="UNSORTED">Unsorted</option>
+          </select>
+        </label>
+        <label>→ to
+          <select id="bulk-to">
+            <option value="HARD_FAIL">Hard</option>
+            <option value="SOFT_FAIL">Soft</option>
+            <option value="PASS">Pass</option>
+            <option value="UNSORTED">Unsorted</option>
+            <option value="__delivered">Mark delivered</option>
+          </select>
+        </label>
+        <button class="primary" id="bulk-move-btn">Move</button>
+        <span class="mono" id="bulk-status"></span>
+      </div>
+    </div>
 
     <h2 class="admin-h2">Pull tasks from Redash</h2>
     <div class="l10-panel glass">

@@ -1,4 +1,5 @@
-import { api, el, cap } from './common.js';
+import { api, el, cap, renderAppHeader } from './common.js';
+import { initIngest } from './ingest.js';
 
 const KIND_LABEL = {
   chat: 'Copilot chat',
@@ -16,8 +17,13 @@ const searchInput = document.getElementById('activity-search');
 async function boot() {
   const me = await api('/me'); // 401 → login
   if (me.role !== 'admin') { location.href = (window.__base__ || '') + '/'; return; }
-  document.getElementById('user-chip').hidden = false;
-  document.getElementById('user-name').textContent = me.username;
+  renderAppHeader({
+    active: 'admin', user: me,
+    extras: [
+      el('span', { class: 'mono admin-rate', id: 'rate-note' }),
+      el('a', { class: 'btn', href: (window.__base__ || '') + '/api/admin/usage.csv' }, 'Export CSV'),
+    ],
+  });
   initL10();
   initDeliver();
   await load();
@@ -247,9 +253,8 @@ function emptyRow(msg) {
 }
 
 searchInput.addEventListener('input', renderEvents);
-document.getElementById('logout-btn').addEventListener('click', async () => {
-  await api('/logout', { method: 'POST' });
-  location.href = (window.__base__ || '') + '/login.html';
-});
 
 boot();
+
+// Delivery ingest moved off the board with the redesign; the code is unchanged.
+initIngest({ onChange: () => location.reload() });
