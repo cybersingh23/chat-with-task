@@ -1,96 +1,107 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Task — Chat with Task</title>
+  <title>Task — Audit Studio</title>
   <link rel="stylesheet" href="/css/studio.css" />
   <link rel="icon" href="/scale-icon.svg" />
+  <script src="/js/theme.js"></script>
 </head>
 <body>
+<div class="app">
+
   <header class="topbar">
-    <a href="/" class="back-home" title="back to board">‹ Board</a>
-    <button class="sev-badge-btn" id="sev-chip" title="reclassify severity"></button>
+    <!-- The glyph and the arrow share one fixed 14px slot; only opacity and
+         transform animate, so hovering never reflows the header. -->
+    <a class="backlink" href="/" title="Back to the board">
+      <span class="backlink__slot">
+        <svg viewBox="0 0 479.82 479.83" role="img" aria-label="Scale"><path d="M452.28,0H27.6C3.06,0-9.23,29.67,8.12,47.02l424.69,424.69c17.35,17.35,47.02,5.06,47.02-19.48V27.54c0-15.21-12.33-27.54-27.54-27.54Z"></path><path d="M198.08,269.69H12.67c-10.71,0-16.08,12.95-8.5,20.53l185.4,185.4c7.58,7.58,20.53,2.21,20.53-8.5v-185.4c0-6.64-5.38-12.02-12.02-12.02Z"></path></svg>
+        <span class="backlink__arrow" aria-hidden="true">←</span>
+      </span>
+      <span class="backlink__label">Board</span>
+    </a>
+    <button class="tag sev-pill" id="sev-chip" title="reclassify severity"></button>
     <span class="mono task-id" id="task-id"></span>
     <div class="spacer"></div>
 
     <span class="claim-who" id="claim-who"></span>
-    <button id="claim-btn"></button>
+    <button class="btn btn--ghost claim-btn" id="claim-btn"></button>
 
-    <select class="verdict-select" id="verdict-select" title="set your decision">
+    <select class="select" id="verdict-select" title="set your decision">
       <option value="">Set decision…</option>
-      <option value="NO_ISSUES">No Issues</option>
+      <option value="NO_ISSUES">No issues</option>
       <option value="FIXES_MADE">Fixes made</option>
       <option value="GRAMMAR_ONLY">Grammar-only</option>
       <option value="SBQ">SBQ</option>
-      <option value="SECOND_OPINION">Second Opinion Needed</option>
+      <option value="SECOND_OPINION">Second opinion needed</option>
     </select>
 
-    <div class="divider"></div>
-
-    <button class="tour-btn" id="tour-btn" title="guided walkthrough">✦ Tour</button>
-    <button class="danger" id="delete-task" hidden>Delete</button>
-
-    <div class="divider"></div>
-
-    <div class="user-chip" id="user-chip" hidden>
-      <span class="avatar sm" id="user-avatar"></span>
-      <span id="user-name"></span>
-      <button id="logout-btn" title="sign out">Sign out</button>
+    <!-- Destructive / rare actions live behind the overflow, not top-level. -->
+    <div class="menu" id="more-menu">
+      <button class="btn btn--icon" type="button" id="more-btn" title="More actions">⋯</button>
+      <div class="menu__list" id="more-list" hidden>
+        <button type="button" id="tour-btn">Take a tour</button>
+        <button type="button" class="menu__danger" id="delete-task" hidden>Delete task</button>
+      </div>
+    </div>
+    <button class="btn btn--icon" type="button" data-theme-toggle title="Switch theme">☀</button>
+    <div class="userblock" id="user-chip" hidden>
+      <span class="avatar" id="user-avatar"></span>
+      <span class="userblock__name" id="user-name"></span>
+      <button class="btn btn--ghost userblock__out" type="button" id="logout-btn">sign out</button>
     </div>
   </header>
 
-  <div class="task-layout">
-    <nav class="sidebar glass" id="sidebar">
-      <h3>Documents</h3>
-      <div id="nav-docs"></div>
-      <h3>Trajectory viewer</h3>
-      <div class="traj-launcher" id="nav-trajs"></div>
-      <h3>Files</h3>
-      <div class="file-tree" id="nav-files"></div>
-    </nav>
+  <div class="strip" id="task-strip"></div>
 
-    <section class="viewer glass" id="viewer">
-      <div class="viewer-head">
-        <button class="back-btn" id="back-btn" title="back" hidden>‹</button>
-        <span class="title" id="viewer-title"></span>
-      </div>
+  <div class="tabs" id="tabs" role="tablist">
+    <div class="spacer"></div>
+    <!-- Files, the QC spec, CB responses and the ranking proof were four more
+         sidebar sections; they collapse into one overflow menu. -->
+    <div class="menu" id="files-menu">
+      <button class="btn tabs__more" type="button" id="files-btn">Files ▾</button>
+      <div class="menu__list menu__list--wide" id="files-list" hidden></div>
+    </div>
+  </div>
+
+  <div class="workspace">
+    <main class="doc" id="viewer">
       <div class="traj-toolbar" id="traj-toolbar" hidden>
         <div class="traj-tabs" id="traj-tabs"></div>
-        <button class="quiet" id="collapse-all">Collapse all</button>
+        <button class="btn btn--ghost" id="collapse-all">Collapse all</button>
       </div>
-      <div id="viewer-body"></div>
-    </section>
+      <button class="btn btn--ghost doc__back" id="back-btn" hidden></button>
+      <div class="doc__inner" id="viewer-body"></div>
+    </main>
 
-    <div class="panel-resizer" id="chat-resizer" title="Drag to resize · double-click to hide"><span></span></div>
-
-    <aside class="chat-panel glass" id="chat-panel">
-      <div class="chat-head">
-        <img class="copilot-avatar" src="/copilot.png" alt="" />
-        <span class="title">Acey</span>
-        <div class="mode-toggle" id="copilot-mode" role="group" aria-label="Copilot mode" title="Static = written answer with citation chips. Dynamic = a clickable, step-by-step guided walkthrough of the evidence.">
-          <button type="button" data-mode="static" class="active">Static</button>
-          <button type="button" data-mode="dynamic">Dynamic</button>
+    <aside class="acey" id="chat-panel">
+      <div class="acey__head">
+        <img src="/copilot.png" alt="" />
+        <b>Acey</b>
+        <div class="spacer"></div>
+        <div class="seg" id="copilot-mode" role="group" aria-label="Copilot mode"
+             title="Static = a written answer with citation chips. Dynamic = a clickable, step-by-step walkthrough of the evidence.">
+          <button type="button" data-mode="static" aria-pressed="true">Static</button>
+          <button type="button" data-mode="dynamic" aria-pressed="false">Dynamic</button>
         </div>
-        <button id="clear-chat">clear</button>
-        <button id="collapse-chat" title="hide Acey (or double-click the divider)">Hide</button>
+        <button class="btn btn--ghost acey__clear" type="button" id="clear-chat">clear</button>
+        <button class="btn btn--ghost acey__hide" type="button" id="collapse-chat" title="hide Acey">✕</button>
       </div>
-      <div class="chat-log" id="chat-log"></div>
-      <div class="status-line" id="chat-status"></div>
-      <div class="chat-input">
-        <textarea id="chat-text" placeholder="Ask Acey about this task… (Enter to send, Shift+Enter for newline)"></textarea>
-        <button class="primary" id="chat-send">Send</button>
+      <div class="acey__body" id="chat-log"></div>
+      <div class="acey__status" id="chat-status"></div>
+      <div class="acey__composer">
+        <textarea id="chat-text" placeholder="Ask about this task…"></textarea>
+        <button class="btn btn--primary" id="chat-send">Send</button>
       </div>
     </aside>
   </div>
+</div>
 
-  <button class="chat-fab glass" id="expand-chat" hidden aria-label="Ask Acey" title="Ask Acey">
-    <img class="fab-avatar" src="/copilot.png" alt="" />
-  </button>
-  <div class="fab-nudge glass" id="fab-nudge" hidden>
-    <button class="fab-nudge-x" id="fab-nudge-x" title="dismiss" aria-label="dismiss">✕</button>
-    <span>Stuck on this audit? <b>Ask Acey</b> — I’ll walk you through it →</span>
-  </div>
+<!-- Collapsed Acey lives here: the mascot, bottom right, out of the document's way. -->
+<button class="acey-fab" id="show-acey" hidden title="Ask Acey" aria-label="Ask Acey">
+  <img src="/copilot.png" alt="" />
+</button>
 
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>

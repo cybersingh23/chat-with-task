@@ -88,8 +88,12 @@ export async function runAgentLoop({ messages, tools, executor, onEvent, maxStep
     const msg = await chatCompletion({ messages: transcript, tools, onUsage });
     transcript.push(msg);
     added.push(msg);
-    if (msg.content) onEvent?.({ type: 'assistant', content: msg.content });
+    // A message that still carries tool_calls is the model narrating its next
+    // step ("Let me check the trajectory…") — reasoning, not the answer. Flag it
+    // so the client can keep it out of the transcript; only the last message,
+    // the one with no tool calls, is the reply.
     const calls = msg.tool_calls || [];
+    if (msg.content) onEvent?.({ type: 'assistant', content: msg.content, final: !calls.length });
     if (!calls.length) return { messages: added, final: msg.content || '' };
 
     for (const call of calls) {

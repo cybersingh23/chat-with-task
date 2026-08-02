@@ -5,12 +5,16 @@ const [, , bucket, taskId] = pathRelative.split('/');
 const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
 document.getElementById('task-id').textContent = taskId;
 const sevChip = document.getElementById('sev-chip');
+const SEV_TAG = { HARD_FAIL: 'tag--hard', SOFT_FAIL: 'tag--soft', PASS: 'tag--pass', UNSORTED: '' };
 sevChip.textContent = (SEV_LABEL[bucket] || bucket) + ' ▾';
-sevChip.className = `sev-badge-btn ${bucket}`;
+sevChip.className = `tag sev-pill ${SEV_TAG[bucket] || ''}`;
 
 const viewerEl = document.getElementById('viewer');
 const viewerBody = document.getElementById('viewer-body');
-const viewerTitle = document.getElementById('viewer-title');
+// The tab bar names the active view now, so the old in-pane title has nowhere
+// to go — keep a detached node so every `viewerTitle.textContent = …` is a
+// harmless no-op rather than a crash.
+const viewerTitle = document.createElement('span');
 const trajToolbar = document.getElementById('traj-toolbar');
 const trajCache = {};
 let activeNav = null;
@@ -49,7 +53,17 @@ function saveCurrentScroll() {
   }
 }
 
+// 800px is a reading measure, right for prose (definition, findings, docs) and
+// badly wrong for the tabular / side-by-side views — the QC spec's two-column
+// card grid, CB responses, trajectories and the pipeline tables were all being
+// squeezed into it while half the pane sat empty.
+const WIDE_VIEWS = /^(qcspec|cb|pipeline|sbs|file|rankproof)/;
+function setDocWidth(key) {
+  document.getElementById('viewer-body').classList.toggle('doc__inner--wide', WIDE_VIEWS.test(key || ''));
+}
+
 function mountView(key, build, { refresh = false } = {}) {
+  setDocWidth(key);
   saveCurrentScroll();
   if (currentViewKey && currentViewKey !== key && !suppressHistory && viewReopeners.has(currentViewKey)) {
     navStack.push(viewReopeners.get(currentViewKey));
@@ -120,9 +134,12 @@ function openContextMenu(x, y, items) {
   setTimeout(() => document.addEventListener('mousedown', away), 0);
 }
 
-// ---------- sidebar ----------
-// _audit_seed.md is intentionally NOT listed here: it stays on disk and is fed
-// to the copilot/docgen as grounding, but is not surfaced as a reviewer tab.
+// ---------- tabs ----------
+// The left sidebar is gone: Documents became the tab bar, the trajectory list
+// became Traj A / Traj B / A ↔ B, and Files (plus the QC spec, CB responses and
+// the ranking proof) collapsed into one overflow menu. That roughly doubles the
+// reading width of the document pane, which was the whole complaint.
+
 const DOCS = [
   { key: 'review', label: 'Review', file: 'review.md' },
   { key: 'remediation', label: 'Remediation', file: 'remediation.md' },
@@ -130,128 +147,174 @@ const DOCS = [
 
 let taskDef = null;
 let hasReview = false;
+let meta = null;
+let activeTab = null;
+
+// Traj A / Traj B / A ↔ B were three tabs for one view: the trajectory toolbar
+// underneath already carries those exact three switches, so the tab bar was
+// duplicating its own content. One "Trajectories" tab, and the toolbar picks
+// the side — returning you to whichever you last had open.
+let lastTraj = 'model_a';
+
+const TABS = [
+  { key: 'definition',   label: 'Definition',   open: () => showTaskDef() },
+  { key: 'review',       label: 'Review',       open: () => openDoc(DOCS.find((d) => d.key === 'review')) },
+  { key: 'remediation',  label: 'Remediation',  open: () => openDoc(DOCS.find((d) => d.key === 'remediation')) },
+  { key: 'trajectories', label: 'Trajectories', open: () => (lastTraj === 'sbs' ? showSideBySide() : showTrajectory(lastTraj)) },
+  { key: 'cb',           label: 'CB responses', open: () => showCbResponses() },
+  { key: 'qcspec',       label: 'QC spec',      open: () => showQcSpec() },
+  { key: 'checklist',    label: 'Checklist',    open: () => showChecklist() },
+  { key: 'pipeline',     label: 'Pipeline',     open: () => showPipeline() },
+];
+
+function setActiveTab(key) {
+  activeTab = key;
+  for (const b of document.querySelectorAll('#tabs button[data-tab]')) {
+    b.setAttribute('aria-selected', String(b.dataset.tab === key));
+  }
+}
+
+function openTab(key) {
+  const t = TABS.find((x) => x.key === key);
+  if (!t) return;
+  setActiveTab(key);
+  t.open();
+}
+
+function tabBadge(key) {
+  if (key === 'review' && meta?.findingCount) return String(meta.findingCount);
+  // Both message counts on one tab, so collapsing the three didn't cost the
+  // at-a-glance "how long is each side".
+  if (key === 'trajectories' && trajMeta.model_a && trajMeta.model_b) {
+    return `${trajMeta.model_a} / ${trajMeta.model_b}`;
+  }
+  if (key === 'cb') return meta?.models?.length ? String(meta.models.length) : null;
+  return null;
+}
+const trajMeta = { model_a: null, model_b: null };
+
+function renderTabs() {
+  const bar = document.getElementById('tabs');
+  const menu = document.getElementById('files-menu');
+  // replaceChildren() below wipes the bar, so the two persistent controls have
+  // to be re-appended, not just left in the markup.
+  const aceyBtn = document.getElementById('show-acey');
+  const nodes = TABS.map((t) => {
+    const badge = tabBadge(t.key);
+    return el('button', {
+      type: 'button', role: 'tab', 'data-tab': t.key,
+      'aria-selected': String(activeTab === t.key),
+      onclick: () => openTab(t.key),
+    }, t.label, badge ? el('span', { class: 'badge' }, badge) : null);
+  });
+  bar.replaceChildren(...nodes, el('div', { class: 'spacer' }), aceyBtn, menu);
+}
 
 async function buildSidebar() {
-  const meta = await api(`/task/${bucket}/${taskId}`);
+  meta = await api(`/task/${bucket}/${taskId}`);
   hasReview = meta.hasReview;
   taskDef ||= await api(`/task/${bucket}/${taskId}/taskdef`);
-  const navDocs = document.getElementById('nav-docs');
-  navDocs.replaceChildren();
-
-  navDocs.append(
-    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showTaskDef(); } },
-      el('span', {}, 'Task definition'),
-      el('span', { class: 'missing' }, taskDef.missing ? 'missing' : `${taskDef.milestones.length} milestones`),
-    ),
-    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showQcSpec(); } },
-      el('span', {}, 'QC spec'),
-      el('span', { class: 'missing' }, 'V11'),
-    ),
-    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showCbResponses(); } },
-      el('span', {}, 'CB responses'),
-      el('span', { class: 'missing' }, meta.models?.length ? `${meta.models.length} models` : 'rank.json'),
-    ),
-  );
-
-  for (const d of DOCS) {
-    const present = d.key === 'review' ? meta.hasReview : meta.hasRemediation;
-    navDocs.append(
-      el('button', { class: 'nav-item', onclick: (ev) => openDoc(d, ev.currentTarget) },
-        el('span', {}, d.label),
-        present ? null : el('span', { class: 'missing' }, me.role === 'admin' ? 'generate' : 'pending'),
-      )
-    );
+  meta.findingCount = 0;
+  if (meta.hasReview) {
+    try {
+      const f = await api(`/task/${bucket}/${taskId}/doc/review`);
+      meta.findingCount = parseFindings(f.text || '').length;
+    } catch { /* not generated yet */ }
   }
-  navDocs.append(
-    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showChecklist(); } },
-      el('span', {}, 'Checklist'),
-    )
-  );
-  // Upstream pipeline context. Shown unconditionally — whether Redash has a row
-  // for this task is only known after querying, and the view says so itself.
-  navDocs.append(
-    el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showPipeline(); } },
-      el('span', {}, 'Pipeline'),
-      el('span', { class: 'missing' }, 'live'),
-    )
-  );
-  if (meta.hasRankingProof) {
-    navDocs.append(
-      el('button', { class: 'nav-item', onclick: (ev) => { setActive(ev.currentTarget); showRankingProof(); } },
-        el('span', {}, 'Ranking proof'),
-      )
-    );
-  }
+  renderTabs();
+  buildFilesMenu();
+  renderTaskStrip();
 
-  const navTrajs = document.getElementById('nav-trajs');
-  navTrajs.replaceChildren(
-    ...['model_a', 'model_b'].map((m) =>
-      el('button', { class: 'traj-launch', id: `traj-launch-${m}`, onclick: () => { setActive(null); showTrajectory(m); } },
-        el('span', { class: `traj-launch-name traj-${m}` }, m === 'model_a' ? 'Model A' : 'Model B'),
-        el('span', { class: 'traj-launch-meta', id: `traj-meta-${m}` }, '· · ·'),
-      )
-    ),
-    el('button', { class: 'traj-launch sbs', id: 'traj-launch-sbs', onclick: () => { setActive(null); showSideBySide(); } },
-      el('span', { class: 'traj-launch-name' }, 'Compare A ↔ B'),
-      el('span', { class: 'traj-launch-meta' }, 'side by side'),
-    ),
-  );
   for (const m of ['model_a', 'model_b']) {
     loadTrajectory(m)
-      .then((t) => {
-        const users = t.messages.filter((x) => x.role === 'user').length;
-        document.getElementById(`traj-meta-${m}`).textContent = `${t.count} msgs · ${users} prompts`;
-      })
-      .catch(() => { document.getElementById(`traj-meta-${m}`).textContent = 'unavailable'; });
+      .then((t) => { trajMeta[m] = `${t.count}`; renderTabs(); })
+      .catch(() => { trajMeta[m] = '—'; renderTabs(); });
   }
-
-  buildFileTree();
 }
+
+// Everything that used to be a sidebar section but isn't a primary reading view.
+async function buildFilesMenu() {
+  const list = document.getElementById('files-list');
+  // QC spec and CB responses are tabs now; what is left here is genuinely
+  // "other stuff" — the ranking proof and the raw files.
+  const entries = [];
+  if (meta.hasRankingProof) {
+    entries.push(el('button', { type: 'button', onclick: () => { closeMenus(); setActiveTab(null); showRankingProof(); } }, 'Ranking proof'));
+    entries.push(el('div', { class: 'menu__sep' }));
+  }
+  list.replaceChildren(...entries);
+
+  const tree = await api(`/task/${bucket}/${taskId}/files`);
+  const files = [];
+  (function walk(es) { for (const e of es) e.dir ? walk(e.children) : files.push(e.path); })(tree);
+  const shown = files.filter((p) =>
+    !SKIP_FILES.has(p) && !p.startsWith('trajectories/') &&
+    !p.startsWith('snapshots/') && !p.startsWith('initial_snapshots/') && !p.startsWith('ranking_proof/'));
+  for (const f of shown) {
+    list.append(el('button', {
+      type: 'button', class: 'menu__file', title: f,
+      onclick: () => { closeMenus(); setActiveTab(null); showFile(f); },
+    }, f));
+  }
+  if (!shown.length) list.append(el('div', { class: 'menu__hint menu__empty' }, 'No other files.'));
+}
+
+// Where this task sits in the reviewer's own queue, and what is still open on it.
+async function renderTaskStrip() {
+  const strip = document.getElementById('task-strip');
+  const state = await api(`/task/${bucket}/${taskId}/state`).catch(() => ({}));
+  const checks = state.checklist || {};
+  const open = Math.max(0, (meta.findingCount || 0) - Object.keys(checks).length);
+  const pct = meta.findingCount ? Math.round(((meta.findingCount - open) / meta.findingCount) * 100) : 0;
+
+  let queue = null;
+  try {
+    const ws = await api('/workspace');
+    const mine = Object.values(ws).flat().filter((t) => t.claimedBy === me?.username && !t.delivered && !t.tour);
+    const idx = mine.findIndex((t) => t.id === taskId);
+    const next = mine.find((t) => t.id !== taskId && !t.verdict);
+    queue = { n: idx >= 0 ? idx + 1 : null, total: mine.length, next };
+  } catch { /* strip degrades to findings only */ }
+
+  mount(strip,
+    queue?.n ? el('span', {}, `Task ${queue.n} of ${queue.total} you claimed`) : el('span', {}, 'Not claimed by you'),
+    meta.findingCount
+      ? el('span', { class: 'progress', style: 'width:150px' }, el('i', { style: `width:${pct}%` }))
+      : null,
+    el('span', { class: 'sep' }, '·'),
+    meta.findingCount
+      ? el('span', {}, `${meta.findingCount} finding${meta.findingCount === 1 ? '' : 's'}, `,
+        el('b', { class: open ? 'is-warn' : 'is-ok', style: 'font-family:var(--font);font-size:12px' },
+          open ? `${open} still open` : 'all adjudicated'))
+      : el('span', {}, 'No review generated yet'),
+    el('span', { class: 'spacer' }),
+    queue?.next
+      ? el('a', { href: `${window.__base__ || ''}/task/${queue.next.bucket}/${queue.next.id}`, style: 'font-weight:600' }, 'Next task →')
+      : null,
+  );
+}
+
+// ---------- overflow menus ----------
+function closeMenus() {
+  for (const m of document.querySelectorAll('.menu__list')) m.hidden = true;
+}
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('#files-btn, #more-btn');
+  if (btn) {
+    const list = btn.parentElement.querySelector('.menu__list');
+    const wasOpen = !list.hidden;
+    closeMenus();
+    list.hidden = wasOpen;
+    return;
+  }
+  if (!e.target.closest('.menu__list')) closeMenus();
+});
 
 const SKIP_FILES = new Set(['review.md', 'remediation.md', '_audit_seed.md', '_chat.json', '_studio.json']);
 const FILE_GROUP_ORDER = ['Task', 'Other'];
 
-async function buildFileTree() {
-  const tree = await api(`/task/${bucket}/${taskId}/files`);
-  const files = [];
-  (function walk(entries) {
-    for (const e of entries) e.dir ? walk(e.children) : files.push(e.path);
-  })(tree);
-
-  // group by folder, with clean basenames (no front-chopped path garbage)
-  const groups = new Map();
-  for (const p of files) {
-    if (SKIP_FILES.has(p) || p.startsWith('trajectories/')) continue;
-    const seg = p.includes('/') ? p.split('/')[0] : '';
-    // snapshots are noise; ranking_proof has its own dedicated view
-    if (seg === 'snapshots' || seg === 'initial_snapshots' || seg === 'ranking_proof') continue;
-    const label = seg === '' ? 'Task' : 'Other';
-    if (!groups.has(label)) groups.set(label, []);
-    groups.get(label).push({ path: p, name: p.split('/').pop() });
-  }
-
-  const navFiles = document.getElementById('nav-files');
-  navFiles.replaceChildren();
-  const labels = [...groups.keys()].sort((a, b) => FILE_GROUP_ORDER.indexOf(a) - FILE_GROUP_ORDER.indexOf(b));
-  for (const label of labels) {
-    navFiles.append(el('div', { class: 'file-group' }, label));
-    for (const f of groups.get(label)) {
-      navFiles.append(
-        el('button', { class: 'nav-item file-item', title: f.path, onclick: (ev) => { setActive(ev.currentTarget); showFile(f.path); } }, f.name)
-      );
-    }
-  }
-}
-
-function setActive(node) {
-  activeNav?.classList.remove('active');
-  activeNav = node;
-  node?.classList.add('active');
-}
-
-function findDocNav(label) {
-  return [...document.querySelectorAll('#nav-docs .nav-item')].find((b) => b.textContent.includes(label)) || null;
-}
+function setActive() {}
+function findDocNav() { return null; }
 
 function loadTrajectory(model) {
   trajCache[model] ||= api(`/task/${bucket}/${taskId}/trajectory/${model}`);
@@ -293,12 +356,13 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
 }
 
 function addRegenButton(doc) {
-  const head = document.querySelector('.viewer-head');
-  head.querySelector('.regen')?.remove();
+  // The old viewer header is gone with the sidebar; the control now sits at the
+  // top of the document pane itself.
+  document.querySelector('.doc__regen')?.remove();
   if (me.role !== 'admin') return; // reviewers view docs; only admin generates
-  head.append(
+  document.getElementById('viewer-body').prepend(
     el('button', {
-      class: 'regen',
+      class: 'btn doc__regen',
       onclick: async () => {
         await api(`/task/${bucket}/${taskId}/docgen/${doc.key}`, { method: 'POST' });
         watchDoc(doc); // background job; poll + auto-reload, survives navigation
@@ -332,9 +396,10 @@ async function watchDoc(doc) {
 
 // ---------- task definition / milestones ----------
 async function showTaskDef() {
+  setActiveTab('definition');
   hideTrajToolbar();
   viewerTitle.textContent = `task definition${taskDef.missing ? '' : ` (${taskDef.source})`}`;
-  document.querySelector('.viewer-head .regen')?.remove();
+  document.querySelector('.doc__regen')?.remove();
   viewReopeners.set('taskdef', { label: 'Task definition', reopen: () => { setActive(findDocNav('Task definition')); showTaskDef(); } });
   const presence = taskDef.missing || !taskDef.milestones.length ? null : await milestonePresence();
   mountView('taskdef', () => buildTaskDefView(presence), { refresh: true });
@@ -544,9 +609,10 @@ function askCopilotAboutMilestone(m) {
 let rubricPromise = null;
 
 async function showQcSpec(focusKey = null) {
+  setActiveTab('qcspec');
   hideTrajToolbar();
   viewerTitle.textContent = 'QC spec — V11 rubric';
-  document.querySelector('.viewer-head .regen')?.remove();
+  document.querySelector('.doc__regen')?.remove();
   viewReopeners.set('qcspec', { label: 'QC spec', reopen: () => { setActive(findDocNav('QC spec')); showQcSpec(); } });
   rubricPromise ||= api('/spec/rubric');
   const { dimensions } = await rubricPromise;
@@ -555,11 +621,22 @@ async function showQcSpec(focusKey = null) {
     setActive(findDocNav('QC spec'));
     const node = document.getElementById(`spec-${focusKey}`);
     if (node) {
-      node.scrollIntoView({ behavior: 'instant', block: 'start' });
-      node.classList.add('flash');
-      setTimeout(() => node.classList.remove('flash'), 2500);
+      revealInPane(node);
     }
   }
+}
+
+// scrollIntoView({block:'start'}) pins the target flush against the top of the
+// scrolling pane, which reads as "cut off" — the card's own heading ends up
+// hard against the tab bar. Scroll the pane manually with headroom instead.
+function revealInPane(node, { offset = 28 } = {}) {
+  const pane = document.getElementById('viewer');
+  const delta = node.getBoundingClientRect().top - pane.getBoundingClientRect().top - offset;
+  pane.scrollBy({ top: delta, behavior: 'smooth' });
+  node.classList.remove('flash');
+  void node.offsetWidth;          // restart the animation if it is already running
+  node.classList.add('flash');
+  setTimeout(() => node.classList.remove('flash'), 2400);
 }
 
 function buildQcSpecView(dimensions) {
@@ -619,7 +696,7 @@ function buildQcSpecView(dimensions) {
             el('h3', {}, group),
             !multi && dims[0].variant ? el('span', { class: 'spec-group-variant' }, dims[0].variant) : null,
           ),
-          desc ? el('p', { class: 'spec-group-desc' }, desc) : null,
+          desc ? groupDesc(desc) : null,
           el('div', { class: 'spec-grid' }, dims.map((d) => card(d, multi))),
         );
       }),
@@ -627,13 +704,34 @@ function buildQcSpecView(dimensions) {
   );
 }
 
+// Some V11 dimension descriptions run to a full screen of prose. Collapsed by
+// default with a peek of the first lines — the cards below are what you came
+// for; the rubric essay is reference you open when you need the exact wording.
+function groupDesc(desc) {
+  const wrap = el('p', { class: 'spec-group-desc collapsed' }, desc);
+  const toggle = el('button', { class: 'spec-desc-toggle', type: 'button' }, 'Show more');
+  toggle.addEventListener('click', () => {
+    const open = wrap.classList.toggle('collapsed');
+    toggle.textContent = open ? 'Show more' : 'Show less';
+  });
+  // Short descriptions don't need a control at all; measured after paint.
+  requestAnimationFrame(() => {
+    if (wrap.scrollHeight <= wrap.clientHeight + 4) {
+      wrap.classList.remove('collapsed');
+      toggle.remove();
+    }
+  });
+  return el('div', { class: 'spec-desc' }, wrap, toggle);
+}
+
 // ---------- CB responses (rank.json behind a UI) ----------
 let rankPromise = null;
 
 async function showCbResponses() {
+  setActiveTab('cb');
   hideTrajToolbar();
   viewerTitle.textContent = 'CB responses — rank.json';
-  document.querySelector('.viewer-head .regen')?.remove();
+  document.querySelector('.doc__regen')?.remove();
   viewReopeners.set('cb', { label: 'CB responses', reopen: () => { setActive(findDocNav('CB responses')); showCbResponses(); } });
   rankPromise ||= api(`/task/${bucket}/${taskId}/rank`);
   const rank = await rankPromise;
@@ -806,7 +904,7 @@ function buildCbResponsesView(rank) {
 async function showRankingProof() {
   hideTrajToolbar();
   viewerTitle.textContent = 'Ranking proof';
-  document.querySelector('.viewer-head .regen')?.remove();
+  document.querySelector('.doc__regen')?.remove();
   viewReopeners.set('rankproof', { label: 'Ranking proof', reopen: () => { setActive(findDocNav('Ranking proof')); showRankingProof(); } });
   const tree = await api(`/task/${bucket}/${taskId}/files`);
   const proof = [];
@@ -849,9 +947,10 @@ const lvlLabel = (l) => LVL_LABEL[String(l)] ?? `L${l}`;
 const fmtDate = (s) => (s ? new Date(s).toISOString().slice(0, 16).replace('T', ' ') : '—');
 
 async function showPipeline() {
+  setActiveTab('pipeline');
   hideTrajToolbar();
   viewerTitle.textContent = 'Pipeline';
-  document.querySelector('.viewer-head .regen')?.remove();
+  document.querySelector('.doc__regen')?.remove();
   viewReopeners.set('pipeline', { label: 'Pipeline', reopen: () => { setActive(findDocNav('Pipeline')); showPipeline(); } });
 
   const host = el('div', { class: 'pipeline' }, el('div', { class: 'pl-loading' }, 'Querying Redash…'));
@@ -971,9 +1070,10 @@ async function gotoFinding(fid) {
 }
 
 async function showChecklist() {
+  setActiveTab('checklist');
   hideTrajToolbar();
   viewerTitle.textContent = 'Checklist';
-  document.querySelector('.viewer-head .regen')?.remove();
+  document.querySelector('.doc__regen')?.remove();
   viewReopeners.set('checklist', { label: 'Checklist', reopen: () => { setActive(findDocNav('Checklist')); showChecklist(); } });
   let reviewText = '';
   try { reviewText = (await api(`/task/${bucket}/${taskId}/file?path=review.md`)).text; } catch { /* no review yet */ }
@@ -1135,8 +1235,10 @@ function userText(m) {
 
 async function showTrajectory(model, focusIndex = null, phrase = null) {
   setActive(null); // single highlight: the launcher below is the only active marker
+  lastTraj = model;
+  setActiveTab('trajectories');
   viewerTitle.textContent = `Trajectory viewer — trajectory_${model}.json`;
-  document.querySelector('.viewer-head .regen')?.remove();
+  document.querySelector('.doc__regen')?.remove();
   viewReopeners.set(`traj:${model}`, {
     label: model === 'model_a' ? 'Model A' : 'Model B',
     reopen: () => showTrajectory(model),
@@ -1219,12 +1321,14 @@ function renderTrajTabs(active) {
 // side render as a one-sided row.
 async function showSideBySide(focus = null) {
   viewerTitle.textContent = 'Trajectory viewer — A ↔ B';
-  document.querySelector('.viewer-head .regen')?.remove();
+  document.querySelector('.doc__regen')?.remove();
   setActive(null);
   viewReopeners.set('sbs', { label: 'A ↔ B', reopen: () => showSideBySide() });
   let A, B;
   try { A = await loadTrajectory('model_a'); } catch { A = null; }
   try { B = await loadTrajectory('model_b'); } catch { B = null; }
+  lastTraj = 'sbs';
+  setActiveTab('trajectories');
   setTrajLauncherActive('sbs');
   renderTrajTabs('sbs');
   mountView('sbs', () => buildSideBySide(A, B), { refresh: true });
@@ -1447,7 +1551,7 @@ document.getElementById('collapse-all').addEventListener('click', (e) => {
 async function showFile(relPath) {
   hideTrajToolbar();
   viewerTitle.textContent = relPath;
-  document.querySelector('.viewer-head .regen')?.remove();
+  document.querySelector('.doc__regen')?.remove();
   viewReopeners.set(`file:${relPath}`, {
     label: relPath.split('/').pop(),
     reopen: () => {
@@ -1492,7 +1596,10 @@ const chatPanel = document.getElementById('chat-panel');
 const chatAmbient = el('div', { class: 'chat-ambient', 'aria-hidden': 'true' });
 chatPanel?.prepend(chatAmbient);
 function syncModeToggle() {
-  modeToggle?.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.mode === copilotMode));
+  // The redesign's segmented control styles [aria-pressed]; toggling the old
+  // .active class left Dynamic looking unselected, so it read as broken.
+  modeToggle?.querySelectorAll('button').forEach((b) =>
+    b.setAttribute('aria-pressed', String(b.dataset.mode === copilotMode)));
 }
 function applyMode() {
   chatPanel?.classList.toggle('mode-dynamic', copilotMode === 'dynamic');
@@ -1505,6 +1612,8 @@ modeToggle?.addEventListener('click', (e) => {
   localStorage.setItem('cwt_copilot_mode', copilotMode);
   syncModeToggle();
   applyMode();
+  chatLog.querySelector('.chat-intro')?.remove();
+  refreshChatIntro();
   // one-shot light sweep across the panel to punctuate the switch
   chatPanel?.classList.add('mode-switching');
   setTimeout(() => chatPanel?.classList.remove('mode-switching'), 650);
@@ -1554,44 +1663,31 @@ function playGuide(guide, originalQuestion = '') {
   let idx = 0;               // 0 = verdict card; 1..N = evidence[idx-1]
   let busy = false;
 
-  const overlay = el('div', { class: 'dg-overlay' });
-  const hole = el('div', { class: 'dg-hole' });
-  overlay.append(hole);
-  const mascot = el('img', { class: 'dg-mascot', src: '/copilot.png', alt: '' });
-  const bubble = el('div', { class: 'dg-bubble glass' });
-  const stage = el('div', { class: 'dg-stage' }, bubble, mascot);
-  document.body.append(overlay, stage);
+  // The walkthrough plays where Acey already lives. Nothing floats over the
+  // document: the panel does the talking and the document reacts, which is what
+  // makes it read as guided rather than as a popup that happened to appear.
+  setChatCollapsed(false);
+  const bubble = el('div', { class: 'dg-bubble' });
+  const stage = el('div', { class: 'dg-stage' }, bubble);
+  chatLog.append(stage);
+  stage.scrollIntoView({ block: 'end', behavior: 'smooth' });
 
   const total = () => evidence.length + 1;
   const curStep = () => (idx === 0
     ? { kind: 'Verdict', accent: 'var(--red)', title: '', text: guide.verdict_line || 'Here’s what I found.', anchor: null }
     : { ...evidence[idx - 1], text: evidence[idx - 1].commentary });
 
+  // resolveAnchor() navigates the document pane to the step's target and the
+  // shared .flash ring marks it — so the highlight lands on the thing being
+  // discussed, not on a 2px outline around the entire pane like it used to.
   function place() {
-    const viewer = document.querySelector('#viewer');
-    const s = curStep();
-    if (idx === 0 || !viewer) {
-      overlay.classList.add('no-target');
-      hole.style.display = 'none';
-    } else {
-      overlay.classList.remove('no-target');
-      const r = viewer.getBoundingClientRect();
-      const pad = 6;
-      Object.assign(hole.style, {
-        display: 'block', left: `${r.left - pad}px`, top: `${r.top - pad}px`,
-        width: `${r.width + pad * 2}px`, height: `${r.height + pad * 2}px`,
-        outline: `2px solid ${s.accent || 'var(--blue)'}`,
-      });
-    }
-    const side = /model_a/.test(s.anchor || '') ? 'left' : /model_b/.test(s.anchor || '') ? 'right' : 'center';
-    stage.classList.remove('dock-left', 'dock-right', 'dock-center');
-    stage.classList.add('dock-' + side);
+    stage.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }
 
   function close() {
     window.removeEventListener('resize', place);
     document.removeEventListener('keydown', onKey);
-    overlay.remove(); stage.remove(); activeGuide = null;
+    stage.remove(); activeGuide = null;
   }
   function onKey(e) {
     if (e.target.closest('.dg-ask')) return;   // typing a follow-up
@@ -1676,21 +1772,24 @@ function playGuide(guide, originalQuestion = '') {
 
 function renderGuideBubble(guide, question = '') {
   chatLog.querySelector('.chat-intro')?.remove();
+  // This card carried its own layout — a mascot floating inside the bubble and
+  // bold body text — so it read as a different component from every other Acey
+  // reply. It now uses the same stamp + bubble as the rest of the transcript.
   const body = el('div', { class: 'bubble md' });
   if (guide.dynamic) {
     body.append(
-      el('div', { class: 'guide-verdict' },
-        el('img', { class: 'copilot-avatar', src: '/copilot.png', alt: '' }),
-        el('span', {}, guide.verdict_line || 'Guided walkthrough')),
-      el('button', { class: 'chat-suggest', onclick: () => playGuide(guide, question) },
-        `▶ Replay walkthrough · ${guide.steps.length} step${guide.steps.length === 1 ? '' : 's'}`),
+      el('div', { class: 'guide-verdict' }, guide.verdict_line || 'Guided walkthrough'),
+      el('button', {
+        class: 'guide-replay', type: 'button',
+        onclick: () => playGuide(guide, question),
+      }, `▶ Replay walkthrough · ${guide.steps.length} step${guide.steps.length === 1 ? '' : 's'}`),
     );
   } else {
     if (guide.verdict_line) body.append(el('div', {}, guide.verdict_line));
     body.append(el('div', { class: 'tool-line' },
       `Not available for dynamic — ${guide.reason || 'no anchored evidence'}. Switch to Static for a written answer.`));
   }
-  chatLog.append(el('div', { class: 'chat-msg assistant' }, el('div', { class: 'who' }, 'Acey'), body));
+  chatLog.append(el('div', { class: 'chat-msg assistant' }, aceyStamp(), body));
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
@@ -1703,23 +1802,28 @@ const CHAT_SUGGESTIONS = [
   'Find the strongest evidence for and against the winning model.',
 ];
 
+// The 76px bobbing mascot, the hero name card and the aurora behind it are gone:
+// Acey's identity is already in the panel header. What is left is the one thing
+// that helps — what it can do, and four ways in.
 function renderChatIntro() {
   const chips = CHAT_SUGGESTIONS.map((s) =>
     el('button', {
-      class: 'chat-suggest',
-      onclick: () => { setChatCollapsed(false); chatText.value = s; chatText.focus(); chatText.dispatchEvent(new Event('input')); },
+      type: 'button',
+      onclick: () => { chatText.value = s; chatText.focus(); chatText.dispatchEvent(new Event('input')); },
     }, s));
+  // The copy used to say "Flip to Dynamic" even while Dynamic was selected.
+  const intro = copilotMode === 'dynamic'
+    ? ['I read both trajectories and cross-check the annotator’s rank.json against what actually ',
+       'happened. Ask me anything and I’ll ', el('b', {}, 'walk you through it step by step'),
+       ', stopping on each turn, rubric row and rank.json field that matters.']
+    : ['I read both trajectories and cross-check the annotator’s rank.json against what actually ',
+       'happened, citing exact turns, rubric rows and rank.json fields as clickable links. Flip to ',
+       el('b', {}, 'Dynamic'), ' and I’ll walk you through a failure step by step.'];
   return el('div', { class: 'chat-intro' },
-    el('div', { class: 'chat-hero' },
-      el('img', { class: 'copilot-avatar hero', src: '/copilot.png', alt: '' }),
-      el('div', { class: 'chat-hero-name' }, 'Acey'),
-      el('div', { class: 'chat-hero-tag' }, 'your embedded ACC quality SME'),
-    ),
-    el('div', { class: 'chat-intro-text' },
-      'I read both trajectories, search them, and cross-check the annotator’s rank.json against what actually happened — ',
-      'citing exact trajectory turns, QC rubric rows, and rank.json fields as clickable links. ',
-      'Flip to ', el('b', {}, 'Dynamic'), ' and I’ll walk you through a failure step by step. Ask anything, or start with:'),
-    el('div', { class: 'chat-suggests' }, ...chips),
+    el('img', { class: 'chat-intro-avatar', src: '/copilot.png', alt: '' }),
+    el('p', { class: 'acey__intro' }, ...intro),
+    el('h3', { class: 'eyebrow', style: 'margin: 20px 0 10px' }, 'Start with'),
+    el('div', { class: 'acey__suggest' }, ...chips),
   );
 }
 
@@ -1729,6 +1833,18 @@ function refreshChatIntro() {
   const intro = chatLog.querySelector('.chat-intro');
   if (hasMsg) intro?.remove();
   else if (!intro) chatLog.append(renderChatIntro());
+  // With only the intro in it, the column centres its content; once there are
+  // messages it goes back to a normal top-anchored scroll.
+  chatLog.classList.toggle('is-empty', !hasMsg);
+}
+
+// Targeted warmth: Acey's replies carry its avatar and a name label, so the
+// column reads as someone answering rather than as log output. No glow, no
+// bobbing mascot — the personality is in the voice and the presence.
+function aceyStamp() {
+  return el('div', { class: 'msg-who' },
+    el('img', { class: 'msg-avatar', src: '/copilot.png', alt: '' }),
+    el('span', {}, 'Acey'));
 }
 
 function appendChat(role, content) {
@@ -1738,7 +1854,9 @@ function appendChat(role, content) {
   else bubble.textContent = content;
   chatLog.append(
     el('div', { class: `chat-msg ${role}` },
-      el('div', { class: 'who' }, role === 'user' ? 'reviewer' : 'Acey'),
+      role === 'user'
+        ? el('div', { class: 'who' }, 'reviewer')
+        : aceyStamp(),
       bubble,
     )
   );
@@ -1898,8 +2016,28 @@ function showContinueBtn() {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
+// One activity row per turn instead of a chat message per tool call. It counts
+// repeats and lists the distinct tools, so the work is still visible without
+// burying the answer under a dozen ⚙ lines.
+let activityRow = null;
+const activityTools = new Map();
+function resetActivity() { activityRow = null; activityTools.clear(); }
+function noteActivity(name) {
+  activityTools.set(name, (activityTools.get(name) || 0) + 1);
+  const total = [...activityTools.values()].reduce((a, b) => a + b, 0);
+  const list = [...activityTools.entries()]
+    .map(([n, c]) => (c > 1 ? `${n}×${c}` : n)).join(' · ');
+  if (!activityRow) {
+    activityRow = el('div', { class: 'tool-line' });
+    chatLog.append(activityRow);
+  }
+  activityRow.textContent = `⚙ ${total} step${total === 1 ? '' : 's'} · ${list}`;
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
 async function sendMessage(message) {
   appendChat('user', message);
+  resetActivity();
   removeContinueBtn();
   document.getElementById('chat-send').disabled = true;
   chatStatus.textContent = 'thinking…';
@@ -1907,11 +2045,17 @@ async function sendMessage(message) {
   try {
     await apiSSE(`/task/${bucket}/${taskId}/chat`, { message, mode: copilotMode }, (m) => {
       if (m.type === 'tool' && m.name !== 'present_guide') {
-        appendToolLine(`⚙ ${m.name} ${JSON.stringify(m.args).slice(0, 120)}`);
+        noteActivity(m.name);
         chatStatus.textContent = `running ${m.name}…`;
       }
       if (m.type === 'tool' && m.name === 'present_guide') chatStatus.textContent = 'building walkthrough…';
-      if (m.type === 'assistant') { appendChat('assistant', m.content); chatStatus.textContent = ''; }
+      // Only the final message is the answer; everything before it is the model
+      // narrating its own next step. That reasoning goes to the status line, not
+      // the transcript.
+      if (m.type === 'assistant') {
+        if (m.final) { appendChat('assistant', m.content); chatStatus.textContent = ''; }
+        else chatStatus.textContent = m.content.replace(/\s+/g, ' ').slice(0, 90);
+      }
       if (m.type === 'guide') { chatStatus.textContent = ''; renderGuideBubble(m.guide, message); if (m.guide.dynamic) playGuide(m.guide, message); }
       if (m.type === 'action') { chatStatus.textContent = ''; handleActionEvent(m); }
       if (m.type === 'truncated') { chatStatus.textContent = ''; showContinueBtn(); }
@@ -2079,73 +2223,59 @@ window.addEventListener('beforeunload', () => {
   if (sessionStorage.getItem('cwt_tour_task') && !sessionStorage.getItem('cwt_tour_resume')) navigator.sendBeacon?.('/api/tour/end');
 });
 
-// ---------- resizable / collapsible chat panel ----------
-const layout = document.querySelector('.task-layout');
-const resizer = document.getElementById('chat-resizer');
-const expandChatBtn = document.getElementById('expand-chat');
-const MIN_CHAT = 300, MAX_CHAT = 720, COLLAPSE_AT = 200;
+// Acey is a fixed 348px column, but it still collapses — reviewers wanted the
+// full width back for reading trajectories. No floating mascot this time: the
+// panel hides and an "Acey ▸" button appears in the tab bar, which is the same
+// chrome as "Files ▾" sitting next to it. Choice persists per browser.
+const workspaceEl = document.querySelector('.workspace');
+const showAceyBtn = document.getElementById('show-acey');
 
-function setChatWidth(px) {
-  layout.style.setProperty('--chat-w', `${Math.min(MAX_CHAT, Math.max(MIN_CHAT, px))}px`);
-}
-const fabNudge = document.getElementById('fab-nudge');
 function setChatCollapsed(collapsed) {
-  layout.classList.toggle('chat-collapsed', collapsed);
-  expandChatBtn.hidden = !collapsed;
-  // Nudge the reviewer toward the copilot when it's tucked away (unless they dismissed it).
-  if (fabNudge) fabNudge.hidden = !(collapsed && !localStorage.getItem('cwt_fab_nudge_dismissed'));
-  localStorage.setItem('cwt_chat_collapsed', collapsed ? '1' : '');
+  workspaceEl.classList.toggle('acey-collapsed', collapsed);
+  showAceyBtn.hidden = !collapsed;
+  try { localStorage.setItem('cwt_chat_collapsed', collapsed ? '1' : ''); } catch { /* private mode */ }
 }
-fabNudge?.addEventListener('click', (e) => { if (!e.target.closest('#fab-nudge-x')) openCopilotWithFlair(); });
-document.getElementById('fab-nudge-x')?.addEventListener('click', (e) => {
-  e.stopPropagation();
-  localStorage.setItem('cwt_fab_nudge_dismissed', '1');
-  if (fabNudge) fabNudge.hidden = true;
-});
+// Kept as a name the tour and suggestion chips already call.
+function openCopilotWithFlair() { setChatCollapsed(false); }
 
-const savedW = Number(localStorage.getItem('cwt_chat_w'));
-if (savedW) setChatWidth(savedW);
-if (localStorage.getItem('cwt_chat_collapsed')) setChatCollapsed(true);
+document.getElementById('collapse-chat').addEventListener('click', () => setChatCollapsed(true));
+showAceyBtn.addEventListener('click', () => setChatCollapsed(false));
+setChatCollapsed(!!localStorage.getItem('cwt_chat_collapsed'));
 
-resizer.addEventListener('pointerdown', (e) => {
+// Drag the panel's left edge to resize. Width persists; below MIN it collapses
+// to the mascot rather than becoming a useless sliver.
+const MIN_ACEY = 300, MAX_ACEY = 760, COLLAPSE_AT = 220;
+const aceyPanel = document.getElementById('chat-panel');
+function setAceyWidth(px) {
+  const w = Math.min(MAX_ACEY, Math.max(MIN_ACEY, px));
+  aceyPanel.style.width = `${w}px`;
+  try { localStorage.setItem('cwt_chat_w', String(w)); } catch { /* private mode */ }
+}
+const savedAceyW = Number(localStorage.getItem('cwt_chat_w'));
+if (savedAceyW) setAceyWidth(savedAceyW);
+
+const aceyGrip = el('div', { class: 'acey__grip', title: 'Drag to resize' });
+aceyPanel.prepend(aceyGrip);
+aceyGrip.addEventListener('pointerdown', (e) => {
   e.preventDefault();
-  resizer.setPointerCapture(e.pointerId);
-  resizer.classList.add('dragging');
+  aceyGrip.setPointerCapture(e.pointerId);
+  aceyGrip.classList.add('dragging');
   document.body.style.cursor = 'col-resize';
   const onMove = (ev) => {
-    const w = window.innerWidth - ev.clientX - 20; // 20px page padding
-    if (w < COLLAPSE_AT) {
-      setChatCollapsed(true);
-    } else {
-      setChatCollapsed(false);
-      setChatWidth(w);
-    }
+    const w = window.innerWidth - ev.clientX;
+    if (w < COLLAPSE_AT) { setChatCollapsed(true); onUp(); return; }
+    setAceyWidth(w);
   };
   const onUp = () => {
-    resizer.classList.remove('dragging');
+    aceyGrip.classList.remove('dragging');
     document.body.style.cursor = '';
-    const w = parseInt(layout.style.getPropertyValue('--chat-w')) || 400;
-    localStorage.setItem('cwt_chat_w', String(w));
-    resizer.removeEventListener('pointermove', onMove);
-    resizer.removeEventListener('pointerup', onUp);
+    aceyGrip.removeEventListener('pointermove', onMove);
+    aceyGrip.removeEventListener('pointerup', onUp);
   };
-  resizer.addEventListener('pointermove', onMove);
-  resizer.addEventListener('pointerup', onUp);
+  aceyGrip.addEventListener('pointermove', onMove);
+  aceyGrip.addEventListener('pointerup', onUp);
 });
-resizer.addEventListener('dblclick', () => setChatCollapsed(true));
-document.getElementById('collapse-chat').addEventListener('click', () => setChatCollapsed(true));
-expandChatBtn.addEventListener('click', openCopilotWithFlair);
 
-// Open the copilot as if it pops out of the mascot: a ghost of the mailbox leaps out with a
-// bubble burst, and the panel unfurls from that corner. Only when actually opening from collapsed.
-function openCopilotWithFlair() {
-  const wasCollapsed = layout.classList.contains('chat-collapsed');
-  setChatCollapsed(false);
-  if (!wasCollapsed) return;
-  const panel = document.getElementById('chat-panel');
-  panel.classList.add('opening');
-  panel.addEventListener('animationend', () => panel.classList.remove('opening'), { once: true });
-}
 
 // ---------- boot ----------
 const me = await api('/me'); // 401 redirects to login
@@ -2171,11 +2301,10 @@ await buildSidebar();
 const params = new URLSearchParams(location.search);
 if (params.get('traj')) {
   showTrajectory(params.get('traj'), params.has('msg') ? Number(params.get('msg')) : null);
-} else if (!hasReview && !taskDef.missing) {
-  setActive(document.querySelector('#nav-docs .nav-item'));
-  showTaskDef();
+} else if (hasReview) {
+  openTab('review');
 } else {
-  openDoc(DOCS[0], findDocNav('Review'));
+  openTab('definition');
 }
 await loadChat();
 
