@@ -101,6 +101,39 @@ export const REGISTRY = {
       days: { type: 'int', min: 1, max: 180, default: () => 30 },
     },
   },
+
+  // ---- the three the Overview page is built on ----
+
+  deliveries: {
+    label: 'Delivery batches',
+    description: 'Bulk level-12 close-out sweeps — one row per delivery, in PT.',
+    sql: 'deliveries.sql',
+    params: {
+      project_id: { type: 'objectId', default: () => config.redash.projectId },
+      // Below this, a same-hour cluster is ordinary attrition rather than a
+      // released batch. The smallest real delivery on record is 43.
+      min_batch: { type: 'int', min: 2, max: 1000, default: () => 20 },
+      limit: { type: 'int', min: 1, max: 200, default: () => 26 },
+    },
+  },
+  queue_state: {
+    label: 'Queue state and aging',
+    description: 'Tasks pending per review level, with average, oldest and stale counts.',
+    sql: 'queue_state.sql',
+    params: {
+      project_id: { type: 'objectId', default: () => config.redash.projectId },
+      stale_days: { type: 'int', min: 1, max: 90, default: () => 7 },
+    },
+  },
+  level_economics: {
+    label: 'Cost and rework per level',
+    description: 'Hours, attempts and rejection rate per review level over a trailing window.',
+    sql: 'level_economics.sql',
+    params: {
+      project_id: { type: 'objectId', default: () => config.redash.projectId },
+      days: { type: 'int', min: 1, max: 365, default: () => 30 },
+    },
+  },
 };
 
 // Public shape for the UI / copilot: what can be run and with which params.

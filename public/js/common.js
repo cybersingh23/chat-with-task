@@ -232,6 +232,10 @@ const SCALE_LOCKUP = '<svg viewBox="0 0 640.54 121.88" role="img" aria-label="Sc
 
 const NAV_ITEMS = [
   { href: '/', label: 'Board', key: 'board' },
+  // Sits second: the board stays home, but Overview is the page you open to
+  // find out where the project is, so it should be reachable before the
+  // drill-down screens rather than after them.
+  { href: '/overview.html', label: 'Overview', key: 'overview' },
   { href: '/archive.html', label: 'Archive', key: 'archive' },
   { href: '/l12.html', label: 'L12 Stats', key: 'l12' },
   { href: '/redash.html', label: 'Redash', key: 'redash' },

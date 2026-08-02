@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Overview — Audit Studio</title>
+  <link rel="stylesheet" href="/css/studio.css" />
+  <link rel="icon" href="/scale-icon.svg" />
+  <script src="/js/theme.js"></script>
+</head>
+<body>
+  <header class="topbar" id="app-header"></header>
+
+  <main class="ov-main">
+    <!-- AI synthesis + the two suggestion queues -->
+    <section class="ov-hero" id="ov-hero" aria-busy="true">
+      <div class="ov-hero__head">
+        <div class="ov-hero__title">
+          <h1 class="ov-headline" id="ov-headline">Loading…</h1>
+          <p class="ov-clock" id="ov-clock"></p>
+        </div>
+        <div class="ov-hero__meta" id="ov-countdown"></div>
+      </div>
+      <div class="ov-prose" id="ov-prose">
+        <div class="ov-skeleton"></div>
+        <div class="ov-skeleton"></div>
+        <div class="ov-skeleton ov-skeleton--short"></div>
+      </div>
+      <div class="ov-hero__foot">
+        <span class="ov-stamp" id="ov-stamp"></span>
+        <button class="btn btn--ghost" id="ov-regen" type="button">regenerate</button>
+      </div>
+      <div class="ov-queues" id="ov-queues"></div>
+    </section>
+
+    <!-- the charts -->
+    <div class="ov-grid">
+      <section class="ov-card ov-card--wide">
+        <header class="ov-card__head">
+          <h2>Delivery volume</h2>
+          <p class="ov-card__sub" id="ov-delivery-sub">Every batch released at the final level, against the weekly target.</p>
+        </header>
+        <div class="ov-chart" id="chart-deliveries"></div>
+      </section>
+
+      <section class="ov-card ov-card--wide">
+        <header class="ov-card__head">
+          <h2>Can we make the next one?</h2>
+          <p class="ov-card__sub" id="ov-funnel-sub">Everything in flight, read cumulatively back from the finish line.</p>
+        </header>
+        <div class="ov-chart" id="chart-funnel"></div>
+      </section>
+
+      <section class="ov-card ov-card--wide">
+        <header class="ov-card__head">
+          <h2>Throughput by stage</h2>
+          <p class="ov-card__sub">Tasks touched per day. A task worked at two stages in one day counts at both, so the stack is activity rather than a task count.</p>
+        </header>
+        <div class="ov-chart" id="chart-throughput"></div>
+        <div id="chart-throughput-legend"></div>
+      </section>
+
+      <section class="ov-card">
+        <header class="ov-card__head">
+          <h2>Where the time goes</h2>
+          <p class="ov-card__sub" id="ov-cost-sub">Billed hours per level.</p>
+        </header>
+        <div class="ov-chart" id="chart-cost"></div>
+      </section>
+
+      <section class="ov-card">
+        <header class="ov-card__head">
+          <h2>Rework</h2>
+          <p class="ov-card__sub" id="ov-rework-sub">Share of attempts a reviewer sent back.</p>
+        </header>
+        <div class="ov-chart" id="chart-rework"></div>
+      </section>
+    </div>
+
+    <p class="ov-foot" id="ov-foot"></p>
+  </main>
+
+  <script type="module" src="/js/overview.js"></script>
+</body>
+</html>

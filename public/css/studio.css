@@ -124,6 +124,36 @@
 :root { --purple: #9c8cf0; --teal: #5bb8d4; --yellow: #d9a441; --gold: #b8924e; }
 :root[data-theme="light"] { --purple: #6b5bc4; --teal: #217e99; --yellow: #8a6510; --gold: #7a6030; }
 
+/* ── data-viz ramp (Overview page) ───────────────────────────────────────
+   Review stages are an ORDERED scale, so they get a single-hue ORDINAL ramp
+   rather than categorical hues: prominence increases toward Final, which is
+   the stage the reader is looking for. Each mode is stepped for its own
+   surface, not flipped — on dark the ramp runs the other way so Final stays
+   the most prominent step against a dark background.
+
+   Both sets were machine-validated against this app's real surfaces
+   (dark #12141a, light #ffffff): monotone lightness, every adjacent step
+   >= 0.06 apart, and the step nearest the surface clearing 2:1 (dark 2.27:1,
+   light 2.11:1). Re-run the validator before changing any of these six. */
+:root {
+  --viz-stage-1: #184f95;   /* Production   — least prominent on dark */
+  --viz-stage-2: #2a78d6;   /* Early review */
+  --viz-stage-3: #6da7ec;   /* Late review  */
+  --viz-stage-4: #cde2fb;   /* Final        — most prominent on dark */
+  --viz-grid: var(--border);
+  --viz-axis: var(--border-strong);
+  --viz-context: #3a4150;   /* de-emphasised marks: present, not competing */
+  --viz-runup: rgba(255, 255, 255, 0.045);
+}
+:root[data-theme="light"] {
+  --viz-stage-1: #86b6ef;   /* Production   — least prominent on light */
+  --viz-stage-2: #2a78d6;
+  --viz-stage-3: #1c5cab;
+  --viz-stage-4: #0d366b;   /* Final        — most prominent on light */
+  --viz-context: #c2c8d2;
+  --viz-runup: rgba(20, 23, 29, 0.05);
+}
+
 
 * { box-sizing: border-box; }
 html { height: 100%; }
@@ -2590,3 +2620,155 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 .bubble a:not(.traj-link):not(.spec-link):not(.cb-link):not(.cb-field-link):not(.cite):hover {
   text-decoration: underline;
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Overview page (/overview.html)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.ov-main { max-width: 1180px; margin: 0 auto; padding: 22px 24px 60px; }
+
+/* ── hero: synthesis + the two queues ─────────────────────────────────── */
+.ov-hero {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-card); padding: 22px 24px 4px; margin-bottom: 20px;
+}
+.ov-hero__head { display: flex; align-items: flex-start; gap: 24px; flex-wrap: wrap; }
+.ov-hero__title { flex: 1 1 340px; min-width: 0; }
+.ov-headline { font-size: 25px; font-weight: 620; letter-spacing: -0.015em; margin: 0 0 4px; color: var(--text); }
+.ov-clock { margin: 0; font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.ov-hero__meta { display: flex; gap: 8px; flex-wrap: wrap; }
+.ov-stat {
+  display: flex; flex-direction: column; gap: 1px; min-width: 92px;
+  padding: 8px 12px; border-radius: var(--r-control);
+  background: var(--surface-active); border: 1px solid var(--border);
+}
+/* Proportional figures, NOT tabular-nums: these are standalone display numbers,
+   and equal-width digits make a value like "43" sit loose at this size. Tabular
+   is for columns that must align vertically — axis ticks and table rows. */
+.ov-stat__v { font-size: 20px; font-weight: 640; color: var(--text); line-height: 1.15; }
+.ov-stat__k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); }
+.ov-stat--warn { background: var(--warn-bg); border-color: var(--warn); }
+.ov-stat--warn .ov-stat__v { color: var(--warn); }
+.ov-stat--ok { background: var(--ok-bg); border-color: var(--ok); }
+.ov-stat--ok .ov-stat__v { color: var(--ok); }
+
+.ov-prose { margin: 16px 0 0; font-size: 14.5px; line-height: 1.62; color: var(--text-muted); max-width: 76ch; }
+.ov-prose p { margin: 0 0 11px; }
+.ov-prose p:last-child { margin-bottom: 0; }
+.ov-error { color: var(--fail); font-size: 13.5px; }
+
+.ov-hero__foot { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.ov-stamp { font-size: 11.5px; color: var(--text-faint); }
+
+.ov-skeleton {
+  height: 12px; border-radius: 4px; background: var(--muted-bg);
+  margin-bottom: 9px; animation: ov-pulse 1.5s ease-in-out infinite;
+}
+.ov-skeleton--short { width: 52%; }
+/* Held-not-flashed: a regenerating summary dims in place instead of collapsing
+   to skeletons, so the layout never jumps mid-read. */
+.ov-prose.is-stale { opacity: 0.42; transition: opacity 0.2s ease; }
+@keyframes ov-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .ov-skeleton { animation: none; } }
+
+/* ── the two suggestion queues ────────────────────────────────────────── */
+.ov-queues {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 28px;
+  margin: 18px -24px 0; padding: 16px 24px 18px; border-top: 1px solid var(--border);
+}
+.ov-queue__head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px; }
+.ov-queue__head h3 { margin: 0; font-size: 11px; font-weight: 660; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text); }
+.ov-queue__hint { font-size: 11px; color: var(--text-faint); }
+.ov-queue__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+
+.ov-sug { display: flex; gap: 9px; align-items: flex-start; }
+.ov-sug__dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--text-faint); }
+.ov-sug--critical .ov-sug__dot { background: var(--fail); }
+.ov-sug--warn .ov-sug__dot { background: var(--warn); }
+.ov-sug--ok .ov-sug__dot { background: var(--ok); }
+.ov-sug--info .ov-sug__dot { background: var(--accent); }
+.ov-sug__text { display: block; font-size: 13px; font-weight: 560; color: var(--text); }
+a.ov-sug__text:hover { color: var(--accent); }
+.ov-sug__detail { display: block; font-size: 12px; line-height: 1.5; color: var(--text-dim); margin-top: 1px; }
+
+/* ── chart cards ──────────────────────────────────────────────────────── */
+.ov-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.ov-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-card); padding: 18px 20px 14px; min-width: 0;
+}
+.ov-card--wide { grid-column: 1 / -1; }
+.ov-card__head { margin-bottom: 12px; }
+.ov-card__head h2 { margin: 0 0 3px; font-size: 14.5px; font-weight: 620; color: var(--text); }
+.ov-card__sub { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text-dim); max-width: 82ch; }
+.ov-chart { width: 100%; min-width: 0; }
+.ov-foot { margin: 22px 2px 0; font-size: 11.5px; color: var(--text-faint); }
+@media (max-width: 820px) { .ov-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── chart marks ──────────────────────────────────────────────────────── */
+/* Fills are classes so a theme flip repaints every mark with no JS. */
+.viz { display: block; overflow: visible; }
+.viz-grid { stroke: var(--viz-grid); stroke-width: 1; }
+.viz-cross { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.viz-tick { fill: var(--text-faint); font: 10.5px var(--font); font-variant-numeric: tabular-nums; }
+.viz-rowlabel { fill: var(--text-muted); font: 11.5px var(--font); }
+.viz-datalabel { fill: var(--text); font: 11.5px var(--font); font-weight: 600; font-variant-numeric: tabular-nums; }
+.viz-sublabel { fill: var(--text-faint); font: 10.5px var(--font); font-variant-numeric: tabular-nums; }
+.viz-sublabel--warn { fill: var(--warn); }
+/* A label that lands on the target rule needs to stay readable without being
+   nudged off its own data point. paint-order draws the stroke first, so the
+   surface-coloured halo sits behind the glyphs rather than over them. */
+.viz-datalabel--halo { paint-order: stroke fill; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.viz-note { fill: var(--text-faint); font: 10.5px var(--font); }
+.viz-empty { fill: var(--text-faint); font: 12px var(--font); }
+
+/* The target is a reference rule, not a series — dashed and in ink, so it
+   never reads as another category. */
+/* Dashed is correct HERE specifically because this is a threshold — the thing
+   dashing is otherwise mistaken for. Gridlines stay solid hairlines.
+   pointer-events:none so the rule and its label never intercept a hover aimed
+   at the column underneath them. */
+.viz-rule { stroke: var(--text-dim); stroke-width: 1.5; stroke-dasharray: 4 3; pointer-events: none; }
+.viz-rule-label { fill: var(--text-dim); font: 10.5px var(--font); font-weight: 600; pointer-events: none; }
+.viz-tick, .viz-rowlabel, .viz-datalabel, .viz-sublabel, .viz-note { pointer-events: none; }
+
+.viz-stage--production   { fill: var(--viz-stage-1); }
+.viz-stage--early_review { fill: var(--viz-stage-2); }
+.viz-stage--late_review  { fill: var(--viz-stage-3); }
+.viz-stage--final        { fill: var(--viz-stage-4); }
+
+/* Emphasis form: the latest delivery is the judgement, the rest is context. */
+.viz-col--context { fill: var(--viz-context); }
+.viz-col--hit { fill: var(--ok); }
+.viz-col--miss { fill: var(--warn); }
+.viz-bar--neutral { fill: var(--viz-stage-2); }
+.viz-bar--warn { fill: var(--warn); }
+.viz-runup { fill: var(--viz-runup); }
+.viz-area { fill-opacity: 0.9; stroke: var(--surface); stroke-width: 2; }
+.viz-col, .viz-bar { transition: opacity 0.12s ease; }
+.viz-col:hover, .viz-bar:hover { opacity: 0.82; cursor: default; }
+
+/* ── legend + tooltip ─────────────────────────────────────────────────── */
+.viz-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; padding-left: 44px; }
+.viz-legend__item { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-muted); }
+.viz-legend__sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.viz-legend__sw.viz-stage--production   { background: var(--viz-stage-1); }
+.viz-legend__sw.viz-stage--early_review { background: var(--viz-stage-2); }
+.viz-legend__sw.viz-stage--late_review  { background: var(--viz-stage-3); }
+.viz-legend__sw.viz-stage--final        { background: var(--viz-stage-4); }
+
+.viz-tip {
+  position: fixed; top: 0; left: 0; z-index: 9000; pointer-events: none;
+  background: var(--surface-active); border: 1px solid var(--border-strong);
+  border-radius: var(--r-control); padding: 8px 11px; font-size: 12px; line-height: 1.55;
+  color: var(--text); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.34); max-width: 300px;
+}
+.viz-tip b { font-weight: 640; }
+.viz-tip__sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
+.viz-tip__sw.viz-stage--production   { background: var(--viz-stage-1); }
+.viz-tip__sw.viz-stage--early_review { background: var(--viz-stage-2); }
+.viz-tip__sw.viz-stage--late_review  { background: var(--viz-stage-3); }
+.viz-tip__sw.viz-stage--final        { background: var(--viz-stage-4); }
+.viz-tip__tot { color: var(--text-dim); }

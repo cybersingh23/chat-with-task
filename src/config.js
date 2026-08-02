@@ -58,6 +58,16 @@ export const config = {
     // the curated registry and saved queries work either way.
     allowAdhoc: process.env.REDASH_ALLOW_ADHOC !== 'false',
   },
+  // The Overview page (/overview.html): the weekly delivery rhythm it measures
+  // everything against. Both are project facts rather than preferences, so they
+  // live here instead of in the page — the copy, the target line on the delivery
+  // chart and the readiness maths all read the same two numbers.
+  overview: {
+    targetVolume: Number(process.env.OVERVIEW_TARGET_VOLUME || 350),
+    // Cadence and greeting are anchored to America/Los_Angeles in src/overview.js:
+    // packaging runs Tuesday evening PT, so a UTC clock would call it Wednesday.
+    staleDays: Number(process.env.OVERVIEW_STALE_DAYS || 7),
+  },
   // On-demand pull of tasks from Redash (a whole review level, or an explicit id
   // list) into a downloadable zip. Needs REDASH_API_KEY in the environment, read
   // by tools/get_tasks/pull_l10.py. No schedule — admin-button triggered only.

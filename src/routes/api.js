@@ -25,6 +25,7 @@ import { markDelivered, markUndelivered, deliverStatus, currentBackup } from '..
 import { computeL12 } from '../l12.js';
 import { createDummyTask, removeTourTasks, logTour } from '../tour.js';
 import { redashApi } from './redash.js';
+import { overviewApi } from './overview.js';
 import { ACTION_TOOL_DEFS, makeActionExecutor, confirmPlan, cancelPlan } from '../copilot_actions.js';
 
 export const api = express.Router();
@@ -61,6 +62,7 @@ api.post('/tour/log', wrap(async (req, res) => {
 
 // Live Redash: pipeline panels, per-task upstream context, query browser.
 api.use('/redash', redashApi);
+api.use('/overview', overviewApi);
 
 api.get('/spec/rubric', (req, res) => res.json({ dimensions: getRubric() }));
 
