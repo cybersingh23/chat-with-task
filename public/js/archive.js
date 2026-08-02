@@ -1,4 +1,4 @@
-import { api, el, cap } from './common.js';
+import { api, el, cap, renderAppHeader } from './common.js';
 
 const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
 const VERDICT_LABELS = {
@@ -96,13 +96,7 @@ searchInput.addEventListener('input', render);
 
 // ---------- boot ----------
 me = await api('/me');
-document.getElementById('user-chip').hidden = false;
-document.getElementById('user-name').textContent = me.username;
-document.getElementById('user-role').textContent = me.role;
-const uAvatar = document.getElementById('user-avatar');
-uAvatar.textContent = (me.username[0] || '?').toUpperCase();
-uAvatar.style.background = `hsl(${avatarHue(me.username)} 52% 42%)`;
-document.getElementById('admin-link').hidden = me.role !== 'admin';
+renderAppHeader({ active: 'archive', user: me });
 
 const q0 = new URLSearchParams(location.search).get('q');
 if (q0) searchInput.value = q0;

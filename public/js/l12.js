@@ -1,4 +1,4 @@
-import { api, el } from './common.js';
+import { api, el, renderAppHeader } from './common.js';
 import { initPipelinePanels } from './redash_panels.js';
 
 const DIM_LABEL = {
@@ -200,15 +200,11 @@ async function loadScope(scope) {
 
 // ---------- boot ----------
 const me = await api('/me');
-document.getElementById('user-chip').hidden = false;
-document.getElementById('user-name').textContent = me.username;
-const uAvatar = document.getElementById('user-avatar');
-uAvatar.textContent = (me.username[0] || '?').toUpperCase();
-uAvatar.style.background = `hsl(${avatarHue(me.username)} 52% 42%)`;
-document.getElementById('logout-btn').addEventListener('click', async () => {
-  await api('/logout', { method: 'POST' });
-  location.href = (window.__base__ || '') + '/login.html';
-});
+const scopeSel = el('select', { class: 'select', id: 'l12-scope-sel' },
+  el('option', { value: 'completed' }, 'Completed (resolved, non-archived)'),
+  el('option', { value: 'active' }, 'Active board (non-archived)'),
+  el('option', { value: 'all' }, 'All tasks on disk'));
+renderAppHeader({ active: 'l12', user: me, extras: [scopeSel] });
 
 const sel = document.getElementById('l12-scope-sel');
 const s0 = new URLSearchParams(location.search).get('scope');

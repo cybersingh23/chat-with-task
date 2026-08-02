@@ -1,4 +1,4 @@
-import { api, el, mount } from './common.js';
+import { api, el, mount, renderAppHeader } from './common.js';
 
 // In-app Redash browser: run the curated registry, search/run any saved Redash
 // query, and (admin only) run read-only ad-hoc SQL — without leaving the studio.
@@ -209,17 +209,8 @@ async function initSqlPane() {
 // ---------- boot ----------
 
 me = await api('/me');
-document.getElementById('user-chip').hidden = false;
-document.getElementById('user-name').textContent = me.username;
-const avatar = document.getElementById('user-avatar');
-avatar.textContent = (me.username[0] || '?').toUpperCase();
-let hue = 0;
-for (const c of me.username) hue = (hue * 31 + c.charCodeAt(0)) % 360;
-avatar.style.background = `hsl(${hue} 52% 42%)`;
-document.getElementById('logout-btn').addEventListener('click', async () => {
-  await api('/logout', { method: 'POST' });
-  location.href = (window.__base__ || '') + '/login.html';
-});
+const connEl = el('span', { class: 'rq-conn', id: 'rq-conn' });
+renderAppHeader({ active: 'redash', user: me, extras: [connEl] });
 
 document.getElementById('rq-tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-tab]');

@@ -1,25 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Redash — Chat with Task</title>
+  <title>Redash — Audit Studio</title>
   <link rel="stylesheet" href="/css/studio.css" />
   <link rel="icon" href="/scale-icon.svg" />
+  <script src="/js/theme.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <a href="/" class="back-home" title="back to board">‹ Board</a>
-    <div class="app-name">Redash <span>/ query browser</span></div>
-    <div class="spacer"></div>
-    <span class="rq-conn" id="rq-conn"></span>
-    <a class="back-home" href="/l12.html" title="delivery analytics dashboard">L12 Stats</a>
-    <div class="user-chip" id="user-chip" hidden>
-      <span class="avatar sm" id="user-avatar"></span>
-      <span id="user-name"></span>
-      <button id="logout-btn" title="sign out">Sign out</button>
-    </div>
-  </header>
+  <header class="topbar" id="app-header"></header>
 
   <main class="index-main">
     <div class="rq-tabs" id="rq-tabs">

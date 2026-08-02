@@ -4,33 +4,126 @@
    semantic color only where it carries meaning (severity, verdict, roles).
    ───────────────────────────────────────────────────────────────────────── */
 :root {
-  --bg: #0c0e13;
-  --surface: rgba(255, 255, 255, 0.04);
-  --surface-2: rgba(255, 255, 255, 0.07);
-  --edge: rgba(255, 255, 255, 0.08);
-  --edge-strong: rgba(255, 255, 255, 0.14);
+  --bg: #0b0d11;
+  --bg-sunken: #0e1116;
+  --surface: #12141a;
+  --surface-hover: #171a21;
+  --surface-active: #1d212a;
 
-  --text: #f3f5fa;
-  --text-2: #aeb4c0;
-  --text-3: #6b7280;
+  --border: #262a33;
+  --border-strong: #333845;
 
-  --blue: #6ca5ff;
-  --blue-deep: #2f6fed;
-  --red: #ff6159;
-  --orange: #ffa14f;
-  --green: #43d17c;
-  --purple: #b98cf5;
-  --teal: #6fc7e8;
-  --yellow: #f5c84c;
-  --gold: #d9b072;   /* V11 score-4: a non-fail milder than 3, without the yellow's volume */
+  --text: #eef0f4;
+  --text-muted: #9aa1ad;
+  --text-dim: #7b8290;
+  --text-faint: #5a616c;
+  --text-sep: #3a3f4a;
 
-  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', sans-serif;
+  --avatar-bg: #2c3a52;
+
+  --accent: #6ca5ff;
+  --accent-hover: #8fbaff;
+  --accent-solid: #2f6fed;
+  --accent-solid-hover: #3d7cf2;
+  --accent-bg: rgba(108, 165, 255, 0.10);
+  --accent-bg-hover: rgba(108, 165, 255, 0.20);
+  --accent-border: rgba(108, 165, 255, 0.22);
+
+  --fail: #ef5a52;
+  --warn: #e8a33d;
+  --ok: #4cb87a;
+  --fail-bg: rgba(239, 90, 82, 0.13);
+  --warn-bg: rgba(232, 163, 61, 0.13);
+  --ok-bg: rgba(76, 184, 122, 0.13);
+  --fail-border: rgba(239, 90, 82, 0.30);
+  --warn-tint: rgba(232, 163, 61, 0.05);
+  --ok-tint: rgba(76, 184, 122, 0.05);
+
+  --muted-bg: rgba(255, 255, 255, 0.06);
+  --scrollbar: #2b303a;
+
+  /* type */
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
   --mono: ui-monospace, 'SF Mono', Menlo, monospace;
 
-  --r-lg: 18px;
-  --r-md: 12px;
-  --r-sm: 8px;
+  /* radii — nothing larger than 8px */
+  --r-tag: 4px;
+  --r-chip: 5px;
+  --r-control: 6px;
+  --r-card: 8px;
+
+  color-scheme: dark;
 }
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-sunken: #f5f6f8;
+  --surface: #ffffff;
+  --surface-hover: #f2f3f6;
+  --surface-active: #e8eaee;
+
+  --border: #e3e5ea;
+  --border-strong: #ccd0d8;
+
+  --text: #14171d;
+  --text-muted: #5c636f;
+  --text-dim: #6b7280;
+  --text-faint: #9096a1;
+  --text-sep: #c9ced7;
+
+  --avatar-bg: #dae3f2;
+
+  --accent: #1f5fd8;
+  --accent-hover: #164caf;
+  --accent-solid: #2f6fed;
+  --accent-solid-hover: #2560d8;
+  --accent-bg: rgba(47, 111, 237, 0.08);
+  --accent-bg-hover: rgba(47, 111, 237, 0.16);
+  --accent-border: rgba(47, 111, 237, 0.24);
+
+  --fail: #c8382f;
+  --warn: #9a6510;
+  --ok: #227a4c;
+  --fail-bg: rgba(200, 56, 47, 0.09);
+  --warn-bg: rgba(154, 101, 16, 0.10);
+  --ok-bg: rgba(34, 122, 76, 0.09);
+  --fail-border: rgba(200, 56, 47, 0.26);
+  --warn-tint: rgba(154, 101, 16, 0.05);
+  --ok-tint: rgba(34, 122, 76, 0.05);
+
+  --muted-bg: rgba(20, 23, 29, 0.05);
+  --scrollbar: #ccd0d8;
+
+  color-scheme: light;
+}
+
+
+/* ── legacy aliases ──────────────────────────────────────────────────────
+   Screens not in this redesign (Admin, Archive, L12 Stats, Redash browser,
+   Login) still speak the old token names. Aliasing them keeps those pages
+   working AND pulls them onto the new palette for free. The redesigned
+   Board and Task pages must use the new names only. */
+:root, :root[data-theme="light"] {
+  --surface-2: var(--surface-active);
+  --edge: var(--border);
+  --edge-strong: var(--border-strong);
+  --text-2: var(--text-muted);
+  --text-3: var(--text-dim);
+  --blue: var(--accent);
+  --blue-deep: var(--accent-solid);
+  --red: var(--fail);
+  --orange: var(--warn);
+  --green: var(--ok);
+  --r-lg: var(--r-card);
+  --r-md: var(--r-control);
+  --r-sm: var(--r-chip);
+}
+/* Chart-only hues. The three-step status ramp is the rule on the redesigned
+   screens; the L12 leaderboard and matchup bars are data visualisation, which
+   the spec leaves as-is and which needs series to be distinguishable. */
+:root { --purple: #9c8cf0; --teal: #5bb8d4; --yellow: #d9a441; --gold: #b8924e; }
+:root[data-theme="light"] { --purple: #6b5bc4; --teal: #217e99; --yellow: #8a6510; --gold: #7a6030; }
+
 
 * { box-sizing: border-box; }
 html { height: 100%; }
@@ -38,14 +131,10 @@ body {
   margin: 0; min-height: 100%;
   color: var(--text);
   font-family: var(--font);
-  font-size: 13.5px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
-  background:
-    radial-gradient(1200px 700px at 80% -20%, rgba(47, 111, 237, 0.10), transparent 65%),
-    radial-gradient(1000px 700px at -15% 115%, rgba(185, 140, 245, 0.06), transparent 60%),
-    var(--bg);
-  background-attachment: fixed;
+  background: var(--bg);
 }
 
 h1, h2, h3 { font-weight: 600; letter-spacing: -0.012em; margin: 0; }
@@ -153,22 +242,6 @@ select option { background: #14161c; }
 .chip.claimed { color: var(--yellow); } .chip.claimed::before { background: var(--yellow); }
 
 /* ── login ──────────────────────────────────────────────────────────────── */
-.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
-.login-card { width: 360px; padding: 40px 36px 32px; text-align: center; }
-.login-card h1 { font-size: 20px; margin-bottom: 6px; }
-.login-card .sub { color: var(--text-3); font-size: 13px; margin-bottom: 28px; }
-.login-card input { width: 100%; margin-bottom: 12px; padding: 10px 14px; }
-.login-card button { width: 100%; padding: 10px; font-size: 14px; margin-top: 4px; }
-.login-error { color: var(--red); font-size: 12.5px; min-height: 18px; margin-top: 14px; }
-.pw-wrap { position: relative; margin-bottom: 12px; }
-.login-card .pw-wrap input { margin-bottom: 0; padding-right: 44px; }
-.login-card .pw-toggle {
-  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
-  width: 34px; height: 34px; margin: 0; padding: 0;
-  display: grid; place-items: center;
-  background: none; border: none; color: var(--text-3); cursor: pointer;
-}
-.login-card .pw-toggle:hover { color: var(--text); }
 .pw-toggle .off { display: none; }
 .pw-toggle.revealed .on { display: none; }
 .pw-toggle.revealed .off { display: block; }
@@ -1788,3 +1861,720 @@ a.cb-field-link:hover { background: rgba(111, 199, 232, 0.22); text-decoration: 
 .act-card-note.warn { color: var(--orange); }
 .act-card-actions { display: flex; gap: 8px; margin-top: 10px; }
 .act-card-actions button { height: 30px; padding: 0 14px; font-size: 12.5px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   REDESIGN — components, from design_handoff_acc_audit_studio/code/redesign.css.
+   Board and Task pages use ONLY these classes plus the tokens above.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── shared ─────────────────────────────────────────────────── */
+
+.app { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.spacer { flex: 1; }
+.vsep { width: 1px; height: 15px; background: var(--border); }
+.dot { width: 5px; height: 5px; border-radius: 50%; flex: 0 0 auto; }
+.mono { font-family: var(--mono); }
+.sep { color: var(--text-sep); }
+
+.avatar {
+  width: 22px; height: 22px; border-radius: var(--r-chip);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10.5px; font-weight: 700;
+  color: var(--text); background: var(--avatar-bg);
+  flex: 0 0 auto;
+}
+.avatar--sm { width: 17px; height: 17px; border-radius: var(--r-tag); font-size: 9.5px; }
+
+.btn {
+  font-family: inherit; font-size: 12.5px; font-weight: 500;
+  padding: 6px 13px; border-radius: var(--r-control); cursor: pointer;
+  background: none; border: 1px solid var(--border); color: var(--text-muted);
+}
+.btn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-hover); }
+.btn--ghost { border-color: transparent; }
+.btn--ghost:hover { border-color: transparent; }
+.btn--primary {
+  background: var(--accent-solid); border-color: transparent;
+  color: #fff; font-weight: 600;
+}
+.btn--primary:hover { background: var(--accent-solid-hover); border-color: transparent; color: #fff; }
+.btn--icon { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; }
+
+.link { font-size: 11.5px; font-weight: 600; color: var(--accent); cursor: pointer; background: none; border: none; padding: 0; font-family: inherit; }
+.link:hover { color: var(--accent-hover); }
+
+.select {
+  font-family: inherit; font-size: 12.5px; color: var(--text);
+  background: var(--surface-hover); border: 1px solid var(--border-strong);
+  border-radius: var(--r-control); padding: 5px 10px; outline: none;
+}
+
+/* Segmented control — severity filter, Acey static/dynamic */
+.seg { display: flex; gap: 2px; padding: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-control); }
+.seg > button {
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  padding: 4px 13px; border: none; border-radius: var(--r-tag);
+  cursor: pointer; background: none; color: var(--text-dim);
+}
+.seg > button[aria-pressed="true"] { background: var(--surface-active); color: var(--text); }
+
+/* Tag — severity, grammar. Same shape everywhere. */
+.tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: var(--r-tag);
+  color: var(--text-muted); background: var(--muted-bg);
+}
+.tag--hard { color: var(--fail); background: var(--fail-bg); }
+.tag--soft { color: var(--warn); background: var(--warn-bg); }
+.tag--pass { color: var(--ok);   background: var(--ok-bg); }
+.tag--grammar {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; text-transform: none;
+  padding: 2px 7px 2px 6px; border: 1px solid var(--border-strong);
+}
+
+/* Citation chip — review findings */
+.cite {
+  font-family: var(--mono); font-size: 11px;
+  padding: 3px 9px; border-radius: var(--r-chip); cursor: pointer;
+  color: var(--accent); background: var(--accent-bg); border: 1px solid var(--accent-border);
+}
+.cite:hover { background: var(--accent-bg-hover); }
+
+.eyebrow {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+
+/* ── top bars ───────────────────────────────────────────────── */
+
+.topbar {
+  display: flex; align-items: center; gap: 18px;
+  height: 52px; flex: 0 0 auto; padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+}
+.lockup { display: flex; align-items: center; gap: 11px; }
+.lockup svg { display: block; height: 14px; width: auto; fill: var(--text); flex: 0 0 auto; }
+.lockup__name { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
+.lockup__sub { font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); }
+
+.nav { display: flex; align-items: center; gap: 2px; margin-left: 10px; }
+.nav a {
+  font-size: 12.5px; font-weight: 500; color: var(--text-muted);
+  padding: 5px 10px; border-radius: var(--r-control);
+}
+.nav a:hover { background: var(--surface-hover); color: var(--text); }
+.nav a[aria-current="page"] { color: var(--text); background: var(--surface-active); }
+
+.userblock { display: flex; align-items: center; gap: 8px; padding-left: 14px; border-left: 1px solid var(--border); }
+
+/* Delivery / progress strip */
+.strip {
+  display: flex; align-items: center; gap: 14px; flex: 0 0 auto;
+  padding: 9px 20px; font-size: 12px; color: var(--text-muted);
+  background: var(--bg-sunken); border-bottom: 1px solid var(--border);
+}
+.strip b { font-family: var(--mono); font-size: 11.5px; font-weight: 600; color: var(--text); }
+.progress { width: 200px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.progress > i { display: block; height: 100%; background: var(--accent); }
+
+/* ── board toolbar ──────────────────────────────────────────── */
+
+.toolbar { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; padding: 14px 20px; }
+
+/* Fixed width on purpose. flex:1 here makes the field resize whenever
+   the result-count text changes width — reads as a glitchy animation. */
+.search {
+  width: 380px; flex: 0 0 auto;
+  display: flex; align-items: center; gap: 9px;
+  height: 32px; padding: 0 11px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-control);
+}
+.search > span { color: var(--text-dim); font-size: 13px; }
+.search > input { flex: 1; border: none; background: none; outline: none; color: var(--text); font-family: inherit; font-size: 13px; }
+
+/* Reserved width + tabular numerals so the toolbar never shifts. */
+.count { font-size: 12px; color: var(--text-dim); min-width: 78px; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+
+/* ── actions drawer ─────────────────────────────────────────── */
+
+.drawer {
+  margin: 0 20px 16px; flex: 0 0 auto;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-card);
+}
+.drawer__tabs { display: flex; align-items: center; gap: 2px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.drawer__tabs button {
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  padding: 5px 12px; border: none; border-radius: var(--r-chip);
+  cursor: pointer; background: none; color: var(--text-muted);
+}
+.drawer__tabs button[aria-selected="true"] { background: var(--surface-active); color: var(--text); }
+.drawer__body { padding: 16px 18px; }
+.drawer__sentence { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted); }
+.drawer__preview {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--text-muted);
+}
+.drawer__preview strong { font-size: 13px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+
+.histrow { display: flex; align-items: center; gap: 14px; padding: 9px 8px; border-radius: var(--r-control); font-size: 12.5px; }
+.histrow:hover { background: var(--surface-hover); }
+.histrow__t { font-family: var(--mono); font-size: 11px; color: var(--text-dim); width: 42px; }
+.histrow__who { color: var(--text-muted); width: 56px; }
+.histrow__what { flex: 1; color: var(--text); }
+.histrow--undone .histrow__what { color: var(--text-dim); text-decoration: line-through; }
+
+/* ── lanes ──────────────────────────────────────────────────── */
+
+/* min-height:0 is load-bearing: without it the lanes grow and the
+   whole page scrolls instead of each lane scrolling. 48px bottom
+   padding lets the last card clear any fixed bottom overlay. */
+.lanes {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px;
+  flex: 1 1 auto; min-height: 0; padding: 4px 20px 48px;
+}
+.lane { display: flex; flex-direction: column; min-height: 0; }
+.lane__head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 0 0 auto;
+  padding: 0 2px 9px; margin-bottom: 10px; border-bottom: 1px solid var(--border);
+}
+/* Every lane title is the same color — no per-lane hue. */
+.lane__name { font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-muted); white-space: nowrap; }
+.lane__count { font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.lane__note { font-size: 11.5px; color: var(--text-dim); margin: -4px 0 10px; line-height: 1.5; }
+.lane__list {
+  display: flex; flex-direction: column; gap: 8px;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding-right: 4px; margin-right: -4px;
+}
+.lane__empty { padding: 14px 2px; font-size: 12px; color: var(--text-faint); line-height: 1.5; }
+/* Lane-level action sits below the cards it acts on, never in the header. */
+.lane__complete {
+  width: 100%; margin-top: 10px; flex: 0 0 auto;
+  font-family: inherit; font-size: 12px; font-weight: 500;
+  color: var(--text-muted); background: none;
+  border: 1px dashed var(--border-strong); border-radius: var(--r-card);
+  padding: 9px 10px; cursor: pointer;
+}
+.lane__complete:hover { color: var(--text); border-color: var(--text-dim); background: var(--surface-hover); }
+
+/* ── task card ──────────────────────────────────────────────── */
+
+/* No colored left border. Severity is a tag, not an edge. */
+.card {
+  display: block; padding: 11px 12px; border-radius: var(--r-card);
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text); text-decoration: none;
+}
+.card:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--text); }
+.card__top { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.card__id { font-family: var(--mono); font-size: 11.5px; letter-spacing: -0.01em; word-break: break-all; }
+.card__problem {
+  font-size: 12.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.card__why {
+  margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border);
+  font-size: 11.5px; line-height: 1.5; color: var(--text-muted);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.card__why b { color: var(--warn); font-weight: 600; }
+.card__foot { margin-top: 10px; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.card__owner { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-muted); }
+.card__verdict { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500; }
+
+/* Resolved cards de-emphasise with tokens, NOT opacity. Stacking
+   opacity on already-dim text drops the task id under 2:1 contrast. */
+.card--resolved { background: transparent; }
+.card--resolved .card__id { color: var(--text-muted); }
+.card--resolved .card__problem { color: var(--text-dim); }
+
+/* verdict / presence colors: states, not categories */
+.is-ok   { color: var(--ok); }
+.is-warn { color: var(--warn); }
+.is-fail { color: var(--fail); }
+
+/* ── task page ──────────────────────────────────────────────── */
+
+/* Logo and back-arrow share one fixed slot; only opacity+transform
+   animate, so the header never reflows on hover. */
+.backlink { display: inline-flex; align-items: center; font-size: 12.5px; font-weight: 500; color: var(--text-muted); padding: 4px 9px 4px 6px; border-radius: var(--r-control); }
+.backlink:hover { background: var(--surface-hover); color: var(--text); }
+.backlink__slot { position: relative; width: 14px; height: 14px; flex: 0 0 auto; }
+.backlink__slot > * { position: absolute; inset: 0; transition: opacity 0.16s ease, transform 0.16s ease; }
+.backlink__slot svg { height: 14px; width: 14px; fill: var(--text); }
+.backlink__arrow { display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1; opacity: 0; transform: translateX(3px); }
+.backlink:hover .backlink__slot svg { opacity: 0; transform: translateX(3px); }
+.backlink:hover .backlink__arrow { opacity: 1; transform: translateX(0); }
+.backlink__label { margin-left: 8px; }
+
+.tabs { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; padding: 0 20px; border-bottom: 1px solid var(--border); }
+.tabs button {
+  font-family: inherit; font-size: 12.5px; font-weight: 500;
+  padding: 11px 12px 10px; background: none; border: none;
+  border-bottom: 2px solid transparent; cursor: pointer; color: var(--text-muted);
+}
+.tabs button:hover { color: var(--text); }
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.tabs .badge { color: var(--text-dim); font-weight: 400; margin-left: 5px; }
+
+.workspace { flex: 1; display: flex; min-height: 0; }
+.doc { flex: 1; overflow-y: auto; min-width: 0; }
+.doc__inner { max-width: 800px; padding: 28px 32px 60px; }
+.doc h1 { font-size: 19px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.35; margin: 0; }
+.doc h2 { margin: 32px 0 12px; }
+.doc__meta { display: flex; align-items: center; gap: 14px; margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+
+.panel { border: 1px solid var(--border); border-radius: var(--r-card); overflow: hidden; }
+.panel > * + * { border-top: 1px solid var(--border); }
+
+.milestone { padding: 13px 15px; }
+.milestone__row { display: flex; align-items: center; gap: 10px; }
+.milestone__id { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text-dim); width: 20px; }
+.milestone__title { font-size: 13px; font-weight: 550; }
+/* Fixed width: labels differ ("In A & B" / "Not found") and without it
+   the action links go ragged from row to row. */
+.milestone__presence { display: inline-flex; align-items: center; gap: 6px; width: 88px; flex: 0 0 auto; font-size: 11.5px; font-weight: 500; }
+.milestone__actions { display: grid; grid-template-columns: 56px 56px 60px; margin-left: 6px; flex: 0 0 auto; font-size: 11.5px; }
+.milestone__actions :last-child { text-align: right; color: var(--text-muted); cursor: pointer; }
+.milestone__prompt { margin: 7px 0 0 30px; font-size: 12.5px; color: var(--text-muted); line-height: 1.6; }
+
+.persona__row { display: grid; grid-template-columns: 168px 1fr; gap: 16px; padding: 11px 15px; }
+.persona__row--key { background: var(--warn-tint); }
+.persona__row--key .persona__label { color: var(--warn); }
+.persona__label { font-size: 11.5px; font-weight: 600; color: var(--text-muted); }
+.persona__value { font-size: 12.5px; color: var(--text-muted); line-height: 1.6; }
+
+.callout { border: 1px solid var(--fail-border); border-radius: var(--r-card); overflow: hidden; margin: 20px 0 28px; }
+.callout__head { display: flex; align-items: center; gap: 8px; padding: 9px 15px; background: var(--fail-bg); border-bottom: 1px solid var(--fail-border); }
+.callout__head span:last-child { font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fail); }
+.callout__body { padding: 13px 15px; }
+.callout__body b { display: block; font-size: 14.5px; font-weight: 600; line-height: 1.45; }
+.callout__body p { font-size: 12.5px; color: var(--text-muted); line-height: 1.6; margin: 4px 0 0; }
+
+.finding { padding: 16px 0; border-top: 1px solid var(--border); }
+.finding__head { display: flex; align-items: center; gap: 10px; }
+.finding__head b { font-size: 14px; font-weight: 600; }
+.finding__grid { margin-top: 10px; display: grid; grid-template-columns: 70px 1fr; gap: 6px 14px; font-size: 12.5px; line-height: 1.6; }
+.finding__grid dt { color: var(--text-dim); }
+.finding__grid dd { margin: 0; color: var(--text-muted); }
+.finding__cites { display: flex; gap: 7px; margin-top: 12px; }
+
+.turn { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+.turn__label { font-size: 10px; font-weight: 700; letter-spacing: 0.11em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 7px; }
+.turn__user { padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); font-size: 13px; line-height: 1.65; }
+.turn__model { margin: 12px 0 0 20px; padding-left: 16px; border-left: 1px solid var(--border); font-size: 13.5px; line-height: 1.75; }
+/* Tool kind is a label, not a status — always neutral. */
+.tool { display: flex; align-items: center; gap: 9px; margin-top: 8px; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-control); background: var(--surface); }
+.tool__kind { font-family: var(--mono); font-size: 9.5px; font-weight: 700; padding: 2px 6px; border-radius: var(--r-tag); color: var(--text-muted); background: var(--muted-bg); }
+.tool__name { font-family: var(--mono); font-size: 11px; color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool__dur { font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
+
+.check { display: flex; align-items: center; gap: 12px; padding: 12px 15px; font-size: 12.5px; }
+.check--done { background: var(--ok-tint); }
+.check--over { background: var(--warn-tint); }
+.check--done .check__title, .check--over .check__title { color: var(--text-dim); text-decoration: line-through; }
+.check__title { flex: 1; }
+.check__act { font-size: 11.5px; font-weight: 500; padding: 3px 10px; border-radius: var(--r-chip); cursor: pointer; color: var(--text-dim); background: none; border: none; font-family: inherit; }
+.check--done .check__act--done { color: var(--ok); background: var(--ok-bg); }
+.check--over .check__act--over { color: var(--warn); background: var(--warn-bg); }
+
+.decision { margin-top: 22px; padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--r-card); }
+.decision__verdicts { display: flex; gap: 7px; margin-top: 14px; flex-wrap: wrap; }
+.decision__verdicts .btn--suggested { color: var(--fail); background: var(--fail-bg); border-color: var(--fail-border); }
+
+/* ── Acey ───────────────────────────────────────────────────── */
+
+.acey {
+  width: 348px; flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0;
+  border-left: 1px solid var(--border); background: var(--bg-sunken);
+}
+.acey__head { display: flex; align-items: center; gap: 9px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.acey__head img { width: 20px; height: 20px; border-radius: var(--r-tag); object-fit: contain; }
+.acey__head b { font-size: 13px; font-weight: 600; }
+.acey__body { flex: 1; overflow-y: auto; padding: 18px 16px; }
+.acey__intro { font-size: 12.5px; color: var(--text-muted); line-height: 1.65; }
+.acey__suggest { display: flex; flex-direction: column; }
+.acey__suggest button {
+  text-align: left; font-family: inherit; font-size: 12.5px; line-height: 1.5;
+  color: var(--text-muted); background: none; border: none;
+  border-top: 1px solid var(--border); padding: 10px 2px; cursor: pointer;
+}
+.acey__suggest button:hover { color: var(--text); }
+.acey__composer { flex: 0 0 auto; padding: 12px 16px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: flex-end; }
+.acey__composer textarea {
+  flex: 1; resize: none; height: 34px; font-family: inherit; font-size: 12.5px;
+  color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r-control);
+  padding: 8px 10px; outline: none; line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::placeholder { color: var(--text-dim); }
+
+/* ── redesign: pieces the handoff sheet leaves to the app ────────────────── */
+.userblock__name { font-size: 12.5px; color: var(--text-muted); }
+.userblock__out { font-size: 11.5px; padding: 2px 6px; }
+.btn--danger { color: var(--fail); border-color: var(--fail-border); }
+.btn--danger:hover { color: var(--fail); border-color: var(--fail); background: var(--fail-bg); }
+.btn[disabled] { opacity: 0.45; cursor: default; }
+.btn--primary[disabled]:hover { background: var(--accent-solid); }
+
+.drawer__body { padding: 16px 18px; }
+.drawer__copy { margin: 0 0 12px; font-size: 12.5px; color: var(--text-muted); line-height: 1.6; }
+.drawer__row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.drawer__row + .drawer__row { margin-top: 12px; }
+.drawer__hint { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
+.drawer__status { font-size: 11.5px; color: var(--text-dim); margin-top: 10px; min-height: 16px; }
+.drawer__ta {
+  width: 100%; min-height: 84px; resize: vertical; font-family: var(--mono); font-size: 12px;
+  color: var(--text); background: var(--surface-hover);
+  border: 1px solid var(--border-strong); border-radius: var(--r-control);
+  padding: 9px 11px; outline: none; line-height: 1.6;
+}
+.drawer__close { font-size: 12px; }
+
+/* Drag-and-drop between lanes is kept from the current app. */
+.card.dragging { opacity: 0.4; }
+.card { cursor: grab; }
+.lane--drop .lane__list {
+  outline: 1px dashed var(--accent-border); outline-offset: 3px; border-radius: var(--r-card);
+}
+.card--tour { outline: 1px dashed var(--accent); outline-offset: 2px; }
+
+/* Neutralise the pre-redesign board rules that still match. The markup moved to
+   .lane__head / .card, but `.lane`, `.lanes` and `.toolbar` are shared names and
+   the old declarations (bordered, filled, rounded lane boxes) still applied. */
+.lane {
+  border: none; background: none; padding: 0; border-radius: 0;
+  max-height: none; min-height: 0;
+}
+.toolbar { margin: 0; }
+.lanes { align-items: stretch; }
+
+/* The old .topbar was a translucent blurred bar over a dark-only page. The
+   redesign has no backdrop-filter anywhere and has to work in light mode, so
+   the bar is opaque and theme-aware. */
+.topbar {
+  position: static; background: var(--bg);
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  height: 52px; padding: 0 20px; gap: 18px;
+}
+
+/* Ingest panel on Admin — the drop-zone lost its .glass wrapper with the
+   redesign, so it carries its own (dashed, theme-aware) frame. */
+.drop-zone {
+  border: 1px dashed var(--border-strong); border-radius: var(--r-card);
+  padding: 20px; text-align: center; background: var(--bg-sunken);
+}
+.drop-zone.over { border-color: var(--accent); background: var(--accent-bg); }
+.drop-title { font-size: 14px; font-weight: 600; }
+.drop-sub { font-size: 12.5px; color: var(--text-muted); margin: 6px auto 16px; max-width: 560px; line-height: 1.55; }
+.drop-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.drop-status { font-size: 11.5px; color: var(--text-dim); margin-top: 10px; }
+.rubric-admin { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 12.5px; color: var(--text-muted); }
+.rubric-admin .rubric-label { font-weight: 600; color: var(--text); }
+#bulk-ids {
+  width: 100%; min-height: 64px; resize: vertical; margin-bottom: 10px;
+  font-size: 12px; color: var(--text); background: var(--surface-hover);
+  border: 1px solid var(--border-strong); border-radius: var(--r-control); padding: 8px 10px;
+}
+
+/* ── task page: pieces the handoff sheet leaves to the app ───────────────── */
+.sev-pill { border: 1px solid var(--border-strong); cursor: pointer; font-family: inherit; }
+.sev-pill.tag--hard { border-color: var(--fail-border); }
+.topbar .task-id { font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+.claim-who { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-muted); }
+.claim-btn { font-size: 11.5px; padding: 2px 8px; }
+.tabs__more { font-size: 12px; padding: 4px 11px; }
+.tabs .badge { color: var(--text-dim); font-weight: 400; margin-left: 5px; }
+
+/* Overflow menus (⋯ and Files ▾) */
+.menu { position: relative; }
+.menu__list {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 210px;
+  max-height: 60vh; overflow-y: auto; padding: 5px;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-card);
+}
+.menu__list--wide { min-width: 280px; }
+.menu__list button {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  font-family: inherit; font-size: 12.5px; color: var(--text-muted);
+  background: none; border: none; border-radius: var(--r-chip);
+  padding: 6px 9px; cursor: pointer;
+}
+.menu__list button:hover { background: var(--surface-hover); color: var(--text); }
+.menu__hint { margin-left: auto; font-size: 11px; color: var(--text-dim); }
+.menu__file { font-family: var(--mono); font-size: 11.5px; }
+.menu__sep { height: 1px; margin: 5px 2px; background: var(--border); }
+.menu__empty { padding: 6px 9px; }
+.menu__danger { color: var(--fail); }
+.menu__danger:hover { color: var(--fail); background: var(--fail-bg); }
+
+/* Document pane chrome */
+.doc__back { margin: 16px 0 -8px 32px; font-size: 12px; }
+.doc .traj-toolbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 32px; background: var(--bg); border-bottom: 1px solid var(--border);
+}
+.acey__status { padding: 0 16px; font-size: 11.5px; color: var(--text-dim); min-height: 16px; }
+.acey__clear { font-size: 11.5px; padding: 2px 6px; }
+.acey .seg > button { font-size: 11px; padding: 2px 9px; }
+
+/* [hidden] must beat the component display rules that come after it. */
+[hidden] { display: none !important; }
+
+/* L12 is out of the redesign's scope, but a fixed 4-column grid drops a 5th
+   stat card alone onto a second row at quarter width. */
+.stat-cards { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+/* Acey collapse — the doc pane takes the full width; the reopen control is the
+   same small outline button as "Files ▾" rather than a floating element. */
+.workspace.acey-collapsed .acey { display: none; }
+.acey__hide { font-size: 12px; padding: 2px 7px; }
+
+/* Working views get the full pane; prose keeps its 800px measure. */
+.doc__inner--wide { max-width: none; }
+
+/* Collapsed Acey — the mascot, bottom right. Not a bobbing animation and no
+   glow; it is a plain round button that happens to wear the logo. */
+.acey-fab {
+  position: fixed; right: 22px; bottom: 22px; z-index: 45;
+  width: 52px; height: 52px; padding: 0; border-radius: 50%; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+.acey-fab:hover { background: var(--surface-hover); border-color: var(--accent-border); transform: translateY(-1px); }
+.acey-fab img { width: 30px; height: 30px; object-fit: contain; display: block; }
+
+/* Each view carried its own max-width from the era when the viewer was a narrow
+   middle column between a sidebar and the chat. In the wide pane those caps are
+   what leave a dead band down the right-hand side, so the tabular and
+   side-by-side views give theirs up. Trajectories and prose keep a measure —
+   full-width body text is worse to read, not better. */
+.doc__inner--wide .qcspec,
+.doc__inner--wide .cb,
+.doc__inner--wide .sbs,
+.doc__inner--wide .pipeline,
+.doc__inner--wide .rankproof { max-width: none; }
+.doc__inner--wide .pipeline { padding: 0; }
+.doc__inner--wide .spec-grid { grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); }
+
+/* Login lives in its own sheet: public/css/login.css (design handoff). */
+
+}
+
+/* Long rubric prose: collapsed to a peek, expanded on demand. */
+.spec-desc { margin: 2px 0 12px; }
+.spec-group-desc { margin: 0; }
+.spec-group-desc.collapsed {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.spec-desc-toggle {
+  margin-top: 5px; padding: 0; font-family: inherit; font-size: 11.5px; font-weight: 600;
+  color: var(--accent); background: none; border: none; cursor: pointer;
+}
+.spec-desc-toggle:hover { color: var(--accent-hover); }
+
+/* Acey: resizable from its left edge. */
+.acey { position: relative; }
+.acey__grip {
+  position: absolute; left: -3px; top: 0; bottom: 0; width: 7px; z-index: 6;
+  cursor: col-resize; touch-action: none;
+}
+.acey__grip::after {
+  content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px;
+  background: transparent; transition: background 0.12s ease;
+}
+.acey__grip:hover::after, .acey__grip.dragging::after { background: var(--accent); }
+
+/* The collapsed mascot reads as a real affordance, not a stray favicon. */
+.acey-fab { width: 64px; height: 64px; right: 26px; bottom: 26px; }
+.acey-fab img { width: 40px; height: 40px; }
+
+/* Task tabs: filled chip, not an accent underline.
+   DEVIATION from the handoff, which specs `border-bottom-color: var(--accent)`
+   here. Every other selected state in this system is a --surface-active chip —
+   the header nav (.nav a[aria-current]), the segmented controls (.seg button
+   [aria-pressed]) and the Actions drawer (.drawer__tabs button[aria-selected]).
+   The tab bar was the only underline, which made it read as a different
+   language on the same screen. */
+.tabs { padding: 7px 20px 6px; gap: 2px; }
+.tabs button {
+  padding: 6px 11px; border-bottom: none;
+  border-radius: var(--r-control); font-size: 12.5px;
+}
+.tabs button:hover { color: var(--text); background: var(--surface-hover); }
+.tabs button[aria-selected="true"] { color: var(--text); background: var(--surface-active); }
+.tabs button[aria-selected="true"]:hover { background: var(--surface-active); }
+
+/* Flash was a hard yellow border/outline from the pre-redesign palette; yellow
+   is no longer a role in the three-step ramp. One accent ring that fades, used
+   for every jump target (rubric card, finding, trajectory turn, rank.json field). */
+@keyframes cwt-flash {
+  0%   { box-shadow: 0 0 0 1px var(--accent), 0 0 0 5px var(--accent-bg-hover); }
+  70%  { box-shadow: 0 0 0 1px var(--accent), 0 0 0 5px var(--accent-bg-hover); }
+  100% { box-shadow: 0 0 0 1px transparent, 0 0 0 5px transparent; }
+}
+.flash,
+.spec-card.flash,
+.md h3.flash,
+.sbs-anchor.flash,
+.msg-user.flash, .msg-asst.flash,
+.cb-section.flash, .cb-model.flash, .cb-pref-panel.flash,
+.cb-pref-none.flash, .cb-grade-wrap.flash {
+  outline: none;
+  border-color: var(--border);
+  border-radius: var(--r-card);
+  animation: cwt-flash 2.4s ease-out;
+}
+.cb-grade-tbl tr.flash td { background: var(--accent-bg); }
+mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-radius: var(--r-tag); }
+
+/* ── dynamic walkthrough, rebuilt in the redesign's language ──────────────
+   The old version dimmed the whole viewport behind a 78% scrim + 7px blur and
+   floated a glowing, shadowed bubble with a 74px bobbing mascot over it. For a
+   feature whose entire purpose is "look at this evidence with me", blurring the
+   evidence is the wrong move — so the page stays legible and the current step is
+   marked by a ring on the target instead of darkness everywhere else. */
+
+/* No scrim, no blur. */
+.dg-overlay, .dg-overlay.no-target { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+/* The spotlight becomes a ring on the target rather than a hole punched in a
+   blackout layer. */
+.dg-hole {
+  border-radius: var(--r-card);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 5px var(--accent-bg-hover);
+  background: none;
+}
+
+/* Dock bottom-right, out of the document's way; it is a companion, not a modal. */
+.dg-stage { bottom: 20px; width: min(420px, 38vw); }
+.dg-stage.dock-left, .dg-stage.dock-right, .dg-stage.dock-center {
+  left: auto; right: 20px; transform: none; align-items: stretch;
+}
+/* Acey is already identified in the panel header; the bobbing mascot was noise. */
+.dg-mascot { display: none; }
+
+.dg-bubble {
+  padding: 14px 16px; border-radius: var(--r-card);
+  background: var(--surface); border: 1px solid var(--border-strong); border-top: 1px solid var(--border-strong);
+  box-shadow: none;
+}
+.dg-bubble::after { display: none; }          /* speech tail belonged to the mascot */
+.dg-kind {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em; border-radius: var(--r-tag);
+  padding: 2px 6px; color: var(--text-muted); background: var(--muted-bg); border: none;
+}
+.dg-dot.on { background: var(--accent); box-shadow: none; }
+.dg-dot.past { background: var(--text-dim); }
+.dg-say { font-size: 13px; line-height: 1.6; color: var(--text); }
+.dg-cite {
+  font-family: var(--mono); font-size: 11px; padding: 3px 9px; border-radius: var(--r-chip);
+  color: var(--accent); background: var(--accent-bg); border: 1px solid var(--accent-border);
+}
+.dg-ask {
+  border-radius: var(--r-control); border: 1px solid var(--border-strong);
+  background: var(--surface-hover); font-size: 12.5px; padding: 7px 10px;
+}
+.dg-x { color: var(--text-dim); }
+.dg-x:hover { color: var(--text); }
+/* The aurora behind the chat panel went with the rest of the glow. */
+.chat-ambient { display: none; }
+
+/* ── walkthrough, hosted in Acey's panel ─────────────────────────────────── */
+.dg-stage {
+  position: static; width: auto; left: auto; right: auto; bottom: auto;
+  transform: none; z-index: auto; pointer-events: auto; margin-top: 12px;
+}
+.dg-bubble {
+  width: auto; animation: dg-arrive 0.16s ease-out;
+}
+@keyframes dg-arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.dg-foot { margin-top: 12px; display: flex; gap: 8px; align-items: center; }
+.dg-nav { display: flex; gap: 6px; margin-left: auto; }
+.dg-nav button, .dg-next {
+  font-family: inherit; font-size: 12px; font-weight: 500; padding: 5px 12px;
+  border-radius: var(--r-control); cursor: pointer;
+  background: none; border: 1px solid var(--border); color: var(--text-muted);
+}
+.dg-nav .dg-next, .dg-next.primary {
+  background: var(--accent-solid); border-color: transparent; color: #fff; font-weight: 600;
+}
+.dg-turn { font-size: 12.5px; line-height: 1.6; margin-top: 10px; color: var(--text-muted); }
+.dg-turn.copilot { color: var(--text); }
+
+/* ── Acey's presence in the transcript ───────────────────────────────────── */
+.msg-who { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.msg-avatar { width: 16px; height: 16px; border-radius: var(--r-tag); object-fit: contain; }
+.msg-who span {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.11em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+/* Each reply eases in rather than snapping — the one bit of motion kept. */
+.chat-msg.assistant { animation: dg-arrive 0.16s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-msg.assistant, .dg-bubble { animation: none; }
+}
+
+/* ── Acey empty state ────────────────────────────────────────────────────
+   The handoff styles the starters as bare rows separated by hairlines, which
+   reads as a table of contents rather than four things you can click. They are
+   the primary action in an empty panel, so they get a real target. */
+.acey__body.is-empty { display: flex; flex-direction: column; justify-content: center; }
+.acey__suggest { gap: 6px; }
+.acey__suggest button {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--border); border-top: 1px solid var(--border);
+  border-radius: var(--r-control); background: var(--surface);
+  padding: 10px 12px; color: var(--text-muted);
+}
+.acey__suggest button::after {
+  content: '→'; margin-left: auto; color: var(--text-dim); font-size: 12px; flex: 0 0 auto;
+}
+.acey__suggest button:hover {
+  background: var(--surface-hover); border-color: var(--border-strong); color: var(--text);
+}
+.acey__suggest button:hover::after { color: var(--accent); }
+
+/* The composer showed a permanent 9px scrollbar gutter from the global rule. */
+.acey__composer textarea { scrollbar-width: thin; }
+.acey__composer textarea::-webkit-scrollbar { width: 0; }
+
+/* Guide card: same bubble as every other reply, no mascot inside it, no bold. */
+.guide-verdict { font-size: 13px; line-height: 1.6; color: var(--text); font-weight: 400; }
+.guide-replay {
+  display: inline-flex; align-items: center; margin-top: 10px;
+  font-family: inherit; font-size: 12px; font-weight: 500; padding: 6px 11px;
+  border-radius: var(--r-control); cursor: pointer;
+  color: var(--text-muted); background: var(--surface-hover); border: 1px solid var(--border);
+}
+.guide-replay:hover { color: var(--text); border-color: var(--border-strong); }
+
+/* Acey's face on a fresh chat — present, not a 76px bobbing hero. */
+.chat-intro-avatar { width: 32px; height: 32px; object-fit: contain; display: block; margin-bottom: 14px; }
+
+/* Mode switch sweep. The animation stopped firing because the panel's class
+   changed from .chat-panel to .acey in the redesign, so these selectors no
+   longer matched anything. Re-pointed, minus the aurora that went with it. */
+.acey { position: relative; overflow: hidden; }
+.acey.mode-switching::after {
+  content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+  background: linear-gradient(115deg, transparent 32%, var(--accent-bg-hover) 50%, transparent 68%);
+  transform: translateX(-100%); animation: chat-sweep 0.62s ease;
+}
+.acey .seg > button[aria-pressed="true"] { transition: background 0.16s ease, color 0.16s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .acey.mode-switching::after { animation: none; display: none; }
+}
