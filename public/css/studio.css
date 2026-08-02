@@ -138,8 +138,12 @@ body {
 }
 
 h1, h2, h3 { font-weight: 600; letter-spacing: -0.012em; margin: 0; }
-a { color: var(--blue); text-decoration: none; }
-a:hover { text-decoration: underline; }
+/* Hover changes colour, never adds an underline. A blanket underline hits every
+   <a>, and structural links -- a whole task card, a lane, a nav item -- are not
+   prose. Underline comes back below for links inside rendered documents, where
+   it is a real affordance. */
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); }
 code, .mono { font-family: var(--mono); font-size: 0.9em; }
 
 /* ── glass surfaces ─────────────────────────────────────────────────────── */
@@ -2577,4 +2581,12 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 .acey .seg > button[aria-pressed="true"] { transition: background 0.16s ease, color 0.16s ease; }
 @media (prefers-reduced-motion: reduce) {
   .acey.mode-switching::after { animation: none; display: none; }
+}
+
+/* Prose links inside rendered docs and Acey's replies keep the underline. The
+   citation chips (traj:// spec:// cb:// and rank.json field paths) are excluded
+   -- they are chips, not sentences. */
+.md a:not(.traj-link):not(.spec-link):not(.cb-link):not(.cb-field-link):not(.cite):hover,
+.bubble a:not(.traj-link):not(.spec-link):not(.cb-link):not(.cb-field-link):not(.cite):hover {
+  text-decoration: underline;
 }
