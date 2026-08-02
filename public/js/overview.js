@@ -41,7 +41,7 @@ async function init() {
   }
 
   renderClock(brief);
-  renderQueues(brief);
+  renderAssignments(brief);
   renderCharts(brief);
   renderFoot(brief);
   loadSummary({});
@@ -110,26 +110,44 @@ async function loadSummary({ refresh }) {
   }
 }
 
-function renderQueues(b) {
-  const sug = b.suggestions;
-  if (!sug) return;
-  const group = (title, hint, items, href) => el('div', { class: 'ov-queue' },
-    el('div', { class: 'ov-queue__head' },
-      el('h3', {}, title),
-      el('span', { class: 'ov-queue__hint' }, hint)),
-    el('ul', { class: 'ov-queue__list' },
-      ...items.map((s) => el('li', { class: `ov-sug ov-sug--${s.severity}` },
-        el('span', { class: 'ov-sug__dot', 'aria-hidden': 'true' }),
-        el('div', {},
-          s.href
-            ? el('a', { class: 'ov-sug__text', href: (window.__base__ || '') + s.href }, s.text)
-            : el('span', { class: 'ov-sug__text' }, s.text),
-          el('span', { class: 'ov-sug__detail' }, s.detail))))));
+// Who does what. Every item carries the system it belongs to, so "chase this
+// upstream" and "triage your own review list" can never be mistaken for each
+// other — that separation was the point of splitting them in the first place.
+const SYSTEM_LABEL = {
+  board: 'Board', pipeline: 'Pipeline',
+  decision: 'Decision', 'cross-functional': 'Cross-functional', direction: 'Direction',
+};
 
-  mount($('ov-queues'),
-    group('Pipeline', 'upstream production', sug.pipeline),
-    group('Your board', 'this app’s audit queue', sug.board));
+function renderAssignments(b) {
+  const a = b.assignments;
+  if (!a) return;
+
+  const card = (person, isLead) => el('article', { class: `ov-person${isLead ? ' ov-person--lead' : ''}` },
+    el('header', { class: 'ov-person__head' },
+      el('h3', { class: 'ov-person__name' }, cap(person.name)),
+      el('span', { class: 'ov-person__role' }, person.role)),
+    person.items.length
+      ? el('ul', { class: 'ov-person__list' },
+        ...person.items.map((it) => el('li', { class: 'ov-task' },
+          el('span', { class: `ov-tag ov-tag--${it.system.replace(/[^a-z]/g, '')}` }, SYSTEM_LABEL[it.system] || it.system),
+          el('span', { class: 'ov-task__text' }, it.text),
+          el('span', { class: 'ov-task__detail' }, it.detail))))
+      : el('p', { class: 'ov-person__clear' }, 'Nothing queued.'));
+
+  // The lead card is its own full-width row, then the reviewers four-up. Putting
+  // all five in one auto-fit grid wrapped the fifth reviewer below a very tall
+  // lead column and left them stranded off the fold.
+  mount($('ov-assign'),
+    el('div', { class: 'ov-assign__head' },
+      el('h2', {}, 'This week'),
+      el('span', { class: 'ov-assign__hint' },
+        'Split from live board and pipeline state — claim before you start. Rotates weekly.')),
+    card(a.lead, true),
+    el('div', { class: 'ov-assign__grid' },
+      ...a.reviewers.map((r) => card(r, false))));
 }
+
+const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 // ---------------------------------------------------------------------------
 // charts

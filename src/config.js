@@ -67,6 +67,16 @@ export const config = {
     // Cadence and greeting are anchored to America/Los_Angeles in src/overview.js:
     // packaging runs Tuesday evening PT, so a UTC clock would call it Wednesday.
     staleDays: Number(process.env.OVERVIEW_STALE_DAYS || 7),
+    // Who the Overview page writes action items for.
+    //
+    // The lead gets a different KIND of item, not a share of the queue: they own
+    // cross-functional and directional calls (raising a broken gate with the
+    // platform owners, committing to or resetting a delivery number), so handing
+    // them 24 tasks to triage would be the wrong instruction.
+    lead: process.env.OVERVIEW_LEAD || 'pavit',
+    leadTitle: process.env.OVERVIEW_LEAD_TITLE || 'Strategic Projects Lead',
+    reviewers: (process.env.OVERVIEW_REVIEWERS || 'gilberto,ernesto,nishchay,christian')
+      .split(',').map((s) => s.trim()).filter(Boolean),
   },
   // On-demand pull of tasks from Redash (a whole review level, or an explicit id
   // list) into a downloadable zip. Needs REDASH_API_KEY in the environment, read

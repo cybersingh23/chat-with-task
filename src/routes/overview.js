@@ -1,5 +1,5 @@
 import express from 'express';
-import { buildBrief, briefWithSuggestions, getSummary, clearSummaryCache, ptNow, deliveryPhase } from '../overview.js';
+import { buildBrief, fullBrief, getSummary, clearSummaryCache, ptNow, deliveryPhase } from '../overview.js';
 
 // /api/overview/* — mounted inside the authenticated api router.
 //
@@ -14,7 +14,7 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 const windowDays = (req) => Math.min(180, Math.max(7, Number(req.query.days) || 30));
 
 overviewApi.get('/brief', wrap(async (req, res) => {
-  res.json(await briefWithSuggestions({ fresh: req.query.fresh === '1', days: windowDays(req) }));
+  res.json(await fullBrief({ fresh: req.query.fresh === '1', days: windowDays(req) }));
 }));
 
 overviewApi.get('/summary', wrap(async (req, res) => {

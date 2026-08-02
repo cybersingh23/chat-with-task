@@ -2631,7 +2631,7 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 /* ── hero: synthesis + the two queues ─────────────────────────────────── */
 .ov-hero {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--r-card); padding: 22px 24px 4px; margin-bottom: 20px;
+  border-radius: var(--r-card); padding: 22px 24px 18px; margin-bottom: 20px;
 }
 .ov-hero__head { display: flex; align-items: flex-start; gap: 24px; flex-wrap: wrap; }
 .ov-hero__title { flex: 1 1 340px; min-width: 0; }
@@ -2673,25 +2673,52 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 @keyframes ov-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) { .ov-skeleton { animation: none; } }
 
-/* ── the two suggestion queues ────────────────────────────────────────── */
-.ov-queues {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0 28px;
-  margin: 18px -24px 0; padding: 16px 24px 18px; border-top: 1px solid var(--border);
-}
-.ov-queue__head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px; }
-.ov-queue__head h3 { margin: 0; font-size: 11px; font-weight: 660; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text); }
-.ov-queue__hint { font-size: 11px; color: var(--text-faint); }
-.ov-queue__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+/* ── who does what ────────────────────────────────────────────────────── */
+.ov-assign { margin-bottom: 20px; }
+.ov-assign__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 2px 11px; }
+.ov-assign__head h2 { margin: 0; font-size: 14.5px; font-weight: 620; color: var(--text); }
+.ov-assign__hint { font-size: 12px; color: var(--text-dim); }
 
-.ov-sug { display: flex; gap: 9px; align-items: flex-start; }
-.ov-sug__dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 6px; flex: none; background: var(--text-faint); }
-.ov-sug--critical .ov-sug__dot { background: var(--fail); }
-.ov-sug--warn .ov-sug__dot { background: var(--warn); }
-.ov-sug--ok .ov-sug__dot { background: var(--ok); }
-.ov-sug--info .ov-sug__dot { background: var(--accent); }
-.ov-sug__text { display: block; font-size: 13px; font-weight: 560; color: var(--text); }
-a.ov-sug__text:hover { color: var(--accent); }
-.ov-sug__detail { display: block; font-size: 12px; line-height: 1.5; color: var(--text-dim); margin-top: 1px; }
+/* Four reviewers, one row at desk width, reflowing without a per-count
+   breakpoint. The lead is NOT in this grid — see .ov-person--lead. */
+.ov-assign__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(212px, 1fr)); gap: 12px; align-items: start; }
+.ov-person {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-card); padding: 14px 15px 15px; min-width: 0;
+}
+/* The lead's items are a different KIND of work, not a bigger pile of the same
+   work, so the card is marked and gets its own full-width row above the
+   reviewers. Sharing their grid made it a tall narrow column that pushed the
+   fourth reviewer onto a second row and off the fold. Its items run in columns
+   so six of them read as a set rather than a long list. */
+.ov-person--lead {
+  border-color: var(--accent-border); background: var(--accent-bg);
+  margin-bottom: 12px; padding: 15px 17px 17px;
+}
+.ov-person--lead .ov-person__list {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+  gap: 12px 24px; align-items: start;
+}
+.ov-person__head { margin-bottom: 10px; }
+.ov-person__name { margin: 0; font-size: 13.5px; font-weight: 650; color: var(--text); }
+.ov-person__role { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-top: 2px; }
+.ov-person__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+.ov-person__clear { margin: 0; font-size: 12px; color: var(--text-faint); }
+
+.ov-task__text { display: block; font-size: 12.5px; font-weight: 560; line-height: 1.42; color: var(--text); margin-top: 3px; }
+.ov-task__detail { display: block; font-size: 11.5px; line-height: 1.48; color: var(--text-dim); margin-top: 2px; }
+
+/* Which system an item belongs to, never inferred from wording. */
+.ov-tag {
+  display: inline-block; font-size: 9.5px; font-weight: 660; text-transform: uppercase;
+  letter-spacing: 0.06em; padding: 2px 5px; border-radius: var(--r-tag);
+  background: var(--muted-bg); color: var(--text-dim);
+}
+.ov-tag--board { background: var(--accent-bg-hover); color: var(--accent); }
+.ov-tag--pipeline { background: var(--warn-bg); color: var(--warn); }
+.ov-tag--decision { background: var(--fail-bg); color: var(--fail); }
+.ov-tag--crossfunctional { background: var(--ok-bg); color: var(--ok); }
+.ov-tag--direction { background: var(--muted-bg); color: var(--text-muted); }
 
 /* ── chart cards ──────────────────────────────────────────────────────── */
 .ov-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
