@@ -1,0 +1,158 @@
+/* ─────────────────────────────────────────────────────────────
+   Login — ACC Audit Studio
+   Requires redesign-tokens.css (tokens, resets, scrollbars).
+   Adds two focus-ring tokens; merge them into your :root blocks.
+   ───────────────────────────────────────────────────────────── */
+
+:root            { --ring-brand: rgba(238, 240, 244, 0.16); --ring-accent: rgba(108, 165, 255, 0.25); }
+:root[data-theme="light"] { --ring-brand: rgba(20, 23, 29, 0.13);  --ring-accent: rgba(47, 111, 237, 0.20); }
+
+/* Space Grotesk is used ONLY for the brand lockup. Everything else
+   stays on the system stack. Load in <head>:
+   <link rel="preconnect" href="https://fonts.googleapis.com">
+   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet"> */
+
+/* ── shell ──────────────────────────────────────────────────── */
+
+/* Both halves are equal width with matching 72px inner gutters, and
+   each column centres its content on the SAME vertical axis. That
+   shared axis is the whole layout — don't let one side drift. */
+.login {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  overflow: hidden;
+}
+
+.login__brand {
+  display: flex; align-items: center; justify-content: flex-end;
+  padding: 48px 72px;
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--border);
+}
+
+.login__form {
+  display: flex; align-items: center; justify-content: flex-start;
+  padding: 48px 72px;
+  position: relative;
+}
+
+.login__theme {
+  position: absolute; top: 20px; right: 20px;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: inherit; font-size: 13px;
+  color: var(--text-muted); background: none;
+  border: 1px solid var(--border); border-radius: var(--r-control, 6px);
+  cursor: pointer;
+}
+.login__theme:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-hover); }
+
+/* ── brand lockup ───────────────────────────────────────────── */
+
+/* Sub-brand lockup: the mark is the hero, the product name is a
+   tracked-caps qualifier beneath a rule. All three share one right
+   edge at --lockup-w — if you change the logo width, retune
+   .login__product letter-spacing so it still lands flush. */
+.login__lockup { --lockup-w: 172px; width: 100%; max-width: 360px; }
+
+.login__mark { display: block; width: var(--lockup-w); height: auto; fill: var(--text); }
+
+.login__rule { width: var(--lockup-w); height: 1px; background: var(--border-strong); margin: 16px 0 13px; }
+
+.login__product {
+  font-family: 'Space Grotesk', var(--font);
+  font-size: 13px; font-weight: 500;
+  letter-spacing: 0.235em; text-transform: uppercase;
+  line-height: 1;
+  margin: 0 -0.235em 0 0;   /* strip trailing track so it sits flush */
+  color: var(--text-muted);
+}
+
+.login__blurb {
+  font-size: 13.5px; line-height: 1.6; color: var(--text-muted);
+  margin: 32px 0 0; max-width: 42ch; text-wrap: pretty;
+}
+
+/* ── form ───────────────────────────────────────────────────── */
+
+.login__panel { width: 100%; max-width: 320px; }
+.login__panel h2 { font-size: 19px; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
+.login__hint { font-size: 13px; color: var(--text-muted); margin: 6px 0 0; }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field + .field { margin-top: 16px; }
+.login__panel .field:first-of-type { margin-top: 28px; }
+
+.field > label {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text-dim);
+}
+
+.field input {
+  width: 100%; height: 36px; padding: 0 11px;
+  font-family: inherit; font-size: 13px; color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--r-control, 6px);
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+/* A 1px border recolour is too weak to serve as the focus indicator
+   for a keyboard-first tool. The 3px ring is the actual affordance. */
+.field input:focus {
+  border-color: var(--text);
+  box-shadow: 0 0 0 3px var(--ring-brand);
+}
+
+.field--pw { position: relative; }
+.field--pw input { padding-right: 38px; }
+.field__reveal {
+  position: absolute; right: 4px; bottom: 4px;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: none; border: none; border-radius: var(--r-chip, 5px);
+  color: var(--text-dim); cursor: pointer;
+}
+.field__reveal:hover { color: var(--text); background: var(--surface-hover); }
+/* ADDED (not in the handoff): the icons carry width/height attributes but end up
+   as zero-width flex items, so they paint inconsistently — visible at some device
+   scale factors and invisible at others. An explicit size is the fix; this is
+   additive and touches none of the load-bearing rules in login-notes.md. */
+.field__reveal svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.field__reveal .icon-off { display: none; }
+.field__reveal.is-revealed .icon-on  { display: none; }
+.field__reveal.is-revealed .icon-off { display: block; }
+
+/* Monochrome by default. Scale's brand is black-on-light, and with a
+   single action on the page colour isn't disambiguating anything —
+   position and size already do. Blue stays the accent INSIDE the app,
+   where it genuinely signals "interactive". */
+.login__submit {
+  width: 100%; height: 36px; margin-top: 24px;
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  color: var(--bg); background: var(--text);
+  border: none; border-radius: var(--r-control, 6px); cursor: pointer;
+}
+.login__submit:hover { opacity: 0.86; }
+
+/* Reserved height so a failed sign-in doesn't shift the form. */
+.login__error { min-height: 18px; margin-top: 10px; font-size: 12px; line-height: 1.5; color: var(--fail); }
+
+/* Blue variant — set data-accent="blue" on .login to compare.
+   Button and focus ring move together; a black button with a blue
+   focus ring is the incoherent middle. */
+.login[data-accent="blue"] .login__submit { background: var(--accent-solid); color: #fff; }
+.login[data-accent="blue"] .login__submit:hover { opacity: 1; background: var(--accent-solid-hover); }
+.login[data-accent="blue"] .field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring-accent); }
+
+@media (max-width: 860px) {
+  .login { grid-template-columns: 1fr; }
+  .login__brand { display: none; }
+  .login__form { justify-content: center; padding: 32px 24px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .field input { transition: none; }
+}
