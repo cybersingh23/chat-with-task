@@ -2679,26 +2679,17 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 .ov-assign__head h2 { margin: 0; font-size: 14.5px; font-weight: 620; color: var(--text); }
 .ov-assign__hint { font-size: 12px; color: var(--text-dim); }
 
-/* Four reviewers, one row at desk width, reflowing without a per-count
-   breakpoint. The lead is NOT in this grid — see .ov-person--lead. */
-.ov-assign__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(212px, 1fr)); gap: 12px; align-items: start; }
+/* All five people, one row at desk width, reflowing without a per-count
+   breakpoint. 196px is what fits five inside .ov-main's 1180px max-width; a
+   larger minimum silently wrapped the fifth card onto its own row. */
+.ov-assign__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); gap: 12px; align-items: start; }
 .ov-person {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--r-card); padding: 14px 15px 15px; min-width: 0;
 }
-/* The lead's items are a different KIND of work, not a bigger pile of the same
-   work, so the card is marked and gets its own full-width row above the
-   reviewers. Sharing their grid made it a tall narrow column that pushed the
-   fourth reviewer onto a second row and off the fold. Its items run in columns
-   so six of them read as a set rather than a long list. */
-.ov-person--lead {
-  border-color: var(--accent-border); background: var(--accent-bg);
-  margin-bottom: 12px; padding: 15px 17px 17px;
-}
-.ov-person--lead .ov-person__list {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
-  gap: 12px 24px; align-items: start;
-}
+/* No lead-specific styling. The lead's items differ in KIND, which the per-item
+   tag already communicates; tinting and separating the whole card made it read as
+   a management panel above the team instead of one of five equal cards. */
 .ov-person__head { margin-bottom: 10px; }
 .ov-person__name { margin: 0; font-size: 13.5px; font-weight: 650; color: var(--text); }
 .ov-person__role { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-top: 2px; }
@@ -2768,6 +2759,9 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 
 /* Emphasis form: the latest delivery is the judgement, the rest is context. */
 .viz-col--context { fill: var(--viz-context); }
+/* Days since the last delivery — the ones being judged. Accent rather than a
+   status colour: being mid-cycle is not good or bad, it is just current. */
+.viz-col--cycle { fill: var(--viz-stage-3); }
 .viz-col--hit { fill: var(--ok); }
 .viz-col--miss { fill: var(--warn); }
 .viz-bar--neutral { fill: var(--viz-stage-2); }

@@ -152,11 +152,12 @@ export async function buildBrief({ fresh = false, days = 30 } = {}) {
   // Independent queries — run them together rather than serially. One failing
   // upstream shouldn't blank the whole page, so each is captured separately and
   // the renderer degrades per panel.
-  const [deliveries, queue, economics, throughput] = await Promise.all([
+  const [deliveries, queue, economics, throughput, intake] = await Promise.all([
     settle(() => runRegistryQuery('deliveries', {}, { fresh })),
     settle(() => runRegistryQuery('queue_state', {}, { fresh })),
     settle(() => runRegistryQuery('level_economics', { days }, { fresh })),
     settle(() => runRegistryQuery('throughput', { days }, { fresh })),
+    settle(() => runRegistryQuery('l12_intake', { days }, { fresh })),
   ]);
 
   const levels = (queue.rows || []).map((r) => ({
@@ -169,11 +170,17 @@ export async function buildBrief({ fresh = false, days = 30 } = {}) {
   const stages = rollUpStages(levels);
   const totalPending = levels.reduce((a, l) => a + l.pending, 0);
 
-  // "Ready" is the pool that can plausibly reach packaging: the final level plus
-  // the QM layer feeding it. Anything earlier needs a level transition first, so
-  // counting it as ready would flatter the forecast.
-  const readyNow = stages.find((s) => s.key === 'final')?.pending || 0;
-  const nearlyReady = stages.find((s) => s.key === 'late_review')?.pending || 0;
+  // DELIVERABLE = level 12, and nothing else.
+  //
+  // This was wrong before and it was the single biggest source of bad numbers on
+  // the page. The earlier version added the L10 feeder to L12 and called the sum
+  // "within reach", which turned a 289-task shortfall into a reported 43 — a
+  // reassuring number with nothing behind it. A task at L10 is not deliverable;
+  // it is supply that still has to be promoted. Progress is measured off L12.
+  const deliverable = levels.find((l) => l.level === '12')?.pending || 0;
+  const feeder = levels.find((l) => l.level === '10')?.pending || 0;
+  const upstream = levels.filter((l) => !['10', '12'].includes(l.level))
+    .reduce((a, l) => a + l.pending, 0);
 
   const history = (deliveries.rows || []).map((r) => ({
     date: String(r.delivered_on).slice(0, 10),
@@ -204,10 +211,15 @@ export async function buildBrief({ fresh = false, days = 30 } = {}) {
       levels,
       stages,
       totalPending,
-      readyNow,
-      nearlyReady,
-      withinReach: readyNow + nearlyReady,
-      gapToTarget: Math.max(0, config.overview.targetVolume - (readyNow + nearlyReady)),
+      deliverable,
+      feeder,
+      upstream,
+      progressPct: Math.round((deliverable / config.overview.targetVolume) * 100),
+      gapToTarget: Math.max(0, config.overview.targetVolume - deliverable),
+      // Whether the target is even reachable from what exists: everything still
+      // in flight, deliverable or not. Short here is a supply problem; short on
+      // `deliverable` alone is a promotion problem. They need different actions.
+      supplyShortfall: Math.max(0, config.overview.targetVolume - totalPending),
       stale: {
         count: levels.reduce((a, l) => a + l.stale, 0),
         byLevel: levels.filter((l) => l.stale > 0).map((l) => ({ level: l.level, stale: l.stale, oldestDays: l.oldestDays })),
@@ -228,7 +240,82 @@ export async function buildBrief({ fresh = false, days = 30 } = {}) {
       level: String(r.review_level),
       tasks: num(r.tasks),
     })),
+    intake: intakeSeries(intake.rows || [], history, now),
+    health: pipelineHealth({ levels, economics: economics.rows || [], throughput: throughput.rows || [], now }),
     windowDays: days,
+  };
+}
+
+// Daily arrivals into the deliverable state, plus the only comparison that means
+// anything: this cycle against the SAME POINT in the previous cycle. L12 fills in
+// the last 72 hours before a delivery, so "61 deliverable" on a Sunday is not
+// comparable to 350 — it is comparable to what Sunday looked like last week.
+function intakeSeries(rows, history, now) {
+  const days = rows.map((r) => ({
+    day: String(r.day).slice(0, 10),
+    dayName: r.day_name,
+    entered: num(r.entered),
+  }));
+  const sinceInclusive = (from, to) => days
+    .filter((d) => d.day >= from && d.day <= to)
+    .reduce((a, d) => a + d.entered, 0);
+
+  // Cycle boundaries are the delivery close-out dates, newest first.
+  const dates = history.map((h) => h.date);
+  const lastDelivery = dates[0] || null;
+  const prevDelivery = dates[1] || null;
+
+  let thisCycle = null, lastCycleToDate = null, offsetDays = null;
+  if (lastDelivery) {
+    thisCycle = sinceInclusive(lastDelivery, now.date);
+    offsetDays = Math.round((Date.parse(`${now.date}T00:00:00Z`) - Date.parse(`${lastDelivery}T00:00:00Z`)) / 86400e3);
+    if (prevDelivery && offsetDays != null) {
+      const end = new Date(Date.parse(`${prevDelivery}T00:00:00Z`) + offsetDays * 86400e3).toISOString().slice(0, 10);
+      lastCycleToDate = sinceInclusive(prevDelivery, end);
+    }
+  }
+  return { days, thisCycle, lastCycleToDate, offsetDays, lastDelivery, prevDelivery };
+}
+
+// A few signals, each with a direction, so the summary can talk about pipeline
+// HEALTH rather than only the delivery count. Everything here is derived from
+// numbers already fetched — no extra queries.
+function pipelineHealth({ levels, economics, throughput, now }) {
+  const ec = economics.map((r) => ({
+    level: String(r.review_level),
+    attempts: num(r.attempts),
+    avgHours: num(r.avg_hours),
+    totalHours: num(r.total_hours),
+    activeHours: num(r.active_hours),
+    pctRejected: num(r.pct_rejected),
+  }));
+
+  // Throughput trend: last 7 days against the 7 before, on total activity.
+  const byDay = {};
+  for (const r of throughput) byDay[String(r.day).slice(0, 10)] = (byDay[String(r.day).slice(0, 10)] || 0) + num(r.tasks);
+  const sorted = Object.keys(byDay).sort();
+  const tail = (n, skip = 0) => sorted.slice(Math.max(0, sorted.length - n - skip), sorted.length - skip)
+    .reduce((a, d) => a + byDay[d], 0);
+  const last7 = tail(7);
+  const prior7 = tail(7, 7);
+  const trendPct = prior7 ? Math.round(((last7 - prior7) / prior7) * 100) : null;
+
+  const rework = ec.filter((e) => e.attempts >= 50).sort((a, b) => b.pctRejected - a.pctRejected)[0] || null;
+  const costliest = ec.filter((e) => e.totalHours >= 100).sort((a, b) => b.totalHours - a.totalHours)[0] || null;
+  const stale = levels.reduce((a, l) => a + l.stale, 0);
+  // The level holding the most work is where the queue is actually backed up.
+  const bottleneck = [...levels].sort((a, b) => b.pending - a.pending)[0] || null;
+
+  return {
+    last7, prior7, trendPct,
+    worstRework: rework ? { level: rework.level, pctRejected: rework.pctRejected, attempts: rework.attempts } : null,
+    costliest: costliest
+      ? { level: costliest.level, totalHours: costliest.totalHours, activeHours: costliest.activeHours,
+          idlePct: costliest.totalHours ? Math.round((1 - costliest.activeHours / costliest.totalHours) * 100) : 0 }
+      : null,
+    stale,
+    bottleneck: bottleneck ? { level: bottleneck.level, pending: bottleneck.pending, oldestDays: bottleneck.oldestDays } : null,
+    asOf: now.label,
   };
 }
 
@@ -416,7 +503,10 @@ export function buildAssignments(brief) {
     lead.push({
       system: 'decision',
       text: `Commit to ${brief.target} for ${c.isDeliveryDay ? 'today' : c.nextDeliveryDate} or reset it`,
-      detail: `${p.withinReach} within reach, ${p.gapToTarget} short. Either promotion from earlier stages covers it or the customer hears a smaller number — and that call is cheaper made early than discovered on delivery day.`,
+      detail: `${p.deliverable} deliverable at L12 now, ${p.gapToTarget} short of ${brief.target}. `
+        + `${p.feeder} are at L10 waiting to be promoted`
+        + `${p.supplyShortfall > 0 ? `, and even everything in flight is ${p.supplyShortfall} short` : ''}`
+        + '. Cheaper decided early than discovered on delivery day.',
     });
   }
   for (const e of brief.economics || []) {
@@ -449,8 +539,18 @@ export function buildAssignments(brief) {
     lead.push({ system: 'direction', text: 'Nothing needs escalating', detail: 'Target is covered, no gate is misbehaving and cost is proportionate.' });
   }
 
+  // Capped, and ranked before capping. Handing the lead every escalation-shaped
+  // item turned their card into a six-entry backlog, which is the opposite of
+  // useful for someone whose job is picking what matters. Two is enough to act on
+  // this week; the underlying signals are all still on the charts.
+  const RANK = { board: 0, decision: 1, 'cross-functional': 2, direction: 3 };
+  const leadTop = lead
+    .slice()
+    .sort((a, b2) => (RANK[a.system] ?? 9) - (RANK[b2.system] ?? 9))
+    .slice(0, 2);
+
   return {
-    lead: { name: config.overview.lead, role: config.overview.leadTitle, items: lead },
+    lead: { name: config.overview.lead, role: config.overview.leadTitle, items: leadTop },
     reviewers,
   };
 }
@@ -480,7 +580,7 @@ function cacheKey(brief) {
   return JSON.stringify([
     brief.calendar.phase,
     brief.now.date,
-    bucket(p?.totalPending), bucket(p?.readyNow), bucket(p?.nearlyReady),
+    bucket(p?.totalPending), bucket(p?.deliverable, 10), bucket(p?.feeder),
     // Stale is small and individually meaningful, so it gets a tighter bucket.
     bucket(p?.stale.count, 5),
     brief.deliveries?.last?.date, brief.deliveries?.last?.tasks,
@@ -495,17 +595,28 @@ by the person accountable for the weekly delivery. Your job is the READ: what th
 together, and what it implies. The charts below you show the numbers; per-person action items
 are generated separately and listed under you.
 
-BREVITY IS THE POINT. Two paragraphs, three at absolute most, and under 90 words in total. A
-reader should get the whole picture in about fifteen seconds. Shorter is better every time.
+Cover BOTH of these, in this order:
+  1. Delivery progress — how much is actually deliverable against the target, read against where
+     the cycle normally is at this point rather than against the target alone.
+  2. Pipeline HEALTH — throughput trend, where the queue is backed up, rework, aging. One or two
+     signals, whichever are actually moving. Not a list of everything.
+Then close with what to do AT THIS MOMENT — the actions should fit the day and hour you are given.
+Sunday afternoon and Tuesday 10am deserve different advice from the same numbers.
+
+BREVITY IS THE POINT. Three short paragraphs, under 110 words in total. A reader should get the
+whole picture in about twenty seconds. Shorter is better every time.
 
 Voice: a sharp colleague who has already looked at everything and respects your time. Warm but
 economical. No headings, no bullets, no emoji.
 
 Hard rules:
 - Open with the exact headline you are given, verbatim, as the first sentence. Then continue.
-- Under 90 words after the headline. Two paragraphs, three maximum.
+- Under 110 words after the headline. Three short paragraphs.
 - Every number you cite must come from the brief. Never estimate or invent one. Cite only the
-  two or three numbers that carry the point; the charts have the rest.
+  three or four numbers that carry the point; the charts have the rest.
+- LEVEL 12 IS THE ONLY DELIVERABLE STATE. Never add upstream levels to it and call the sum ready
+  or within reach — a task at L10 is supply, not progress. If you mean the whole in-flight pool,
+  say "in flight".
 - Do NOT assign work or name people. That is handled below you and duplicating it wastes lines.
 - Where both systems come up, name them so they can't be confused: "the pipeline" is upstream
   production, "the board" is this app's audit queue. Write them in normal prose capitalisation —
@@ -539,9 +650,14 @@ function buildPrompt(brief) {
     // Dates here are the pipeline CLOSE-OUT, which trails the packaging run.
     // Without this the model has to guess why a Tuesday cadence shows Wednesday
     // dates, and a guess that happens to be right is still a guess.
-    lines.push('Note: these dates are when the pipeline released the batch. Packaging happens the'
-      + ' evening before, so a Wednesday close-out is the Tuesday delivery. Refer to deliveries by'
-      + ' their delivery day, not the close-out date.');
+    // Spelled out with the actual timeline, because "the evening before" was
+    // read as "the evening before Tuesday" and produced advice about packaging on
+    // Monday. Packaging is ON delivery day; the close-out lands the next morning.
+    lines.push(`Note on these dates: they are when the PIPELINE closed the batch out, which is the`
+      + ` morning AFTER packaging. Packaging happens on delivery day itself, in the evening —`
+      + ` e.g. packaged Tue 2026-07-28 23:48, closed out Wed 2026-07-29 10:00. So the next`
+      + ` packaging window is the evening of ${c.isDeliveryDay ? 'today' : c.nextDeliveryDate},`
+      + ` a ${c.deliveryWeekday}. Never describe packaging as happening the day before delivery.`);
     lines.push(`Trailing 4 deliveries average ${brief.deliveries.trailingAvg} tasks. Full history, newest first: ${brief.deliveries.history.map((h) => `${h.date}=${h.tasks}`).join(', ')}.`);
   }
 
@@ -549,13 +665,40 @@ function buildPrompt(brief) {
     lines.push('');
     lines.push(`PIPELINE (upstream, ${p.totalPending} tasks in flight):`);
     for (const s of p.stages) lines.push(`  ${s.label} (levels ${s.levels.join(', ') || 'none'}): ${s.pending} pending${s.stale ? `, ${s.stale} stale` : ''}`);
-    lines.push(`  At the final level now: ${p.readyNow}. One layer back: ${p.nearlyReady}. Within reach: ${p.withinReach}.`);
+    lines.push(`  DELIVERABLE NOW (at L12): ${p.deliverable} of ${brief.target} — ${p.progressPct}%. L12 is the deliverable state;`);
+    lines.push(`  nothing upstream counts until it is promoted. Feeder at L10: ${p.feeder}. Deeper upstream: ${p.upstream}.`);
     lines.push(p.gapToTarget > 0
       ? `  That is ${p.gapToTarget} SHORT of ${brief.target} — the rest must come from earlier stages.`
       : `  That covers the ${brief.target} target.`);
     if (p.stale.count) {
       lines.push(`  Stale (>7 days at current level): ${p.stale.count} — ${p.stale.byLevel.map((s) => `L${s.level}: ${s.stale} (oldest ${s.oldestDays}d)`).join('; ')}.`);
     }
+  }
+
+  // Cycle-position context. Without it, "61 deliverable against 350" reads as a
+  // catastrophe on a Sunday when it is roughly the normal shape of a Sunday.
+  const ik = brief.intake;
+  if (ik?.thisCycle != null) {
+    lines.push('');
+    lines.push('DELIVERABLE INTAKE (how fast work reaches L12):');
+    lines.push(`  Since the last delivery (${ik.lastDelivery}, ${ik.offsetDays} day(s) ago): ${ik.thisCycle} tasks entered L12.`);
+    if (ik.lastCycleToDate != null) {
+      lines.push(`  Same point in the previous cycle: ${ik.lastCycleToDate}. That is the fair comparison, NOT the target.`);
+    }
+    const recent = ik.days.slice(-6).map((d) => `${d.day}(${d.dayName})=${d.entered}`).join(', ');
+    if (recent) lines.push(`  Recent daily intake: ${recent}.`);
+    lines.push('  L12 fills late: for the 350 batch, 80% arrived in the final three days and 135 on delivery day itself.');
+  }
+
+  const h = brief.health;
+  if (h) {
+    lines.push('');
+    lines.push('PIPELINE HEALTH:');
+    if (h.trendPct != null) lines.push(`  Activity last 7 days ${h.last7} vs ${h.prior7} the week before (${h.trendPct >= 0 ? '+' : ''}${h.trendPct}%).`);
+    if (h.bottleneck) lines.push(`  Most work queued at L${h.bottleneck.level}: ${h.bottleneck.pending} pending, oldest ${h.bottleneck.oldestDays} days.`);
+    if (h.worstRework) lines.push(`  Highest rework: L${h.worstRework.level} rejecting ${h.worstRework.pctRejected}% of ${h.worstRework.attempts} attempts.`);
+    if (h.costliest) lines.push(`  Largest cost: L${h.costliest.level}, ${h.costliest.totalHours}h billed vs ${h.costliest.activeHours}h active (${h.costliest.idlePct}% idle).`);
+    if (h.stale) lines.push(`  Stale past ${config.overview.staleDays} days: ${h.stale}.`);
   }
 
   if (brief.economics?.length) {
@@ -575,8 +718,9 @@ function buildPrompt(brief) {
   lines.push('Per-person action items are generated separately and shown directly below your summary,');
   lines.push('so do not assign work or name anyone.');
   lines.push('');
-  lines.push('Write the summary now. Open with the headline verbatim, then TWO short paragraphs (three at');
-  lines.push('most), under 90 words total. Give the read on this week, not a tour of the numbers.');
+  lines.push('Write the summary now. Open with the headline verbatim, then THREE short paragraphs under 110');
+  lines.push('words total: delivery progress against where the cycle normally is, one or two health signals');
+  lines.push(`that are actually moving, and what to do right now given it is ${brief.now.label}.`);
   return lines.join('\n');
 }
 

@@ -1,5 +1,5 @@
 import { api, el, mount, renderAppHeader } from './common.js';
-import { mountChart, deliveryColumns, readinessFunnel, stackedArea, hBars, legend } from './charts.js';
+import { mountChart, deliveryColumns, intakeColumns, readinessFunnel, stackedArea, hBars, legend } from './charts.js';
 
 // The Overview page.
 //
@@ -60,10 +60,13 @@ function renderClock(b) {
     el('div', { class: `ov-stat ${cls}` }, el('span', { class: 'ov-stat__v' }, value), el('span', { class: 'ov-stat__k' }, label));
 
   const p = b.pipeline;
+  // The headline number is DELIVERABLE (L12), not a roll-up of upstream stages.
+  // Reporting the sum as "within reach" made a 289-task shortfall read as 43.
   mount($('ov-countdown'),
     chip('', c.isDeliveryDay ? 'delivery is today' : `days to ${c.deliveryWeekday}`, c.isDeliveryDay ? '—' : String(c.daysUntil)),
-    p ? chip('', 'within reach', int(p.withinReach)) : null,
-    p ? chip(p.gapToTarget > 0 ? 'ov-stat--warn' : 'ov-stat--ok', p.gapToTarget > 0 ? `short of ${b.target}` : `target ${b.target}`,
+    p ? chip('', `deliverable of ${int(b.target)}`, int(p.deliverable)) : null,
+    p ? chip(p.gapToTarget > 0 ? 'ov-stat--warn' : 'ov-stat--ok',
+      p.gapToTarget > 0 ? 'still to promote' : `target ${b.target}`,
       p.gapToTarget > 0 ? int(p.gapToTarget) : 'met') : null);
 }
 
@@ -122,7 +125,11 @@ function renderAssignments(b) {
   const a = b.assignments;
   if (!a) return;
 
-  const card = (person, isLead) => el('article', { class: `ov-person${isLead ? ' ov-person--lead' : ''}` },
+  // Every card is identical — no accent tint, no separate row, no ordering
+  // privilege beyond being first. The lead's items differ in KIND, and the tag on
+  // each item already says so; styling the whole card differently made it read as
+  // a management panel sitting above the team rather than one of five people.
+  const card = (person) => el('article', { class: 'ov-person' },
     el('header', { class: 'ov-person__head' },
       el('h3', { class: 'ov-person__name' }, cap(person.name)),
       el('span', { class: 'ov-person__role' }, person.role)),
@@ -134,17 +141,16 @@ function renderAssignments(b) {
           el('span', { class: 'ov-task__detail' }, it.detail))))
       : el('p', { class: 'ov-person__clear' }, 'Nothing queued.'));
 
-  // The lead card is its own full-width row, then the reviewers four-up. Putting
-  // all five in one auto-fit grid wrapped the fifth reviewer below a very tall
-  // lead column and left them stranded off the fold.
+  // All five in one grid. This only works because the lead's items are now capped
+  // at two, so no card is tall enough to strand the others on a second row — the
+  // earlier version had a six-item lead column that did exactly that.
   mount($('ov-assign'),
     el('div', { class: 'ov-assign__head' },
       el('h2', {}, 'This week'),
       el('span', { class: 'ov-assign__hint' },
         'Split from live board and pipeline state — claim before you start. Rotates weekly.')),
-    card(a.lead, true),
     el('div', { class: 'ov-assign__grid' },
-      ...a.reviewers.map((r) => card(r, false))));
+      ...[a.lead, ...a.reviewers].map((p) => card(p))));
 }
 
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
@@ -155,7 +161,7 @@ const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 function renderCharts(b) {
   if (!b.redash?.enabled) {
-    for (const id of ['chart-deliveries', 'chart-funnel', 'chart-throughput', 'chart-cost', 'chart-rework']) {
+    for (const id of ['chart-deliveries', 'chart-funnel', 'chart-intake', 'chart-throughput', 'chart-cost', 'chart-rework']) {
       mount($(id), el('p', { class: 'ov-error' }, 'Redash is not configured (REDASH_API_KEY unset).'));
     }
     return;
@@ -169,13 +175,33 @@ function renderCharts(b) {
     mountChart($('chart-deliveries'), deliveryColumns({ history: d.history, target: b.target }));
   }
 
-  // 2 — readiness funnel
+  // 2 — supply funnel. Only the Final band is deliverable; the rest is supply
+  // that still needs promoting, and the caption says so rather than letting the
+  // cumulative total imply the target is covered.
   if (b.pipeline?.stages?.length) {
     const p = b.pipeline;
-    $('ov-funnel-sub').textContent = p.gapToTarget > 0
-      ? `${int(p.withinReach)} of ${int(b.target)} within reach — ${int(p.gapToTarget)} must come from earlier stages.`
-      : `${int(p.withinReach)} within reach of ${int(b.target)}. The target is covered.`;
+    $('ov-funnel-sub').textContent =
+      `${int(p.deliverable)} of ${int(b.target)} are deliverable now (L12) — ${p.progressPct}%. `
+      + `${int(p.feeder)} sit at L10 and ${int(p.upstream)} further back; running totals below assume every one of them promotes in time`
+      + `${p.supplyShortfall > 0 ? `, which would still leave ${int(p.supplyShortfall)} short` : ''}.`;
     mountChart($('chart-funnel'), readinessFunnel({ stages: p.stages, target: b.target }));
+  }
+
+  // 2c — deliverable intake. The summary cites the cycle-to-date comparison, so
+  // it needs to be visible somewhere rather than only asserted in prose.
+  if (b.intake?.days?.length) {
+    const ik = b.intake;
+    const pace = ik.lastCycleToDate != null && ik.lastCycleToDate > 0
+      ? ` That is ${Math.round((ik.thisCycle / ik.lastCycleToDate) * 100)}% of the ${int(ik.lastCycleToDate)} reached by the same point last cycle.`
+      : '';
+    $('ov-intake-sub').textContent =
+      `Level 12 is the deliverable state. ${int(ik.thisCycle ?? 0)} have entered it since the last delivery `
+      + `(${ik.lastDelivery}, ${ik.offsetDays} day${ik.offsetDays === 1 ? '' : 's'} ago).${pace}`;
+    mountChart($('chart-intake'), intakeColumns({
+      days: ik.days,
+      deliveries: (b.deliveries?.history || []).map((d) => d.date),
+      cycleStart: ik.lastDelivery,
+    }));
   }
 
   // 3 — throughput, rolled up from level to stage

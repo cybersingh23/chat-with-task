@@ -125,6 +125,15 @@ export const REGISTRY = {
       stale_days: { type: 'int', min: 1, max: 90, default: () => 7 },
     },
   },
+  l12_intake: {
+    label: 'Deliverable intake',
+    description: 'Tasks entering level 12 per day — the rate at which work becomes deliverable.',
+    sql: 'l12_intake.sql',
+    params: {
+      project_id: { type: 'objectId', default: () => config.redash.projectId },
+      days: { type: 'int', min: 1, max: 180, default: () => 30 },
+    },
+  },
   level_economics: {
     label: 'Cost and rework per level',
     description: 'Hours, attempts and rejection rate per review level over a trailing window.',

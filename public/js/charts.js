@@ -269,6 +269,63 @@ export function readinessFunnel({ stages, target }) {
 }
 
 // ---------------------------------------------------------------------------
+// 2b. Deliverable intake — daily arrivals into L12, with delivery markers
+// ---------------------------------------------------------------------------
+// Job: is the deliverable pool being fed fast enough, and where are we in the
+// cycle. Emphasis form again: days since the last delivery are the ones being
+// judged, everything before them is the pattern being judged against. Delivery
+// dates get a rule so the pre-delivery ramp is visible rather than inferred.
+export function intakeColumns({ days, deliveries, cycleStart }) {
+  return (w) => {
+    if (!days.length) return emptyState(w, 210, 'No level-12 arrivals in this window');
+    const h = 210;
+    const pad = { t: 24, r: 16, b: 40, l: 44 };
+    const iw = w - pad.l - pad.r;
+    const ih = h - pad.t - pad.b;
+    const max = Math.max(...days.map((d) => d.entered)) * 1.15 || 1;
+    const y = (v) => pad.t + ih - (v / max) * ih;
+    const slot = iw / days.length;
+    const bw = Math.max(4, Math.min(30, slot - 4));
+    const delivered = new Set(deliveries || []);
+
+    const svg = s('svg', { class: 'viz', width: w, height: h, role: 'img',
+      'aria-label': `Tasks entering level 12 per day across ${days.length} days` });
+
+    for (const t of [0, max / 2]) {
+      svg.append(s('line', { class: 'viz-grid', x1: pad.l, x2: w - pad.r, y1: y(t), y2: y(t) }));
+      svg.append(s('text', { class: 'viz-tick', x: pad.l - 8, y: y(t) + 4, 'text-anchor': 'end' }, fmtInt(t)));
+    }
+
+    days.forEach((d, i) => {
+      const x = pad.l + i * slot + (slot - bw) / 2;
+      const top = y(d.entered);
+      const inCycle = cycleStart && d.day >= cycleStart;
+      svg.append(s('path', {
+        class: `viz-col ${inCycle ? 'viz-col--cycle' : 'viz-col--context'}`,
+        d: endRoundedPath(x, top, bw, pad.t + ih - top, 4, 'up'),
+      }));
+      // Delivery days get a marker so the ramp into each one is legible.
+      if (delivered.has(d.day)) {
+        svg.append(s('line', { class: 'viz-rule', x1: x + bw / 2, x2: x + bw / 2, y1: pad.t - 8, y2: pad.t + ih }));
+      }
+      const hit = s('rect', { x: pad.l + i * slot, y: pad.t, width: slot, height: ih, fill: 'transparent' });
+      const tip = `<b>${d.day}</b> ${d.dayName}<br>${fmtInt(d.entered)} entered L12`
+        + `${delivered.has(d.day) ? '<br>delivery closed out this day' : ''}`
+        + `${inCycle ? '<br>this cycle' : ''}`;
+      hit.addEventListener('pointerenter', (e) => showTip(tip, e));
+      hit.addEventListener('pointermove', (e) => showTip(tip, e));
+      hit.addEventListener('pointerleave', hideTip);
+      svg.append(hit);
+      if (i === 0 || i === days.length - 1 || d.entered === Math.max(...days.map((z) => z.entered))) {
+        svg.append(s('text', { class: 'viz-tick', x: x + bw / 2, y: h - pad.b + 16, 'text-anchor': 'middle' },
+          d.day.slice(5).replace('-', '/')));
+      }
+    });
+    return svg;
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 3. Throughput — stacked area by stage, with a crosshair
 // ---------------------------------------------------------------------------
 // Job: trend + composition. Ordinal ramp because stages are ordered. The value

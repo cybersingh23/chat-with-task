@@ -47,10 +47,21 @@
 
       <section class="ov-card ov-card--wide">
         <header class="ov-card__head">
-          <h2>Can we make the next one?</h2>
-          <p class="ov-card__sub" id="ov-funnel-sub">Everything in flight, read cumulatively back from the finish line.</p>
+          <!-- Was titled "Can we make the next one?", which combined with the
+               cumulative totals implied the target was covered whenever the
+               in-flight pool exceeded it. Only the Final band is deliverable. -->
+          <h2>Supply in flight</h2>
+          <p class="ov-card__sub" id="ov-funnel-sub">Everything still in the pipeline, read cumulatively back from the finish line.</p>
         </header>
         <div class="ov-chart" id="chart-funnel"></div>
+      </section>
+
+      <section class="ov-card ov-card--wide">
+        <header class="ov-card__head">
+          <h2>Deliverable intake</h2>
+          <p class="ov-card__sub" id="ov-intake-sub">Tasks entering level 12 per day — the rate at which work becomes deliverable.</p>
+        </header>
+        <div class="ov-chart" id="chart-intake"></div>
       </section>
 
       <section class="ov-card ov-card--wide">
