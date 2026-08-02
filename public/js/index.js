@@ -1,4 +1,4 @@
-import { api, el, cap, startTour } from './common.js';
+import { api, el, mount, cap, startTour, renderAppHeader } from './common.js';
 
 const ORDER = ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'];
 const VERDICT_LABELS = {
@@ -9,6 +9,14 @@ const VERDICT_LABELS = {
   SECOND_OPINION: 'Second Opinion Needed',
 };
 const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
+// Severity is the only thing colour means on a board card. Unsorted has no colour:
+// it is an absence of a verdict, not a fourth status.
+const SEV_TAG = { HARD_FAIL: 'tag--hard', SOFT_FAIL: 'tag--soft', PASS: 'tag--pass', UNSORTED: '' };
+// Verdicts are states, not categories — a three-step ramp, nothing else.
+const VERDICT_STATE = {
+  NO_ISSUES: 'is-ok', FIXES_MADE: 'is-ok', GRAMMAR_ONLY: 'is-ok',
+  SECOND_OPINION: 'is-warn', SBQ: 'is-fail',
+};
 // Workflow lanes — derived from claim + decision state. A decision marks a
 // ticket "seen" (Resolved), except Second Opinion which stays in its own lane.
 const RESOLVED_VERDICTS = new Set(['NO_ISSUES', 'FIXES_MADE', 'GRAMMAR_ONLY', 'SBQ']);
@@ -45,8 +53,8 @@ function avatarHue(name) {
 // Claim straight from the board without opening the task (opening = view only).
 // stopPropagation/preventDefault so the click doesn't follow the card link.
 function claimAction(t) {
-  return el('span', {
-    class: 'card-claim', role: 'button', title: 'assign this task to you',
+  return el('button', {
+    class: 'link', type: 'button', title: 'assign this task to you',
     onclick: async (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -54,17 +62,14 @@ function claimAction(t) {
       catch (err) { toast(err.message); }
       load();
     },
-  }, el('span', { class: 'avatar ghost' }), 'Claim');
+  }, 'Claim');
 }
 
 function assignee(name) {
-  if (!name) {
-    return el('span', { class: 'assignee none' },
-      el('span', { class: 'avatar ghost' }), 'Unassigned');
-  }
-  return el('span', { class: 'assignee' },
-    el('span', { class: 'avatar', style: `background: hsl(${avatarHue(name)} 52% 42%)` }, name[0].toUpperCase()),
-    el('span', { class: 'assignee-name' }, cap(name)),
+  if (!name) return el('span', { class: 'card__owner' }, 'Unassigned');
+  return el('span', { class: 'card__owner' },
+    el('span', { class: 'avatar avatar--sm' }, name[0].toUpperCase()),
+    cap(name),
   );
 }
 
@@ -166,7 +171,7 @@ let toastTimer;
 function toast(msg, action = null) {
   let t = document.getElementById('toast');
   if (!t) { t = el('div', { id: 'toast', class: 'toast' }); document.body.append(t); }
-  t.replaceChildren(
+  mount(t,
     el('span', {}, msg),
     action
       ? el('button', {
@@ -188,19 +193,19 @@ const searchInput = document.getElementById('task-search');
 
 async function boot() {
   me = await api('/me'); // 401 redirects to login
-  document.getElementById('user-chip').hidden = false;
-  document.getElementById('user-name').textContent = me.username;
-  document.getElementById('user-role').textContent = me.role;
-  document.getElementById('ingest-section').hidden = me.role !== 'admin';
-  document.getElementById('admin-link').hidden = me.role !== 'admin';
+  // One header implementation across every page — the board included, so the
+  // two can't drift apart again.
+  renderAppHeader({
+    active: 'board', user: me,
+    extras: [el('button', { class: 'btn btn--ghost', type: 'button', id: 'tour-btn' }, 'Take a tour')],
+  });
+  document.getElementById('tour-btn').addEventListener('click', startBoardTour);
   document.getElementById('clear-board').hidden = me.role !== 'admin';
   document.getElementById('gen-all').hidden = me.role !== 'admin';
   if (me.role === 'admin') pollGenStatus(); // reflect any in-flight batch on load
-  if (me.role === 'admin') refreshRubricStatus();
   const q = new URLSearchParams(location.search).get('q');
   if (q) searchInput.value = q;
   await load();
-  moveSlider();
   setInterval(load, 8000); // live claim/verdict status from other reviewers
 }
 
@@ -218,9 +223,8 @@ function allTickets() {
 
 function ticketCard(t) {
   const lane = laneOf(t);
-  const seen = lane === 'RESOLVED';
   const card = el('a', {
-    class: `ticket accent-${t.bucket}${seen ? ' seen' : ''}${lane === 'SECOND_OPINION' ? ' attention' : ''}${t.delivered ? ' delivered' : ''}${t.tour ? ' tour-card' : ''}`,
+    class: `card${lane === 'RESOLVED' ? ' card--resolved' : ''}${t.tour ? ' card--tour' : ''}`,
     href: `${window.__base__ || ''}/task/${t.bucket}/${t.id}`,
     draggable: 'true',
     ondragstart: (e) => {
@@ -231,32 +235,36 @@ function ticketCard(t) {
     },
     ondragend: (e) => { dragging = null; e.currentTarget.classList.remove('dragging'); },
   },
-    el('div', { class: 'ticket-top' },
-      el('span', { class: `sev-tag accent-${t.bucket}` }, SEV_LABEL[t.bucket]),
-      t.tour ? el('span', { class: 'tour-tag', title: 'temporary tour sandbox — deleted when the tour ends' }, 'sandbox') : null,
-      seen ? el('span', { class: 'seen-mark', title: 'seen' }, '✓') : null,
-      lane === 'SECOND_OPINION' ? el('span', { class: 'attention-mark', title: 'needs another reviewer' }, '⚠') : null,
-      t.delivered ? el('span', { class: 'delivered-mark', title: `delivered${t.deliveredAt ? ' ' + t.deliveredAt.slice(0, 10) : ''}` }, 'delivered') : null,
+    el('div', { class: 'card__top' },
+      // Severity is a tag, never a coloured left edge on the card.
+      el('span', { class: `tag ${SEV_TAG[t.bucket] || ''}` }, SEV_LABEL[t.bucket]),
+      t.tour ? el('span', { class: 'tag', title: 'temporary tour sandbox — deleted when the tour ends' }, 'sandbox') : null,
+      t.delivered ? el('span', { class: 'tag', title: `delivered${t.deliveredAt ? ' ' + t.deliveredAt.slice(0, 10) : ''}` }, 'archived') : null,
+      el('span', { class: 'spacer' }),
+      // Verdicts are states, not categories: settled → ok, unsettled → warn, rejected → fail.
+      t.verdict
+        ? el('span', { class: `card__verdict ${VERDICT_STATE[t.verdict] || ''}` },
+          el('span', { class: 'dot', style: 'background: currentColor' }),
+          VERDICT_LABELS[t.verdict] || t.verdict)
+        : null,
     ),
-    el('div', { class: 'tid' }, t.id),
-    t.problem ? el('div', { class: 'prob' }, t.problem) : null,
+    el('div', { class: 'card__id' }, t.id),
+    t.problem ? el('div', { class: 'card__problem' }, t.problem) : null,
     lane === 'SECOND_OPINION' && t.verdictNote
-      ? el('div', { class: 'card-why', title: t.verdictNote }, el('span', { class: 'card-why-tag' }, 'Why'), t.verdictNote)
+      ? el('div', { class: 'card__why', title: t.verdictNote }, el('b', {}, 'Why · '), t.verdictNote)
       : null,
-    el('div', { class: 'ticket-foot' },
+    el('div', { class: 'card__foot' },
       t.claimedBy ? assignee(t.claimedBy) : claimAction(t),
+      el('span', { class: 'spacer' }),
+      // Neutral by design so it never competes with the severity tag.
       t.grammar
         ? el('span', {
-          class: 'chip grammar-chip',
+          class: 'tag tag--grammar',
           title: t.grammarOnly
-            ? `Spelling/Grammar is the only fail (${(t.qcDims || []).join(', ')}) — auto-routed to Grammar Fixes`
-            : `Spelling/Grammar flagged, but not the only fail — also ${(t.otherDims || []).join(', ')}`,
-        }, '✎ Spelling/Grammar')
+            ? `Spelling / grammar is the only fail (${(t.qcDims || []).join(', ')}) — auto-routed to Grammar fixes`
+            : `Spelling / grammar flagged, but not the only fail — also ${(t.otherDims || []).join(', ')}`,
+        }, el('span', { 'aria-hidden': 'true' }, '✎'), 'Grammar')
         : null,
-      lane === 'GRAMMAR' && t.grammarLane === 'in'
-        ? el('span', { class: 'chip manual-chip', title: 'moved here by hand, not auto-detected' }, 'moved in')
-        : null,
-      t.verdict ? el('span', { class: `chip v-${t.verdict}` }, VERDICT_LABELS[t.verdict] || t.verdict) : null,
     ),
   );
   if (t.tour) card.id = 'tour-dummy-card';
@@ -265,9 +273,10 @@ function ticketCard(t) {
 
 function render() {
   const q = searchInput.value.trim().toLowerCase();
-  const tickets = allTickets().filter((t) =>
+  const all = allTickets().filter((t) =>
     (!t.tour || t.tourOwner === me?.username) && // sandbox tasks show only to their owner
-    (showDelivered || !t.delivered) &&
+    (showDelivered || !t.delivered));
+  const tickets = all.filter((t) =>
     (sevFilter === 'ALL' || t.bucket === sevFilter) &&
     (!q || t.id.toLowerCase().includes(q) || (t.problem || '').toLowerCase().includes(q))
   );
@@ -277,71 +286,96 @@ function render() {
   for (const t of tickets) byLane.get(laneOf(t)).push(t);
 
   const root = document.getElementById('lanes');
-  // Preserve each lane's scroll position across the 8s auto-refresh (and any re-render),
-  // so scrolling down into a lane doesn't snap back to the top.
+  // Preserve each lane's scroll position across the 8s auto-refresh, so scrolling
+  // into a lane doesn't snap back to the top.
   const prevScroll = {};
   root.querySelectorAll('.lane').forEach((l) => {
-    const k = (l.className.match(/lane-([A-Z_]+)/) || [])[1];
-    const b = l.querySelector('.lane-body');
+    const k = l.dataset.lane;
+    const b = l.querySelector('.lane__list');
     if (k && b) prevScroll[k] = b.scrollTop;
   });
+
   root.replaceChildren(
     ...LANES.map((lane) => {
       const items = byLane.get(lane.key);
+      const mixed = lane.key === 'GRAMMAR' ? items.filter((t) => !t.grammarOnly).length : 0;
       return el('section', {
-        class: `lane lane-${lane.key}`,
+        class: 'lane',
+        'data-lane': lane.key,
         ondragover: (e) => {
           if (!dragging || laneOf(dragging) === lane.key) return;
           e.preventDefault();
-          e.currentTarget.classList.add('drop-target');
+          e.currentTarget.classList.add('lane--drop');
         },
-        ondragleave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove('drop-target'); },
+        ondragleave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove('lane--drop'); },
         ondrop: (e) => {
           e.preventDefault();
-          e.currentTarget.classList.remove('drop-target');
+          e.currentTarget.classList.remove('lane--drop');
           if (dragging) applyLaneChange(dragging, lane.key, e.clientX, e.clientY);
         },
       },
-        el('div', { class: 'lane-head' },
-          el('span', { class: 'lane-name' }, lane.name),
-          el('span', { class: 'lane-count' }, String(items.length)),
-          lane.key === 'GRAMMAR' && items.length
-            ? el('button', {
-              class: 'lane-action',
-              title: 'Complete this lane — grammar-only tasks resolve as Grammar-only, the rest as Fixes made',
-              onclick: (e) => { e.preventDefault(); completeGrammarLane(items); },
-            }, 'Complete lane')
-            : null,
-          // show the split up front, so the two kinds of task in here are visible
-          // before you commit to completing them
-          lane.key === 'GRAMMAR' && items.length
-            ? el('div', { class: 'lane-split' },
-              el('b', {}, `${items.filter((t) => t.grammarOnly).length} grammar-only`),
-              ' · ',
-              el('i', {}, `${items.filter((t) => !t.grammarOnly).length} had other fails`),
-            )
-            : null,
+        el('div', { class: 'lane__head' },
+          el('span', { class: 'lane__name' }, lane.name),
+          el('span', { class: 'lane__count' }, String(items.length)),
         ),
+        // The split only earns a line when there is actually a mix in here.
+        lane.key === 'GRAMMAR' && items.length && mixed
+          ? el('div', { class: 'lane__note' },
+            `${items.length - mixed} grammar-only · ${mixed} had other fails`)
+          : null,
         items.length
-          ? el('div', { class: 'lane-body' }, items.map(ticketCard))
-          : el('div', { class: 'lane-empty' }, q || sevFilter !== 'ALL' ? 'No match.' : lane.hint),
+          ? el('div', { class: 'lane__list' }, items.map(ticketCard))
+          : el('div', { class: 'lane__empty' }, q || sevFilter !== 'ALL' ? 'No match.' : lane.hint),
+        // Lane-level action sits BELOW the cards it acts on, not in the header
+        // where it competed with the lane title as a second link.
+        lane.key === 'GRAMMAR' && items.length
+          ? el('button', {
+            class: 'lane__complete',
+            title: 'Grammar-only tasks resolve as Grammar-only, the rest as Fixes made',
+            onclick: (e) => { e.preventDefault(); completeGrammarLane(items); },
+          }, `Complete lane · ${items.length} task${items.length === 1 ? '' : 's'}`)
+          : null,
       );
     })
   );
-  // restore the per-lane scroll captured above
   root.querySelectorAll('.lane').forEach((l) => {
-    const k = (l.className.match(/lane-([A-Z_]+)/) || [])[1];
-    const b = l.querySelector('.lane-body');
+    const k = l.dataset.lane;
+    const b = l.querySelector('.lane__list');
     if (k && b && prevScroll[k]) b.scrollTop = prevScroll[k];
   });
 
-  const total = allTickets().filter((t) => !t.delivered && !t.tour).length;
-  document.getElementById('ws-summary').textContent =
-    `${total} tasks · ` + LANES.map((l) => `${l.name.toLowerCase()} ${byLane.get(l.key).length}`).join(' · ');
+  renderStrip(all, byLane);
+  // Reserved width + tabular numerals, so the toolbar never shifts between states.
   document.getElementById('search-count').textContent =
-    q || sevFilter !== 'ALL' ? `${tickets.length} shown` : '';
+    q || sevFilter !== 'ALL' ? `${tickets.length} of ${all.length}` : `${all.length} tasks`;
   refreshBulkCount();
   refreshIdmoveSummary();
+}
+
+// "How far through this delivery are we" — replaces counting cards by eye.
+function renderStrip(all, byLane) {
+  const real = all.filter((t) => !t.tour);
+  const audited = real.filter((t) => t.verdict && RESOLVED_VERDICTS.has(t.verdict)).length;
+  const mine = real.filter((t) => t.claimedBy === me?.username).length;
+  const second = byLane.get('SECOND_OPINION').length;
+  const pct = real.length ? Math.round((audited / real.length) * 100) : 0;
+  const resume = real.find((t) => t.claimedBy === me?.username && !t.verdict)
+    || real.find((t) => !t.claimedBy && !t.verdict);
+
+  mount(document.getElementById('strip'),
+    el('b', {}, `${real.length} tasks`),
+    el('span', { class: 'progress' }, el('i', { style: `width:${pct}%` })),
+    el('span', {}, `${audited} / ${real.length} audited`),
+    el('span', { class: 'sep' }, '·'),
+    el('span', {}, `${second} need 2nd opinion`),
+    el('span', { class: 'sep' }, '·'),
+    el('span', {}, `${mine} claimed by you`),
+    el('span', { class: 'spacer' }),
+    resume
+      ? el('a', { href: `${window.__base__ || ''}/task/${resume.bucket}/${resume.id}`, style: 'font-weight:600' },
+        'Resume audit →')
+      : null,
+  );
 }
 
 // Show/hide the delivered toggle based on how many tasks are soft-archived.
@@ -386,52 +420,58 @@ document.getElementById('toggle-delivered').addEventListener('click', () => {
 
 searchInput.addEventListener('input', render);
 
-const sevSlider = document.getElementById('sev-slider');
-function moveSlider() {
-  const active = document.querySelector('.sev-chip.active');
-  if (!active) return;
-  sevSlider.style.left = `${active.offsetLeft}px`;
-  sevSlider.style.width = `${active.offsetWidth}px`;
+// ---------- actions drawer ----------
+// One drawer instead of six scattered controls. It pushes the lane grid down;
+// the page still never scrolls.
+const drawer = document.getElementById('drawer');
+let drawerTab = 'move';
+
+function setDrawerTab(tab) {
+  drawerTab = tab;
+  for (const b of drawer.querySelectorAll('.drawer__tabs button[data-tab]')) {
+    b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+  }
+  for (const p of drawer.querySelectorAll('.drawer__body')) {
+    p.hidden = p.dataset.panel !== tab;
+  }
+  if (tab === 'history') refreshActions();
+  if (tab === 'export') renderExportIds();
 }
+
+function setDrawerOpen(open) {
+  drawer.hidden = !open;
+  document.getElementById('actions-btn').setAttribute('aria-expanded', String(open));
+  if (open) setDrawerTab(drawerTab);
+}
+
+document.getElementById('actions-btn').addEventListener('click', () => setDrawerOpen(drawer.hidden));
+document.getElementById('drawer-close').addEventListener('click', () => setDrawerOpen(false));
+drawer.addEventListener('click', (e) => {
+  const t = e.target.closest('.drawer__tabs button[data-tab]');
+  if (t) setDrawerTab(t.dataset.tab);
+});
+
+// Per-lane id export lives in the drawer now rather than as a button per column.
+function renderExportIds() {
+  const host = document.getElementById('export-ids');
+  if (!host || host.childElementCount) return;
+  const base = window.__base__ || '';
+  mount(host,
+    el('span', { class: 'drawer__hint' }, 'One task_id per line:'),
+    ...['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'].map((b) =>
+      el('a', { class: 'btn', href: `${base}/api/export/ids/${b}` }, `${SEV_LABEL[b]} ids`)),
+  );
+}
+
 document.getElementById('sev-filter').addEventListener('click', (e) => {
-  const btn = e.target.closest('.sev-chip');
+  const btn = e.target.closest('button[data-sev]');
   if (!btn) return;
   sevFilter = btn.dataset.sev;
-  document.querySelectorAll('.sev-chip').forEach((b) => b.classList.toggle('active', b === btn));
-  moveSlider();
+  for (const b of document.querySelectorAll('#sev-filter button')) {
+    b.setAttribute('aria-pressed', String(b === btn));
+  }
   render();
 });
-window.addEventListener('resize', moveSlider);
-
-// ---------- admin: QC rubric upload ----------
-async function refreshRubricStatus() {
-  try {
-    const { dimensions } = await api('/spec/rubric');
-    const n = dimensions.length;
-    document.getElementById('rubric-status').textContent = n ? `${n} dimensions loaded` : 'not uploaded yet';
-  } catch {
-    document.getElementById('rubric-status').textContent = 'unavailable';
-  }
-}
-
-document.getElementById('rubric-upload-btn')?.addEventListener('click', () => document.getElementById('rubric-input').click());
-document.getElementById('rubric-input')?.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const status = document.getElementById('rubric-status');
-  status.textContent = 'uploading…';
-  try {
-    const text = await file.text();
-    const res = await fetch((window.__base__ || '') + '/api/spec/rubric', { method: 'POST', headers: { 'content-type': 'text/csv' }, body: text });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'upload failed');
-    status.textContent = `${data.dimensions} dimensions loaded`;
-  } catch (err) {
-    status.textContent = err.message;
-  }
-  e.target.value = '';
-});
-
 
 document.getElementById('export-csv').addEventListener('click', () => { location.href = (window.__base__ || '') + '/api/export/all.csv'; });
 
@@ -467,13 +507,31 @@ function bulkMatches() {
   );
 }
 
+// Showing the match count, the severity split and the skip reason BEFORE the
+// button is the point of this panel — the old inline pill committed first and
+// reported after.
 function refreshBulkCount() {
   if (!bvCount) return;
-  const n = bulkMatches().length;
-  bvCount.textContent = String(n);
-  bvCount.classList.toggle('zero', n === 0);
+  const matches = bulkMatches();
+  const { lane } = bulkTarget();
+  const already = matches.filter((t) => laneOf(t) === lane).length;
+  const willMove = matches.length - already;
+
+  bvCount.textContent = `${matches.length} task${matches.length === 1 ? '' : 's'} match`;
+  const split = ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED']
+    .map((b) => [SEV_LABEL[b], matches.filter((t) => t.bucket === b).length])
+    .filter(([, n]) => n)
+    .map(([l, n]) => `${n} ${l}`)
+    .join(' · ');
+  document.getElementById('bv-split').textContent = split;
+  document.getElementById('bv-skip').textContent =
+    already ? `${already} already in that lane, skipped` : '';
+
   const apply = document.getElementById('bv-apply');
-  if (apply) apply.disabled = n === 0;
+  if (apply) {
+    apply.disabled = willMove === 0;
+    apply.textContent = willMove ? `Move ${willMove} task${willMove === 1 ? '' : 's'}` : 'Move';
+  }
 }
 [bvSev, bvFrom, bvTo].forEach((s) => s?.addEventListener('change', refreshBulkCount));
 
@@ -549,7 +607,7 @@ function refreshIdmoveSummary() {
   if (already) bits.push(`${already} already there`);
   if (c.missing.length) bits.push(`${c.missing.length} not on the board`);
   if (c.malformed.length) bits.push(`${c.malformed.length} not a task ID`);
-  box.replaceChildren(
+  mount(box,
     el('span', {}, `${c.ids.length} pasted · ${bits.join(' · ')}`),
     c.missing.length || c.malformed.length
       ? el('div', { class: 'idmove-bad' },
@@ -562,7 +620,7 @@ function refreshIdmoveSummary() {
 }
 idmoveInput?.addEventListener('input', refreshIdmoveSummary);
 idmoveTo?.addEventListener('change', refreshIdmoveSummary);
-document.getElementById('idmove')?.addEventListener('toggle', refreshIdmoveSummary);
+
 
 document.getElementById('idmove-apply')?.addEventListener('click', async () => {
   const status = document.getElementById('idmove-status');
@@ -613,7 +671,7 @@ function ago(iso) {
 
 async function refreshActions() {
   const body = document.getElementById('acts-body');
-  if (!body || !document.getElementById('acts')?.open) return;
+  if (!body || drawerTab !== 'history' || drawer.hidden) return;
   let actions;
   try { ({ actions } = await api('/actions?limit=12')); } catch { return; }
   body.replaceChildren(
@@ -629,7 +687,7 @@ async function refreshActions() {
       : [el('div', { class: 'act-empty' }, 'No lane changes yet.')])
   );
 }
-document.getElementById('acts')?.addEventListener('toggle', refreshActions);
+
 // generate review+remediation for every task missing them, as background jobs
 let genPoll = null;
 document.getElementById('gen-all').addEventListener('click', async () => {
@@ -663,142 +721,6 @@ document.getElementById('clear-board').addEventListener('click', async () => {
   await load();
   document.getElementById('search-count').textContent = `cleared ${cleared}`;
 });
-// ---------- admin: bulk move ----------
-document.getElementById('bulk-move-btn')?.addEventListener('click', async () => {
-  const ids = document.getElementById('bulk-ids').value.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
-  const fromBucket = document.getElementById('bulk-from').value;
-  const toSel = document.getElementById('bulk-to').value;
-  const status = document.getElementById('bulk-status');
-  if (!ids.length && !fromBucket) { status.textContent = 'paste IDs or pick a source bucket'; return; }
-  const body = {};
-  if (ids.length) body.taskIds = ids;
-  if (fromBucket) body.fromBucket = fromBucket;
-  if (toSel === '__delivered') body.delivered = true; else body.to = toSel;
-
-  const src = [fromBucket ? `all ${SEV_LABEL[fromBucket]}` : null, ids.length ? `${ids.length} pasted ID(s)` : null].filter(Boolean).join(' + ');
-  const dest = toSel === '__delivered' ? 'delivered (hidden from board)' : SEV_LABEL[toSel];
-  if (!confirm(`Move ${src} → ${dest}?`)) return;
-
-  status.textContent = 'moving…';
-  try {
-    const r = await api('/admin/bulk-move', { method: 'POST', body });
-    if (r.mode === 'delivered') {
-      status.textContent = `delivered ${r.delivered}${r.notFound?.length ? `, ${r.notFound.length} not found` : ''}`;
-    } else {
-      status.textContent = `moved ${r.moved}${r.sameBucket ? `, ${r.sameBucket} already there` : ''}${r.notFound?.length ? `, ${r.notFound.length} not found` : ''}`;
-    }
-    document.getElementById('bulk-ids').value = '';
-    await load();
-  } catch (e) { status.textContent = e.message; }
-});
-
-document.getElementById('logout-btn').addEventListener('click', async () => {
-  await api('/logout', { method: 'POST' });
-  location.href = (window.__base__ || '') + '/login.html';
-});
-
-// ---------- admin: delivery upload ----------
-const statusEl = document.getElementById('upload-status');
-const progressEl = document.getElementById('upload-progress');
-const barEl = document.getElementById('upload-bar');
-const dropZone = document.getElementById('drop-zone');
-
-function uploadFormData(form) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', (window.__base__ || '') + '/api/upload');
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) barEl.style.width = `${Math.round((e.loaded / e.total) * 100)}%`;
-    };
-    xhr.onload = () => {
-      try {
-        const data = JSON.parse(xhr.responseText);
-        xhr.status < 400 ? resolve(data) : reject(new Error(data.error || `upload failed (${xhr.status})`));
-      } catch {
-        reject(new Error(`upload failed (${xhr.status})`));
-      }
-    };
-    xhr.onerror = () => reject(new Error('network error during upload'));
-    xhr.send(form);
-  });
-}
-
-async function uploadFiles(files) {
-  if (!files.length) return;
-  const form = new FormData();
-  form.append('bucket', document.getElementById('upload-bucket').value);
-  let total = 0;
-  for (const f of files) {
-    form.append('files', f, f.webkitRelativePath || f.name);
-    total += f.size;
-  }
-  statusEl.textContent = `uploading ${files.length} file(s), ${(total / 1e6).toFixed(1)} MB…`;
-  progressEl.hidden = false;
-  barEl.style.width = '0%';
-  try {
-    const r = await uploadFormData(form);
-    const counts = Object.entries(r.counts || {}).map(([b, n]) => `${b} ${n}`).join(', ') || 'none';
-    const replaced = r.replaced?.length ? ` · replaced ${r.replaced.length} existing` : '';
-    const reopened = r.reopened?.length ? ` · reopened ${r.reopened.length} for re-audit` : '';
-    statusEl.textContent = `done — sorted: ${counts}${replaced}${reopened}`;
-    progressEl.hidden = true;
-    if (r.ingested?.length === 1) location.href = `${window.__base__ || ''}/task/${r.bucket}/${r.taskId}`;
-    else load();
-  } catch (e) {
-    statusEl.textContent = e.message;
-    progressEl.hidden = true;
-  }
-}
-
-document.getElementById('pick-folder').addEventListener('click', () => document.getElementById('folder-input').click());
-document.getElementById('pick-zip').addEventListener('click', () => document.getElementById('zip-input').click());
-document.getElementById('folder-input').addEventListener('change', (e) => uploadFiles([...e.target.files]));
-document.getElementById('zip-input').addEventListener('change', (e) => uploadFiles([...e.target.files]));
-
-dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
-dropZone.addEventListener('drop', async (e) => {
-  e.preventDefault();
-  dropZone.classList.remove('over');
-  uploadFiles(await collectDropped(e.dataTransfer));
-});
-
-// Dropped folders need the webkitGetAsEntry tree walk to recover relative paths.
-async function collectDropped(dt) {
-  const out = [];
-  const walk = async (entry, prefix) => {
-    if (entry.isFile) {
-      const file = await new Promise((res, rej) => entry.file(res, rej));
-      out.push(new File([file], file.name, { type: file.type }));
-      Object.defineProperty(out[out.length - 1], 'webkitRelativePath', { value: prefix + entry.name });
-    } else if (entry.isDirectory) {
-      const reader = entry.createReader();
-      for (;;) {
-        const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
-        if (!batch.length) break;
-        for (const child of batch) await walk(child, prefix + entry.name + '/');
-      }
-    }
-  };
-  const entries = [...dt.items].map((i) => i.webkitGetAsEntry?.()).filter(Boolean);
-  if (!entries.length) return [...dt.files];
-  for (const entry of entries) await walk(entry, '');
-  return out;
-}
-
-// ---------- admin: ingest by id ----------
-document.getElementById('claim-btn').addEventListener('click', async () => {
-  const status = document.getElementById('claim-status');
-  const taskId = document.getElementById('claim-input').value.trim();
-  const bucket = document.getElementById('upload-bucket').value;
-  status.textContent = 'searching…';
-  try {
-    const r = await api('/ingest', { method: 'POST', body: { taskId, bucket } });
-    location.href = `${window.__base__ || ''}/task/${r.bucket}/${r.taskId}`;
-  } catch (e) {
-    status.textContent = e.message;
-  }
-});
 
 // ---------- guided tour (interactive, on a disposable sandbox task) ----------
 function tourTask() { try { return JSON.parse(sessionStorage.getItem('cwt_tour_task') || 'null'); } catch { return null; } }
@@ -825,14 +747,13 @@ function openTaskForTour() {
 
 const BOARD_TOUR = [
   { title: 'Welcome to ACC Audit Studio 👋', body: 'A hands-on tour — you\'ll actually try things on a private sandbox task (marked "sandbox"). Nothing you do here is real; it\'s deleted when the tour ends. Use Next / Back or ← →, Esc to leave.' },
-  { selector: '.board-controls', title: 'Find & filter tasks', body: 'Search by task ID or problem text, and filter by severity — Hard, Soft, or Pass. Invaluable when a delivery drops hundreds of tasks at once.' },
+  { selector: '.toolbar', title: 'Find & filter tasks', body: 'Search by task ID or problem text, and filter by severity — Hard, Soft, or Pass. Invaluable when a delivery drops hundreds of tasks at once.' },
   { selector: '.lanes', title: 'Your workflow board', body: 'Every task sits in a lane that reflects its state: Open → In review → (Needs 2nd opinion) → Resolved. It\'s the shared source of truth for who\'s doing what.' },
   { selector: '#tour-dummy-card', pin: 'top', title: 'Try it: drag & drop 🖱️', body: 'The drag IS the action — no forms. Grab your highlighted "sandbox" card (in the Soft column) and drag it into another lane: drop in Resolved to pick a decision, "Needs 2nd opinion" to flag it, or "In review" to claim it. Go ahead — I\'ll wait.',
     try: { action: 'drag_drop', hint: 'Waiting for you to drag the sandbox card into another lane…', verify: verifyDragged } },
-  { selector: '.lane-SECOND_OPINION', title: 'Second opinions, with the "why"', body: 'Tasks flagged for another reviewer land here — and the key issue the first reviewer wrote shows right on the card, so whoever picks it up knows the crux instantly.' },
-  { selector: '#drop-zone', title: 'Upload a delivery', body: 'Admins: drop a tasks .zip or a <task_id> folder. Tasks auto-sort into Hard / Soft / Pass, and re-uploading a task that was SBQ or Fixes-made reopens it for re-audit so nothing silently ships twice.' },
-  { selector: '#bulk-move', title: 'Bulk move', body: 'Admins: paste a list of task IDs and/or move an entire bucket in one shot — to another bucket, or straight to "delivered".' },
-  { selector: '#export-csv', title: 'Export', body: 'Pull the whole board as CSV; each lane also exports just its task IDs.' },
+  { selector: '.lane[data-lane="SECOND_OPINION"]', title: 'Second opinions, with the "why"', body: 'Tasks flagged for another reviewer land here — and the key issue the first reviewer wrote shows right on the card, so whoever picks it up knows the crux instantly.' },
+  { selector: '#actions-btn', title: 'Actions', body: 'Everything bulk lives behind one button: move a whole severity or lane, move a pasted list of IDs, export CSV or per-lane IDs, review and undo recent actions, and (admins) generate docs or archive completed work. Each move shows you what matches before you commit.', onShow: () => document.getElementById('drawer').hidden && document.getElementById('actions-btn').click() },
+  { selector: '#drawer', title: 'Preview, then commit', body: 'The Move panel reads as a sentence and tells you how many tasks match — and how many are already there and will be skipped — before you press the button. Everything you do here is undoable from the History tab.' },
   { title: 'Now the fun part — the task itself', body: 'The board is the map; the task page is where you actually audit: trajectories, the annotator\'s grading, and an AI copilot. Let me open your sandbox task and keep going.', nextLabel: 'Open the task ▸', onNext: openTaskForTour },
 ];
 
@@ -850,6 +771,5 @@ async function startBoardTour() {
   await load(); // surface the sandbox card
   startTour(BOARD_TOUR, { onExit: endTourCleanup, onLog: postTourLog });
 }
-document.getElementById('tour-btn')?.addEventListener('click', startBoardTour);
 
 boot();
