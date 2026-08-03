@@ -78,8 +78,17 @@ const hideTip = () => { if (tip) tip.hidden = true; };
 
 // Charts are laid out in real pixels rather than a scaled viewBox, so labels
 // keep their intended size instead of stretching with the container.
+// Returns a teardown. CALL IT before putting anything else in the same host.
+//
+// Both observers used to outlive the chart they were drawing. For a chart mounted
+// once that was invisible, but a host that re-renders — the matchup chart behind
+// the layer toggles — broke outright: replacing the chart with an empty-state
+// message resized the host, the orphaned ResizeObserver woke up and drew the old
+// chart straight back over it, and each pass leaked another observer pair.
 export function mountChart(host, render) {
-  if (!host) return;
+  if (!host) return () => {};
+  teardown(host);
+
   let raf = 0;
   const draw = () => {
     const w = Math.max(280, Math.floor(host.clientWidth || host.getBoundingClientRect().width || 640));
@@ -87,6 +96,7 @@ export function mountChart(host, render) {
     host.replaceChildren(...(node ? [node] : []));
   };
   draw();
+
   const ro = new ResizeObserver(() => {
     cancelAnimationFrame(raf);
     raf = requestAnimationFrame(draw);
@@ -95,8 +105,28 @@ export function mountChart(host, render) {
   // Theme flips change the ramp, and the marks are classed so they repaint
   // themselves — but direct labels are placed against measured geometry, so a
   // redraw keeps them honest.
-  new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-  return () => ro.disconnect();
+  const mo = new MutationObserver(draw);
+  mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  const stop = () => { cancelAnimationFrame(raf); ro.disconnect(); mo.disconnect(); };
+  // Parked on the host so a later mountChart — or clearChart — can find it
+  // without every caller having to hold the handle.
+  host.__vizTeardown = stop;
+  return stop;
+}
+
+function teardown(host) {
+  if (host?.__vizTeardown) {
+    host.__vizTeardown();
+    delete host.__vizTeardown;
+  }
+}
+
+// Replace a chart with arbitrary content, stopping its observers first.
+export function clearChart(host, ...children) {
+  if (!host) return;
+  teardown(host);
+  host.replaceChildren(...children.flat().filter((c) => c != null));
 }
 
 function emptyState(w, h, msg) {
@@ -407,12 +437,18 @@ export function stackedArea({ days, stageKeys, stageLabels, series }) {
 // lets bar LENGTH carry the magnitude on its own. Colouring a magnitude chart by
 // pipeline stage was tried and removed — it handed the largest bar the lightest
 // step, so hue argued with length instead of adding to it.
-export function hBars({ rows, valueKey, format = fmtInt, accent = 'neutral', threshold = null, note = null }) {
+// `labelWidth` sizes the row-label gutter. It has to be caller-controlled because
+// the default 74px was set for "L-1"-style labels, and a long one — a model
+// matchup like "anthropic/claude-opus-4-6 vs super_nova_ext" — is right-aligned
+// into that gutter, so it ran to negative x and spilled outside the card (.viz is
+// overflow:visible by design, so nothing clipped it).
+export function hBars({ rows, valueKey, format = fmtInt, accent = 'neutral', threshold = null, note = null, labelWidth = 74 }) {
   return (w) => {
     if (!rows.length) return emptyState(w, 180, 'No data in this window');
     const rowH = 32;
     const h = rows.length * rowH + (note ? 34 : 14);
-    const pad = { t: 6, r: 76, b: 8, l: 74 };
+    // Never let the gutter eat the plot: cap it at 55% of the available width.
+    const pad = { t: 6, r: 76, b: 8, l: Math.min(labelWidth, Math.floor(w * 0.55)) };
     const iw = w - pad.l - pad.r;
     const max = Math.max(...rows.map((r) => r[valueKey])) * 1.02 || 1;
 
@@ -440,7 +476,9 @@ export function hBars({ rows, valueKey, format = fmtInt, accent = 'neutral', thr
       }
       svg.append(s('text', { class: 'viz-datalabel', x: pad.l + bw + 8, y: y + barH / 2 + 4 }, format(v)));
     });
-    if (note) svg.append(s('text', { class: 'viz-note', x: pad.l - 74 + 2, y: h - 8 }, note));
+    // Anchored to the left edge, not offset from the gutter — the old
+    // `pad.l - 74 + 2` only landed at x=2 while the gutter was fixed at 74.
+    if (note) svg.append(s('text', { class: 'viz-note', x: 2, y: h - 8 }, note));
     return svg;
   };
 }

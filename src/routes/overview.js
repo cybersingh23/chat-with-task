@@ -1,5 +1,5 @@
 import express from 'express';
-import { buildBrief, fullBrief, getSummary, clearSummaryCache, ptNow, deliveryPhase } from '../overview.js';
+import { buildBrief, fullBrief, inflightMatchups, getSummary, clearSummaryCache, ptNow, deliveryPhase } from '../overview.js';
 
 // /api/overview/* — mounted inside the authenticated api router.
 //
@@ -15,6 +15,13 @@ const windowDays = (req) => Math.min(180, Math.max(7, Number(req.query.days) || 
 
 overviewApi.get('/brief', wrap(async (req, res) => {
   res.json(await fullBrief({ fresh: req.query.fresh === '1', days: windowDays(req) }));
+}));
+
+// Every in-flight task with its A/B matchup, plus level and matchup facets. The
+// client filters against these in memory — a few hundred rows — so toggling a
+// layer is instant instead of a round trip.
+overviewApi.get('/inflight', wrap(async (req, res) => {
+  res.json(await inflightMatchups({ fresh: req.query.fresh === '1' }));
 }));
 
 overviewApi.get('/summary', wrap(async (req, res) => {

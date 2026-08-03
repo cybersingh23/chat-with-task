@@ -73,6 +73,20 @@
         <div id="chart-throughput-legend"></div>
       </section>
 
+      <!-- in-flight tasks + model matchups, with layer toggles -->
+      <section class="ov-card ov-card--wide">
+        <header class="ov-card__head">
+          <h2>In flight by matchup</h2>
+          <p class="ov-card__sub" id="ov-mu-sub">Every task pending at any review level, and the A/B pairing it compares.</p>
+        </header>
+        <div class="ov-layers" id="ov-layers" role="group" aria-label="Filter by review level"></div>
+        <div class="ov-chart" id="chart-matchups"></div>
+        <div class="ov-mu-tablewrap">
+          <table class="ov-mu-table" id="ov-mu-table"></table>
+        </div>
+        <p class="ov-mu-foot" id="ov-mu-foot"></p>
+      </section>
+
       <section class="ov-card">
         <header class="ov-card__head">
           <h2>Where the time goes</h2>

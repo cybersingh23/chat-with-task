@@ -125,6 +125,12 @@ export const REGISTRY = {
       stale_days: { type: 'int', min: 1, max: 90, default: () => 7 },
     },
   },
+  inflight_matchups: {
+    label: 'In-flight tasks and matchups',
+    description: 'Every task pending at any review level, with the A/B model pairing it compares.',
+    sql: 'inflight_matchups.sql',
+    params: { project_id: { type: 'objectId', default: () => config.redash.projectId } },
+  },
   l12_intake: {
     label: 'Deliverable intake',
     description: 'Tasks entering level 12 per day — the rate at which work becomes deliverable.',

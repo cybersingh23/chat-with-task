@@ -1,5 +1,5 @@
 import { api, el, mount, renderAppHeader, avatar, personName } from './common.js';
-import { mountChart, deliveryColumns, intakeColumns, readinessFunnel, stackedArea, hBars, legend } from './charts.js';
+import { mountChart, clearChart, deliveryColumns, intakeColumns, readinessFunnel, stackedArea, hBars, legend } from './charts.js';
 
 // The Overview page.
 //
@@ -44,7 +44,10 @@ async function init() {
   renderAssignments(brief);
   renderCharts(brief);
   renderFoot(brief);
+  // Both are slower than the brief and independent of each other, so neither
+  // blocks the page or the other.
   loadSummary({});
+  loadInflight();
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +255,136 @@ function renderCharts(b) {
       note: 'Amber at 25% and above — each rejection re-runs an earlier level.',
     }));
   }
+}
+
+// ---------------------------------------------------------------------------
+// in-flight tasks + matchups, with layer toggles
+// ---------------------------------------------------------------------------
+
+// Fetched separately from the brief and filtered in memory, so toggling a layer
+// is instant rather than a round trip. `selected` is the source of truth; every
+// render reads it, nothing derives state from the DOM.
+let inflight = null;
+const selected = new Set();
+
+async function loadInflight() {
+  const host = $('chart-matchups');
+  try {
+    inflight = await api('/overview/inflight');
+  } catch (e) {
+    clearChart(host, el('p', { class: 'ov-error' }, `Could not load in-flight tasks — ${e.message}`));
+    return;
+  }
+  if (!inflight.enabled) {
+    clearChart(host, el('p', { class: 'ov-error' }, 'Redash is not configured (REDASH_API_KEY unset).'));
+    return;
+  }
+  if (inflight.error) {
+    clearChart(host, el('p', { class: 'ov-error' }, `Query failed — ${inflight.error}`));
+    return;
+  }
+  // Every layer on by default: the question is "what is in flight", and starting
+  // with a partial view would misrepresent the total.
+  for (const l of inflight.levels) selected.add(l.level);
+  renderLayerToggles();
+  renderMatchups();
+}
+
+const LEVEL_LABEL = (lvl) => `L${lvl}`;
+
+function renderLayerToggles() {
+  const host = $('ov-layers');
+  const chips = inflight.levels.map((l) => {
+    const on = selected.has(l.level);
+    const btn = el('button', {
+      class: `ov-layer${on ? ' is-on' : ''}`, type: 'button',
+      'aria-pressed': on ? 'true' : 'false',
+      title: `${l.total} in flight at level ${l.level}, ${l.withMatchup} with a recorded matchup`,
+    }, LEVEL_LABEL(l.level), el('span', { class: 'ov-layer__n' }, String(l.total)));
+    btn.addEventListener('click', () => {
+      if (selected.has(l.level)) selected.delete(l.level); else selected.add(l.level);
+      renderLayerToggles();
+      renderMatchups();
+    });
+    return btn;
+  });
+
+  // All/none is the only pair of shortcuts worth having with six layers.
+  const all = el('button', { class: 'ov-layer ov-layer--act', type: 'button' }, 'all');
+  all.addEventListener('click', () => {
+    for (const l of inflight.levels) selected.add(l.level);
+    renderLayerToggles(); renderMatchups();
+  });
+  const none = el('button', { class: 'ov-layer ov-layer--act', type: 'button' }, 'none');
+  none.addEventListener('click', () => {
+    selected.clear(); renderLayerToggles(); renderMatchups();
+  });
+
+  mount(host, ...chips, el('span', { class: 'ov-layers__sep' }), all, none);
+}
+
+function renderMatchups() {
+  const rows = inflight.rows.filter((r) => selected.has(r.level));
+  const known = rows.filter((r) => r.matchup).length;
+
+  $('ov-mu-sub').textContent = selected.size === 0
+    ? 'No layers selected.'
+    : `${int(rows.length)} task${rows.length === 1 ? '' : 's'} in flight across `
+      + `${selected.size} of ${inflight.levels.length} layers — ${int(known)} with a recorded matchup.`;
+
+  // Recount per matchup over the FILTERED rows, so the bars answer the question
+  // the toggles just asked rather than showing project-wide totals.
+  const counts = new Map();
+  for (const r of rows) {
+    const k = r.matchup || '(not yet recorded)';
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  const bars = [...counts.entries()]
+    .sort((a, b) => {
+      const an = a[0] === '(not yet recorded)', bn = b[0] === '(not yet recorded)';
+      if (an !== bn) return an ? 1 : -1;
+      return b[1] - a[1];
+    })
+    .map(([matchup, n]) => ({
+      label: matchup.replace(/\s+vs\s+/, ' vs '),
+      count: n,
+      tip: `<b>${matchup.replace(/\s+vs\s+/, ' vs ')}</b><br>${int(n)} of ${int(rows.length)} selected`
+        + `<br>${Math.round((n / Math.max(1, rows.length)) * 100)}% of the current selection`,
+    }));
+
+  if (!bars.length) {
+    // clearChart, not mount: the host may hold a live chart whose ResizeObserver
+    // would otherwise redraw it over this message.
+    clearChart($('chart-matchups'), el('p', { class: 'ov-mu-empty' }, 'Nothing in flight in the selected layers.'));
+  } else {
+    // Model names are long and vary, so the label gutter is sized from the
+    // longest one actually present rather than left at the default.
+    const longest = Math.max(...bars.map((b2) => b2.label.length));
+    mountChart($('chart-matchups'), hBars({
+      rows: bars, valueKey: 'count', format: (v) => int(v),
+      labelWidth: Math.min(330, Math.max(90, Math.round(longest * 6.4) + 18)),
+      note: 'Model names as recorded upstream. A pairing is order-normalised, so X vs Y and Y vs X count together.',
+    }));
+  }
+
+  // Oldest first — that is the actionable order for anything in flight.
+  const sorted = [...rows].sort((a, b) => b.ageDays - a.ageDays || a.level.localeCompare(b.level));
+  const table = $('ov-mu-table');
+  const head = el('tr', {},
+    el('th', {}, 'Task'), el('th', {}, 'Level'), el('th', { class: 'ov-num' }, 'Age'), el('th', {}, 'Matchup'));
+  mount(table,
+    el('thead', {}, head),
+    el('tbody', {}, ...sorted.slice(0, 400).map((r) => el('tr', {},
+      el('td', { class: 'mono' }, r.taskId),
+      el('td', {}, LEVEL_LABEL(r.level)),
+      el('td', { class: 'ov-num' }, `${r.ageDays}d`),
+      el('td', { class: r.matchup ? '' : 'ov-mu-none' },
+        r.matchup ? r.matchup.replace(/\s+vs\s+/, '  vs  ') : 'not yet recorded')))));
+
+  // Say so when the table is capped, rather than letting 400 look like all of it.
+  $('ov-mu-foot').textContent = sorted.length > 400
+    ? `Showing the 400 oldest of ${int(sorted.length)} selected tasks.`
+    : (sorted.length ? `All ${int(sorted.length)} selected tasks shown, oldest first.` : '');
 }
 
 function renderFoot(b) {

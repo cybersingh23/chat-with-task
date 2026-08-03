@@ -333,11 +333,76 @@ function pipelineHealth({ levels, economics, throughput, now }) {
   };
 }
 
-// Suggestions depend on the assembled brief, so they are attached after the fact
+// Assignments depend on the assembled brief, so they are attached after the fact
 // rather than threaded through every branch above.
 export async function fullBrief(opts) {
   const brief = await buildBrief(opts);
   return { ...brief, assignments: buildAssignments(brief) };
+}
+
+// ---------------------------------------------------------------------------
+// In-flight tasks and their model matchups
+// ---------------------------------------------------------------------------
+
+// Its own endpoint rather than part of the brief. The recursive VARIANT flatten
+// behind it costs several seconds cold and the brief is what the whole page waits
+// on, so this loads after first paint — the same split already used for the LLM
+// summary.
+export async function inflightMatchups({ fresh = false } = {}) {
+  if (!redashEnabled()) return { enabled: false, rows: [], levels: [], matchups: [] };
+
+  let res;
+  try {
+    res = await runRegistryQuery('inflight_matchups', {}, { fresh });
+  } catch (e) {
+    return { enabled: true, error: e.message, rows: [], levels: [], matchups: [] };
+  }
+
+  const rows = (res.rows || []).map((r) => ({
+    taskId: String(r.task_id),
+    level: String(r.review_level),
+    ageDays: num(r.age_days),
+    modelA: r.model_a || null,
+    modelB: r.model_b || null,
+    matchup: r.matchup || null,
+  }));
+
+  // Facets are computed server-side so the layer toggles show a FIXED set with
+  // stable totals. Deriving them from whatever is currently visible would make
+  // the chips renumber themselves as you filter, which is unusable.
+  const byLevel = new Map();
+  for (const r of rows) {
+    const e = byLevel.get(r.level) || { level: r.level, total: 0, withMatchup: 0 };
+    e.total += 1;
+    if (r.matchup) e.withMatchup += 1;
+    byLevel.set(r.level, e);
+  }
+  const levels = [...byLevel.values()].sort((a, b) => Number(a.level) - Number(b.level));
+
+  const byMatchup = new Map();
+  for (const r of rows) {
+    const key = r.matchup || null;
+    const e = byMatchup.get(key) || { matchup: key, total: 0, byLevel: {} };
+    e.total += 1;
+    e.byLevel[r.level] = (e.byLevel[r.level] || 0) + 1;
+    byMatchup.set(key, e);
+  }
+  // Named matchups by size; the not-yet-recorded bucket always last, since it is
+  // an absence of data rather than a competitor and shouldn't head the list.
+  const matchups = [...byMatchup.values()].sort((a, b) => {
+    if ((a.matchup === null) !== (b.matchup === null)) return a.matchup === null ? 1 : -1;
+    return b.total - a.total;
+  });
+
+  return {
+    enabled: true,
+    rows,
+    levels,
+    matchups,
+    total: rows.length,
+    withMatchup: rows.filter((r) => r.matchup).length,
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 async function settle(fn) {
