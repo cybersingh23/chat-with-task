@@ -176,7 +176,11 @@ export async function buildBrief({ fresh = false, days = 30 } = {}) {
   // the page. The earlier version added the L10 feeder to L12 and called the sum
   // "within reach", which turned a 289-task shortfall into a reported 43 — a
   // reassuring number with nothing behind it. A task at L10 is not deliverable;
-  // it is supply that still has to be promoted. Progress is measured off L12.
+  // it is supply that still has to REACH L12. Progress is measured off L12.
+  //
+  // Deliberately not called "promotion" anywhere user-facing: promotion already
+  // means something else on the platform (worker tiers), so using it for a task
+  // moving between review levels reads as the wrong concept entirely.
   const deliverable = levels.find((l) => l.level === '12')?.pending || 0;
   const feeder = levels.find((l) => l.level === '10')?.pending || 0;
   const upstream = levels.filter((l) => !['10', '12'].includes(l.level))
@@ -218,7 +222,7 @@ export async function buildBrief({ fresh = false, days = 30 } = {}) {
       gapToTarget: Math.max(0, config.overview.targetVolume - deliverable),
       // Whether the target is even reachable from what exists: everything still
       // in flight, deliverable or not. Short here is a supply problem; short on
-      // `deliverable` alone is a promotion problem. They need different actions.
+      // `deliverable` alone is a movement problem. They need different actions.
       supplyShortfall: Math.max(0, config.overview.targetVolume - totalPending),
       stale: {
         count: levels.reduce((a, l) => a + l.stale, 0),
@@ -265,6 +269,11 @@ function intakeSeries(rows, history, now) {
   const lastDelivery = dates[0] || null;
   const prevDelivery = dates[1] || null;
 
+  // Day names come from the query, never inferred. Handing the model a bare
+  // "2026-07-29" made it describe a Wednesday close-out as Friday's — the same
+  // failure mode as asking it what day today is, just about a past date.
+  const dayNameOf = (d) => history.find((h) => h.date === d)?.dayName || null;
+
   let thisCycle = null, lastCycleToDate = null, offsetDays = null;
   if (lastDelivery) {
     thisCycle = sinceInclusive(lastDelivery, now.date);
@@ -274,7 +283,12 @@ function intakeSeries(rows, history, now) {
       lastCycleToDate = sinceInclusive(prevDelivery, end);
     }
   }
-  return { days, thisCycle, lastCycleToDate, offsetDays, lastDelivery, prevDelivery };
+  return {
+    days, thisCycle, lastCycleToDate, offsetDays,
+    lastDelivery, prevDelivery,
+    lastDeliveryDay: dayNameOf(lastDelivery),
+    prevDeliveryDay: dayNameOf(prevDelivery),
+  };
 }
 
 // A few signals, each with a direction, so the summary can talk about pipeline
@@ -504,7 +518,7 @@ export function buildAssignments(brief) {
       system: 'decision',
       text: `Commit to ${brief.target} for ${c.isDeliveryDay ? 'today' : c.nextDeliveryDate} or reset it`,
       detail: `${p.deliverable} deliverable at L12 now, ${p.gapToTarget} short of ${brief.target}. `
-        + `${p.feeder} are at L10 waiting to be promoted`
+        + `${p.feeder} are sitting at L10 and still have to reach L12`
         + `${p.supplyShortfall > 0 ? `, and even everything in flight is ${p.supplyShortfall} short` : ''}`
         + '. Cheaper decided early than discovered on delivery day.',
     });
@@ -617,6 +631,9 @@ Hard rules:
 - LEVEL 12 IS THE ONLY DELIVERABLE STATE. Never add upstream levels to it and call the sum ready
   or within reach — a task at L10 is supply, not progress. If you mean the whole in-flight pool,
   say "in flight".
+- VOCABULARY: never say "promote", "promoted" or "promotion" about a task moving between review
+  levels. On this platform promotion means something else entirely (worker tiers), so it reads as
+  the wrong concept. Say a task "reaches L12", "moves to L12", or "moves up a level".
 - Do NOT assign work or name people. That is handled below you and duplicating it wastes lines.
 - Where both systems come up, name them so they can't be confused: "the pipeline" is upstream
   production, "the board" is this app's audit queue. Write them in normal prose capitalisation —
@@ -666,7 +683,7 @@ function buildPrompt(brief) {
     lines.push(`PIPELINE (upstream, ${p.totalPending} tasks in flight):`);
     for (const s of p.stages) lines.push(`  ${s.label} (levels ${s.levels.join(', ') || 'none'}): ${s.pending} pending${s.stale ? `, ${s.stale} stale` : ''}`);
     lines.push(`  DELIVERABLE NOW (at L12): ${p.deliverable} of ${brief.target} — ${p.progressPct}%. L12 is the deliverable state;`);
-    lines.push(`  nothing upstream counts until it is promoted. Feeder at L10: ${p.feeder}. Deeper upstream: ${p.upstream}.`);
+    lines.push(`  nothing upstream counts until it reaches L12. Feeder at L10: ${p.feeder}. Deeper upstream: ${p.upstream}.`);
     lines.push(p.gapToTarget > 0
       ? `  That is ${p.gapToTarget} SHORT of ${brief.target} — the rest must come from earlier stages.`
       : `  That covers the ${brief.target} target.`);
@@ -681,10 +698,12 @@ function buildPrompt(brief) {
   if (ik?.thisCycle != null) {
     lines.push('');
     lines.push('DELIVERABLE INTAKE (how fast work reaches L12):');
-    lines.push(`  Since the last delivery (${ik.lastDelivery}, ${ik.offsetDays} day(s) ago): ${ik.thisCycle} tasks entered L12.`);
+    lines.push(`  Since the last delivery (${ik.lastDelivery}${ik.lastDeliveryDay ? `, a ${ik.lastDeliveryDay}` : ''}, ${ik.offsetDays} day(s) ago): ${ik.thisCycle} tasks entered L12.`);
     if (ik.lastCycleToDate != null) {
-      lines.push(`  Same point in the previous cycle: ${ik.lastCycleToDate}. That is the fair comparison, NOT the target.`);
+      lines.push(`  Same point in the previous cycle (from ${ik.prevDelivery}${ik.prevDeliveryDay ? `, a ${ik.prevDeliveryDay}` : ''}): ${ik.lastCycleToDate}. That is the fair comparison, NOT the target.`);
     }
+    // Every date in this brief carries its weekday. Do not work one out.
+    lines.push('  Use the day names given here verbatim; never infer a weekday from a date yourself.');
     const recent = ik.days.slice(-6).map((d) => `${d.day}(${d.dayName})=${d.entered}`).join(', ');
     if (recent) lines.push(`  Recent daily intake: ${recent}.`);
     lines.push('  L12 fills late: for the 350 batch, 80% arrived in the final three days and 135 on delivery day itself.');

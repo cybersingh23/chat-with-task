@@ -66,7 +66,7 @@ function renderClock(b) {
     chip('', c.isDeliveryDay ? 'delivery is today' : `days to ${c.deliveryWeekday}`, c.isDeliveryDay ? '—' : String(c.daysUntil)),
     p ? chip('', `deliverable of ${int(b.target)}`, int(p.deliverable)) : null,
     p ? chip(p.gapToTarget > 0 ? 'ov-stat--warn' : 'ov-stat--ok',
-      p.gapToTarget > 0 ? 'still to promote' : `target ${b.target}`,
+      p.gapToTarget > 0 ? 'still to reach L12' : `target ${b.target}`,
       p.gapToTarget > 0 ? int(p.gapToTarget) : 'met') : null);
 }
 
@@ -177,13 +177,13 @@ function renderCharts(b) {
   }
 
   // 2 — supply funnel. Only the Final band is deliverable; the rest is supply
-  // that still needs promoting, and the caption says so rather than letting the
+  // that still has to reach L12, and the caption says so rather than letting the
   // cumulative total imply the target is covered.
   if (b.pipeline?.stages?.length) {
     const p = b.pipeline;
     $('ov-funnel-sub').textContent =
       `${int(p.deliverable)} of ${int(b.target)} are deliverable now (L12) — ${p.progressPct}%. `
-      + `${int(p.feeder)} sit at L10 and ${int(p.upstream)} further back; running totals below assume every one of them promotes in time`
+      + `${int(p.feeder)} sit at L10 and ${int(p.upstream)} further back; running totals below assume every one of them reaches L12 in time`
       + `${p.supplyShortfall > 0 ? `, which would still leave ${int(p.supplyShortfall)} short` : ''}.`;
     mountChart($('chart-funnel'), readinessFunnel({ stages: p.stages, target: b.target }));
   }
