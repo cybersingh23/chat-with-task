@@ -197,6 +197,51 @@ export function cap(s) {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
+// A person's name for display. Always title-cased, every time one is shown.
+// Separate from cap() because that is used on arbitrary strings and only touches
+// the first character — this one capitalises each part, so a two-word or
+// hyphenated name doesn't come out half lowercase.
+export function personName(s) {
+  return String(s ?? '')
+    .split(/([ _-]+)/)
+    .map((part) => (/^[ _-]+$/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join('');
+}
+
+// Deterministic per-name hue for the initial disc. Was copy-pasted into four
+// page scripts; this is the one definition now.
+export function avatarHue(name) {
+  let hue = 0;
+  for (const c of String(name || '')) hue = (hue * 31 + c.charCodeAt(0)) % 360;
+  return hue;
+}
+
+// A person's avatar: their photo when there is one, the initial disc otherwise.
+//
+// The disc renders FIRST and is swapped for the photo once it loads, rather than
+// rendering an <img> and handling its error. Pointing an <img> at a 404 flashes a
+// broken-image glyph before any fallback can run, and most users have no photo.
+export function avatar(name, { cls = '' } = {}) {
+  const label = String(name || '?');
+  const disc = el('span', {
+    class: ['avatar', cls].filter(Boolean).join(' '),
+    style: `background: hsl(${avatarHue(label)} 42% 34%); color: #fff`,
+    title: personName(label),
+  }, (label[0] || '?').toUpperCase());
+  if (!name) return disc;
+
+  const src = `${window.__base__ || ''}/api/avatar/${encodeURIComponent(label.toLowerCase())}`;
+  const probe = new Image();
+  probe.addEventListener('load', () => {
+    disc.replaceWith(el('img', {
+      class: ['avatar', 'avatar--photo', cls].filter(Boolean).join(' '),
+      src, alt: '', title: personName(label),
+    }));
+  });
+  probe.src = src;
+  return disc;
+}
+
 export function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -264,14 +309,10 @@ export function renderAppHeader({ active, user, extras = [] } = {}) {
   }, document.documentElement.getAttribute('data-theme') === 'light' ? '☾' : '☀');
   themeBtn.addEventListener('click', () => window.toggleTheme(themeBtn));
 
-  // Deterministic per-name hue, the same one the board cards use for assignees.
-  let hue = 0;
-  for (const c of user?.username || '') hue = (hue * 31 + c.charCodeAt(0)) % 360;
   const userBlock = user
     ? el('div', { class: 'userblock' },
-      el('span', { class: 'avatar', style: `background: hsl(${hue} 42% 34%)` },
-        (user.username[0] || '?').toUpperCase()),
-      el('span', { class: 'userblock__name' }, user.username),
+      avatar(user.username),
+      el('span', { class: 'userblock__name' }, personName(user.username)),
       el('button', {
         class: 'btn btn--ghost userblock__out', type: 'button',
         onclick: async () => {

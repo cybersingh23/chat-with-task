@@ -1,4 +1,4 @@
-import { api, el, mount, renderAppHeader } from './common.js';
+import { api, el, mount, renderAppHeader, avatar, personName } from './common.js';
 import { mountChart, deliveryColumns, intakeColumns, readinessFunnel, stackedArea, hBars, legend } from './charts.js';
 
 // The Overview page.
@@ -131,8 +131,10 @@ function renderAssignments(b) {
   // a management panel sitting above the team rather than one of five people.
   const card = (person) => el('article', { class: 'ov-person' },
     el('header', { class: 'ov-person__head' },
-      el('h3', { class: 'ov-person__name' }, cap(person.name)),
-      el('span', { class: 'ov-person__role' }, person.role)),
+      avatar(person.name, { cls: 'ov-person__pic' }),
+      el('div', { class: 'ov-person__id' },
+        el('h3', { class: 'ov-person__name' }, personName(person.name)),
+        el('span', { class: 'ov-person__role' }, person.role))),
     person.items.length
       ? el('ul', { class: 'ov-person__list' },
         ...person.items.map((it) => el('li', { class: 'ov-task' },
@@ -153,7 +155,6 @@ function renderAssignments(b) {
       ...[a.lead, ...a.reviewers].map((p) => card(p))));
 }
 
-const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 // ---------------------------------------------------------------------------
 // charts

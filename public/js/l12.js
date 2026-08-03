@@ -17,11 +17,6 @@ const STRENGTHS = ['strong', 'moderate', 'slight', 'unrated'];
 let data = null;
 let lbSort = { key: 'overall', dir: -1 };
 
-function avatarHue(name) {
-  let h = 0;
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return h;
-}
 // Display name: drop the vendor path ("anthropic/…", "xai/…") and the "claude-" family
 // prefix so the distinguishing part (opus-4-6, sonnet-4-6, grok-4.5) is what shows.
 // Full raw name is kept in the title tooltip. Codenames pass through unchanged.

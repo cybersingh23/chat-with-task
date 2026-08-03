@@ -1,4 +1,4 @@
-import { api, el, mount, cap, startTour, renderAppHeader } from './common.js';
+import { api, el, mount, cap, startTour, renderAppHeader, avatar, personName } from './common.js';
 
 const ORDER = ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'];
 const VERDICT_LABELS = {
@@ -45,11 +45,6 @@ function laneOf(t) {
 
 // Assignee avatar: a colored initial (deterministic per name) + the name.
 // Unclaimed shows a dashed placeholder.
-function avatarHue(name) {
-  let h = 0;
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return h;
-}
 // Claim straight from the board without opening the task (opening = view only).
 // stopPropagation/preventDefault so the click doesn't follow the card link.
 function claimAction(t) {
@@ -68,8 +63,8 @@ function claimAction(t) {
 function assignee(name) {
   if (!name) return el('span', { class: 'card__owner' }, 'Unassigned');
   return el('span', { class: 'card__owner' },
-    el('span', { class: 'avatar avatar--sm' }, name[0].toUpperCase()),
-    cap(name),
+    avatar(name, { cls: 'avatar--sm' }),
+    personName(name),
   );
 }
 

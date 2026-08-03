@@ -1,4 +1,4 @@
-import { api, el, cap, renderAppHeader } from './common.js';
+import { api, el, cap, renderAppHeader, avatar, personName } from './common.js';
 
 const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
 const VERDICT_LABELS = {
@@ -13,11 +13,6 @@ let me = null;
 let tasks = [];
 const searchInput = document.getElementById('archive-search');
 
-function avatarHue(name) {
-  let h = 0;
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return h;
-}
 
 async function restore(t, card) {
   if (!confirm(`Restore task ${t.id} to the board? It will reappear in its ${SEV_LABEL[t.bucket]} lane and leave the archive.`)) return;
@@ -52,8 +47,8 @@ function archiveCard(t) {
       el('span', { class: 'archive-when' },
         t.deliveredAt ? `Archived ${t.deliveredAt.slice(0, 10)}` : 'Archived',
         t.deliveredBy ? el('span', { class: 'archive-by' },
-          el('span', { class: 'avatar sm', style: `background: hsl(${avatarHue(t.deliveredBy)} 52% 42%)` }, t.deliveredBy[0].toUpperCase()),
-          cap(t.deliveredBy)) : null,
+          avatar(t.deliveredBy, { cls: 'avatar--sm' }),
+          personName(t.deliveredBy)) : null,
       ),
       el('span', { class: 'spacer' }),
       el('button', { class: 'quiet archive-open', onclick: open, title: 'open task (view only)' }, 'View'),

@@ -1919,6 +1919,13 @@ a.cb-field-link:hover { background: rgba(111, 199, 232, 0.22); text-decoration: 
 }
 .avatar--sm { width: 17px; height: 17px; border-radius: var(--r-tag); font-size: 9.5px; }
 
+/* Photo avatars. object-fit:cover so a not-quite-square crop fills the disc
+   without distorting a face, and the same hairline ring the initial disc carries
+   so both forms sit identically in a row. */
+.avatar--photo { object-fit: cover; object-position: center; background: var(--avatar-bg); }
+img.avatar { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+
+
 .btn {
   font-family: inherit; font-size: 12.5px; font-weight: 500;
   padding: 6px 13px; border-radius: var(--r-control); cursor: pointer;
@@ -2690,7 +2697,10 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 /* No lead-specific styling. The lead's items differ in KIND, which the per-item
    tag already communicates; tinting and separating the whole card made it read as
    a management panel above the team instead of one of five equal cards. */
-.ov-person__head { margin-bottom: 10px; }
+.ov-person__head { display: flex; align-items: center; gap: 9px; margin-bottom: 11px; }
+.ov-person__id { min-width: 0; }
+/* Bigger than the 22px chrome avatar: on this card the person IS the subject. */
+.ov-person__pic { width: 30px; height: 30px; border-radius: 50%; font-size: 12px; }
 .ov-person__name { margin: 0; font-size: 13.5px; font-weight: 650; color: var(--text); }
 .ov-person__role { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-top: 2px; }
 .ov-person__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }

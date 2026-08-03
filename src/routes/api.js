@@ -52,6 +52,29 @@ api.use(requireAuth);
 
 api.get('/me', (req, res) => res.json(req.user));
 
+// Profile photo for a user, or 404 so the client falls back to the initial disc.
+//
+// These are real people's photographs, so they live in DATA_DIR (gitignored, and
+// excluded from the sandbox deploy tarball) rather than in public/. That keeps
+// faces out of git history and off any shared host, and means they are only
+// reachable with a session — this route sits below requireAuth. The cost is that
+// a fresh clone or deploy shows initials until the files are copied in, which is
+// the right default for personal data.
+const AVATAR_NAME_RE = /^[a-z0-9_-]{1,32}$/i;
+api.get('/avatar/:username', (req, res) => {
+  const name = String(req.params.username || '').toLowerCase();
+  if (!AVATAR_NAME_RE.test(name)) return res.status(400).end();
+  const file = path.join(config.dataDir, 'avatars', `${name}.png`);
+  // Belt and braces on top of the character allowlist: the resolved path must
+  // still sit inside the avatars directory.
+  const dir = path.join(config.dataDir, 'avatars');
+  const resolved = path.resolve(file);
+  if (!resolved.startsWith(dir + path.sep)) return res.status(400).end();
+  if (!fs.existsSync(resolved)) return res.status(404).end();
+  res.set('Cache-Control', 'private, max-age=3600');
+  res.type('png').send(fs.readFileSync(resolved));
+});
+
 // --- guided tour sandbox: a disposable dummy task the user can act on ---
 api.post('/tour/start', wrap(async (req, res) => res.json(createDummyTask(req.user.username))));
 api.post('/tour/end', wrap(async (req, res) => res.json({ removed: removeTourTasks(req.user.username) })));

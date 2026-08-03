@@ -1,4 +1,4 @@
-import { api, apiSSE, renderMarkdown, el, mount, fmtTime, cap, startTour } from './common.js';
+import { api, apiSSE, renderMarkdown, el, mount, fmtTime, cap, startTour, avatar, personName } from './common.js';
 
 const pathRelative = location.pathname.slice((window.__base__ || '').length);
 const [, , bucket, taskId] = pathRelative.split('/');
@@ -2115,11 +2115,6 @@ const claimBtn = document.getElementById('claim-btn');
 const claimWho = document.getElementById('claim-who');
 const verdictSelect = document.getElementById('verdict-select');
 let claimedBy = null;
-function avatarHue(name) {
-  let h = 0;
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return h;
-}
 
 async function refreshState() {
   const s = await api(`/task/${bucket}/${taskId}/state`);
@@ -2135,8 +2130,8 @@ async function refreshState() {
   } else {
     claimWho.className = 'claim-who claimed';
     claimWho.replaceChildren(
-      el('span', { class: 'avatar', style: `background: hsl(${avatarHue(s.claimed_by)} 52% 42%)` }, s.claimed_by[0].toUpperCase()),
-      mine ? 'Claimed by you' : `Claimed by ${cap(s.claimed_by)}`,
+      avatar(s.claimed_by),
+      mine ? 'Claimed by you' : `Claimed by ${personName(s.claimed_by)}`,
     );
     const canRelease = mine || me.role === 'admin';
     claimBtn.hidden = !canRelease;
@@ -2280,12 +2275,9 @@ aceyGrip.addEventListener('pointerdown', (e) => {
 // ---------- boot ----------
 const me = await api('/me'); // 401 redirects to login
 document.getElementById('user-chip').hidden = false;
-document.getElementById('user-name').textContent = me.username;
+document.getElementById('user-name').textContent = personName(me.username);
 const uAvatar = document.getElementById('user-avatar');
-if (uAvatar) {
-  uAvatar.textContent = (me.username[0] || '?').toUpperCase();
-  uAvatar.style.background = `hsl(${avatarHue(me.username)} 52% 42%)`;
-}
+if (uAvatar) uAvatar.replaceWith(avatar(me.username, { cls: 'avatar--photo-slot' }));
 if (me.role === 'admin') {
   const del = document.getElementById('delete-task');
   del.hidden = false;
