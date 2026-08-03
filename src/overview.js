@@ -494,7 +494,7 @@ export function buildAssignments(brief) {
       `${p.stale.byLevel.map((s) => `L${s.level}: ${s.stale}`).join(', ')}. Biggest cluster is L${worst.level}. These sit in the layer feeding delivery.`);
   }
 
-  const reviewers = roster.map((name) => ({ name, role: 'Reviewer', items: items[name] }));
+  const reviewers = roster.map((name) => ({ name, items: items[name] }));
 
   // ---- the lead: direction and cross-functional, never a share of the queue ----
   const lead = [];
@@ -564,7 +564,7 @@ export function buildAssignments(brief) {
     .slice(0, 2);
 
   return {
-    lead: { name: config.overview.lead, role: config.overview.leadTitle, items: leadTop },
+    lead: { name: config.overview.lead, items: leadTop },
     reviewers,
   };
 }

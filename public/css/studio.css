@@ -2698,11 +2698,9 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
    tag already communicates; tinting and separating the whole card made it read as
    a management panel above the team instead of one of five equal cards. */
 .ov-person__head { display: flex; align-items: center; gap: 9px; margin-bottom: 11px; }
-.ov-person__id { min-width: 0; }
 /* Bigger than the 22px chrome avatar: on this card the person IS the subject. */
 .ov-person__pic { width: 30px; height: 30px; border-radius: 50%; font-size: 12px; }
 .ov-person__name { margin: 0; font-size: 13.5px; font-weight: 650; color: var(--text); }
-.ov-person__role { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dim); margin-top: 2px; }
 .ov-person__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }
 .ov-person__clear { margin: 0; font-size: 12px; color: var(--text-faint); }
 

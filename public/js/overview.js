@@ -132,9 +132,7 @@ function renderAssignments(b) {
   const card = (person) => el('article', { class: 'ov-person' },
     el('header', { class: 'ov-person__head' },
       avatar(person.name, { cls: 'ov-person__pic' }),
-      el('div', { class: 'ov-person__id' },
-        el('h3', { class: 'ov-person__name' }, personName(person.name)),
-        el('span', { class: 'ov-person__role' }, person.role))),
+      el('h3', { class: 'ov-person__name' }, personName(person.name))),
     person.items.length
       ? el('ul', { class: 'ov-person__list' },
         ...person.items.map((it) => el('li', { class: 'ov-task' },

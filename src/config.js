@@ -74,7 +74,6 @@ export const config = {
     // platform owners, committing to or resetting a delivery number), so handing
     // them 24 tasks to triage would be the wrong instruction.
     lead: process.env.OVERVIEW_LEAD || 'pavit',
-    leadTitle: process.env.OVERVIEW_LEAD_TITLE || 'Strategic Projects Lead',
     reviewers: (process.env.OVERVIEW_REVIEWERS || 'gilberto,ernesto,nishchay,christian')
       .split(',').map((s) => s.trim()).filter(Boolean),
   },
