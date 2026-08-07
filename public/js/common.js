@@ -281,6 +281,9 @@ const NAV_ITEMS = [
   // find out where the project is, so it should be reachable before the
   // drill-down screens rather than after them.
   { href: '/overview.html', label: 'Overview', key: 'overview' },
+  // Next to Overview because they answer the two halves of the same question:
+  // Overview says where the project is, Team says who is doing something about it.
+  { href: '/team.html', label: 'Team', key: 'team' },
   { href: '/archive.html', label: 'Archive', key: 'archive' },
   { href: '/l12.html', label: 'L12 Stats', key: 'l12' },
   { href: '/redash.html', label: 'Redash', key: 'redash' },

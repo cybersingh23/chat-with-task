@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Team — Audit Studio</title>
+  <link rel="stylesheet" href="/css/studio.css" />
+  <link rel="icon" href="/scale-icon.svg" />
+  <script src="/js/theme.js"></script>
+</head>
+<body>
+  <header class="topbar" id="app-header"></header>
+
+  <main class="tm-main">
+    <section class="tm-head">
+      <div>
+        <h1 class="tm-title">Team</h1>
+        <p class="tm-sub" id="tm-sub">Loading project health…</p>
+      </div>
+      <div class="tm-actions">
+        <button class="btn btn--ghost" id="tm-add" type="button">add todo</button>
+        <button class="btn btn--ghost" id="tm-refresh" type="button">refresh</button>
+        <label class="tm-toggle"><input type="checkbox" id="tm-closed" /> show closed</label>
+      </div>
+    </section>
+
+    <!-- health first: the todos below are derived from it, so the evidence
+         should be readable before the instruction -->
+    <section class="tm-health" id="tm-health"></section>
+
+    <h2 class="admin-h2">Escalated <span class="admin-sub">cross-domain or above the line — the owner still holds the work</span></h2>
+    <div class="tm-esc" id="tm-esc"></div>
+
+    <h2 class="admin-h2">Owners <span class="admin-sub">routed by domain, not rotation</span></h2>
+    <div class="tm-people" id="tm-people"></div>
+
+    <p class="tm-foot" id="tm-foot"></p>
+  </main>
+
+  <script type="module" src="/js/team.js"></script>
+</body>
+</html>
