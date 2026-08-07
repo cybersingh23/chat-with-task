@@ -3,10 +3,11 @@ import { config } from '../config.js';
 import { requireAdmin } from '../auth.js';
 import {
   redashEnabled, runSaved, runAdhoc, getQuery, searchQueries,
-  listDataSources, ping, queryUrl, clearRedashCache, RedashError,
+  listDataSources, ping, queryUrl, clearRedashCache, RedashError, assertReadOnly,
 } from '../redash.js';
 import { describeRegistry, runRegistryQuery } from '../redash_registry.js';
 import { taskPipeline, boardPipeline, pipelineOverview } from '../pipeline.js';
+import { qualitySnapshot } from '../quality.js';
 
 // /api/redash/* — mounted inside the authenticated api router, so every route
 // here already requires a session. Ad-hoc SQL additionally requires admin.
@@ -64,6 +65,19 @@ redashApi.get('/board', wrap(async (req, res) => {
   res.json(await boardPipeline({ scope: req.query.scope, fresh: req.query.fresh === '1' }));
 }));
 
+// The pipeline's own view of the people producing the work: QMS tiers, the
+// week-over-week slippers, and the reviewer scorecard. Three queries rolled up
+// server-side so the tier mix and the action list can never describe different
+// populations.
+redashApi.get('/quality', wrap(async (req, res) => {
+  res.json(await qualitySnapshot({
+    fresh: req.query.fresh === '1',
+    days: Math.min(365, Math.max(1, Number(req.query.days) || 30)),
+    windowDays: Math.min(90, Math.max(1, Number(req.query.windowDays) || 7)),
+    level: Number.isInteger(Number(req.query.level)) ? Number(req.query.level) : 0,
+  }));
+}));
+
 // ---- query browser ----
 
 redashApi.get('/search', wrap(async (req, res) => {
@@ -90,40 +104,10 @@ redashApi.post('/query/:id/run', wrap(async (req, res) => {
 
 // ---- ad-hoc SQL (admin only) ----
 
-// Defence in depth: the browser box is admin-gated and the data source should be
-// read-only anyway, but a typo'd DELETE shouldn't be able to reach Snowflake.
-// Comments and string literals are stripped first so a keyword inside a quoted
-// string ("-- drop table" in a comment, 'DELETE' as a value) doesn't false-trip.
-const FORBIDDEN = /\b(insert|update|delete|drop|truncate|alter|create|grant|revoke|merge|copy|call|execute|use|set)\b/i;
-
-export function assertReadOnly(sql) {
-  const original = String(sql).trim();
-
-  // Analysis copy ONLY: comments and string literals are blanked so a keyword
-  // written inside them can't trip the checks below. It is never executed —
-  // running it would silently rewrite the user's string literals to ''.
-  const stripped = original
-    .replace(/--[^\n]*/g, ' ')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/'(?:[^']|'')*'/g, "''")
-    .replace(/"(?:[^"]|"")*"/g, '""');
-
-  // Reject stacked statements: anything after the first ; that isn't whitespace.
-  const semi = stripped.indexOf(';');
-  if (semi !== -1 && stripped.slice(semi + 1).trim()) {
-    throw new RedashError('only a single statement is allowed', 400);
-  }
-  const body = (semi === -1 ? stripped : stripped.slice(0, semi)).trim();
-  if (!/^(with|select)\b/i.test(body)) {
-    throw new RedashError('only SELECT / WITH queries are allowed', 400);
-  }
-  const hit = FORBIDDEN.exec(body);
-  if (hit) throw new RedashError(`statement keyword not allowed here: ${hit[1].toUpperCase()}`, 400);
-
-  // Hand back the ORIGINAL text (minus a trailing semicolon), so literals and
-  // comments survive into the query that actually runs.
-  return original.replace(/;\s*$/, '');
-}
+// assertReadOnly now lives in src/redash.js so the copilot's run_sql tool passes
+// through the same gate. Re-exported here because that is where it was, and
+// callers should not have to care that it moved.
+export { assertReadOnly };
 
 redashApi.post('/adhoc', requireAdmin, wrap(async (req, res) => {
   if (!config.redash.allowAdhoc) throw new RedashError('ad-hoc SQL is disabled (REDASH_ALLOW_ADHOC=false)', 403);

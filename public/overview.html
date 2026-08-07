@@ -32,6 +32,9 @@
       </div>
     </section>
 
+    <!-- what YOU owe, routed by domain and persisted on the Team page -->
+    <div class="ov-mine" id="ov-mine"></div>
+
     <!-- who does what, generated from board + pipeline state (not the model) -->
     <section class="ov-assign" id="ov-assign"></section>
 
@@ -66,8 +69,8 @@
 
       <section class="ov-card ov-card--wide">
         <header class="ov-card__head">
-          <h2>Throughput by stage</h2>
-          <p class="ov-card__sub">Tasks touched per day. A task worked at two stages in one day counts at both, so the stack is activity rather than a task count.</p>
+          <h2>Throughput by level</h2>
+          <p class="ov-card__sub" id="ov-tp-sub">Tasks touched per day. A task worked at two levels in one day counts at both, so the stack is activity rather than a task count.</p>
         </header>
         <div class="ov-chart" id="chart-throughput"></div>
         <div id="chart-throughput-legend"></div>
@@ -85,6 +88,20 @@
           <table class="ov-mu-table" id="ov-mu-table"></table>
         </div>
         <p class="ov-mu-foot" id="ov-mu-foot"></p>
+      </section>
+
+      <!-- tasks stopped in the problem lanes: the only pending work that needs
+           a person rather than a queue -->
+      <section class="ov-card ov-card--wide">
+        <header class="ov-card__head">
+          <h2>Blocked upstream</h2>
+          <p class="ov-card__sub" id="ov-blk-sub">Tasks stopped in the content and engineering lanes.</p>
+        </header>
+        <div class="ov-layers" id="ov-blk-lanes" role="group" aria-label="Filter by lane"></div>
+        <div class="ov-mu-tablewrap">
+          <table class="ov-mu-table" id="ov-blk-table"></table>
+        </div>
+        <p class="ov-mu-foot" id="ov-blk-foot"></p>
       </section>
 
       <section class="ov-card">

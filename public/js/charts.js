@@ -232,7 +232,7 @@ export function readinessFunnel({ stages, target }) {
     const x = (v) => (v / max) * iw;
 
     const svg = s('svg', { class: 'viz', width: w, height: h, role: 'img',
-      'aria-label': `Tasks pending by stage, cumulative, against a target of ${target}` });
+      'aria-label': `Tasks pending by review level, cumulative, against a target of ${target}` });
 
     // Drawn in three passes so the z-order is right: marks, then the target
     // rule over them, then every label on top. A single pass put the rule
@@ -356,7 +356,7 @@ export function intakeColumns({ days, deliveries, cycleStart }) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Throughput — stacked area by stage, with a crosshair
+// 3. Throughput — stacked area by review level, with a crosshair
 // ---------------------------------------------------------------------------
 // Job: trend + composition. Ordinal ramp because stages are ordered. The value
 // is "tasks touched at each stage per day": a task worked at two stages in one
@@ -385,7 +385,7 @@ export function stackedArea({ days, stageKeys, stageLabels, series }) {
 
     // Final is drawn first, so it sits on the baseline: the stage the reader is
     // actually chasing gets the axis-anchored band, which is the only one whose
-    // thickness can be judged accurately. Production stacks on top of it.
+    // thickness can be judged accurately. L-1 stacks on top of it.
     const order = [...stageKeys].reverse();
     const base = days.map(() => 0);
     for (const k of order) {

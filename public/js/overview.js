@@ -1,5 +1,6 @@
 import { api, el, mount, renderAppHeader, avatar, personName } from './common.js';
 import { mountChart, clearChart, deliveryColumns, intakeColumns, readinessFunnel, stackedArea, hBars, legend } from './charts.js';
+import { mountAcey } from './acey.js';
 
 // The Overview page.
 //
@@ -8,15 +9,18 @@ import { mountChart, clearChart, deliveryColumns, intakeColumns, readinessFunnel
 // fetched independently so the charts paint immediately and the prose lands
 // when it lands, rather than the page sitting blank behind the LLM.
 
+// Mirrors STAGES in src/overview.js: the bands ARE the levels. L1/L4/L8 are
+// blocked work, not a step on the forward path, so they map to null and are
+// reported separately rather than being folded into a neighbouring band.
 const STAGE_LABELS = {
-  production: 'Production',
-  early_review: 'Early review',
-  late_review: 'Late review',
-  final: 'Final',
+  l_minus1: 'L-1',
+  l0: 'L0',
+  l10: 'L10',
+  l12: 'L12',
 };
-const STAGE_ORDER = ['production', 'early_review', 'late_review', 'final'];
-const LEVEL_STAGE = { '-1': 'production', 0: 'early_review', 1: 'early_review', 4: 'late_review', 8: 'late_review', 10: 'late_review', 12: 'final' };
-const stageOf = (lvl) => LEVEL_STAGE[String(lvl)] || 'late_review';
+const STAGE_ORDER = ['l_minus1', 'l0', 'l10', 'l12'];
+const LEVEL_STAGE = { '-1': 'l_minus1', 0: 'l0', 10: 'l10', 12: 'l12' };
+const stageOf = (lvl) => LEVEL_STAGE[String(lvl)] || null;
 
 const int = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
 const $ = (id) => document.getElementById(id);
@@ -41,6 +45,7 @@ async function init() {
   }
 
   renderClock(brief);
+  renderMyTodos();
   renderAssignments(brief);
   renderCharts(brief);
   renderFoot(brief);
@@ -48,6 +53,7 @@ async function init() {
   // blocks the page or the other.
   loadSummary({});
   loadInflight();
+  loadBlocked();
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +130,33 @@ const SYSTEM_LABEL = {
   decision: 'Decision', 'cross-functional': 'Cross-functional', direction: 'Direction',
 };
 
+// What YOU owe, routed by domain and persisted — as opposed to the weekly split
+// below, which is board chores shared out evenly. Two different things, so they
+// are two different blocks rather than one merged list.
+//
+// Fetched separately from the brief: it is cheap, and a failure here must not
+// take the delivery numbers with it.
+async function renderMyTodos() {
+  const host = $('ov-mine');
+  if (!host) return;
+  let mine;
+  try {
+    mine = await api('/team/mine');
+  } catch {
+    return; // the Team page is the source of truth; silence beats an error strip here
+  }
+  const base = window.__base__ || '';
+  if (!mine.count) {
+    return mount(host,
+      el('span', { class: 'ov-mine__clear' }, 'Nothing routed to you right now.'),
+      el('a', { class: 'ov-mine__link', href: `${base}/team.html` }, 'team board'));
+  }
+  mount(host,
+    el('span', { class: 'ov-mine__n' }, `${mine.count} for you`),
+    ...mine.top.map((t) => el('span', { class: `ov-mine__item ov-mine__item--${t.severity}` }, t.title)),
+    el('a', { class: 'ov-mine__link', href: `${base}/team.html` }, 'team board'));
+}
+
 function renderAssignments(b) {
   const a = b.assignments;
   if (!a) return;
@@ -182,10 +215,16 @@ function renderCharts(b) {
   // cumulative total imply the target is covered.
   if (b.pipeline?.stages?.length) {
     const p = b.pipeline;
+    // The bands are L-1, L0, L10, L12. Blocked levels are not on that path, so
+    // they are stated here rather than quietly missing from the running total.
+    const blocked = p.blocked?.pending
+      ? ` ${int(p.blocked.pending)} more are blocked at `
+        + `${p.blocked.byLevel.map((x) => `L${x.level}`).join(' / ')} and are not counted below.`
+      : '';
     $('ov-funnel-sub').textContent =
       `${int(p.deliverable)} of ${int(b.target)} are deliverable now (L12) — ${p.progressPct}%. `
       + `${int(p.feeder)} sit at L10 and ${int(p.upstream)} further back; running totals below assume every one of them reaches L12 in time`
-      + `${p.supplyShortfall > 0 ? `, which would still leave ${int(p.supplyShortfall)} short` : ''}.`;
+      + `${p.supplyShortfall > 0 ? `, which would still leave ${int(p.supplyShortfall)} short` : ''}.${blocked}`;
     mountChart($('chart-funnel'), readinessFunnel({ stages: p.stages, target: b.target }));
   }
 
@@ -206,14 +245,24 @@ function renderCharts(b) {
     }));
   }
 
-  // 3 — throughput, rolled up from level to stage
+  // 3 — throughput per level
   if (b.throughput?.length) {
     const days = [...new Set(b.throughput.map((r) => r.day))].sort();
     const idx = new Map(days.map((d, i) => [d, i]));
     const series = Object.fromEntries(STAGE_ORDER.map((k) => [k, days.map(() => 0)]));
-    for (const r of b.throughput) series[stageOf(r.level)][idx.get(r.day)] += r.tasks;
+    // stageOf is null for the blocked levels, which have no band on an ordinal
+    // ramp. Skipping them keeps the chart honest; the count goes in the caption.
+    let offPath = 0;
+    for (const r of b.throughput) {
+      const k = stageOf(r.level);
+      if (!k) { offPath += r.tasks; continue; }
+      series[k][idx.get(r.day)] += r.tasks;
+    }
     mountChart($('chart-throughput'), stackedArea({ days, stageKeys: STAGE_ORDER, stageLabels: STAGE_LABELS, series }));
     mount($('chart-throughput-legend'), legend(STAGE_ORDER.map((k) => ({ key: k, label: STAGE_LABELS[k] }))));
+    if (offPath) {
+      $('ov-tp-sub').textContent += ` A further ${int(offPath)} touches at L1/L4/L8 are not shown — see Blocked upstream.`;
+    }
   }
 
   // 4 & 5 — two measures, two charts, never one dual axis
@@ -226,10 +275,15 @@ function renderCharts(b) {
     mountChart($('chart-cost'), hBars({
       rows: [...ec].sort((a, b2) => b2.totalHours - a.totalHours).map((e) => ({
         label: `L${e.level}`,
-        stageKey: stageOf(e.level),
+        // Blocked levels have no band on the ramp; they get the neutral fill
+        // rather than borrowing a forward level's colour.
+        stageKey: stageOf(e.level) || 'blocked',
         totalHours: e.totalHours,
-        tip: `<b>L${e.level}</b> · ${STAGE_LABELS[stageOf(e.level)]}<br>`
-          + `${int(e.totalHours)}h billed vs ${int(e.activeHours)}h active<br>`
+        tip: `<b>L${e.level}</b><br>`
+          + `${int(e.totalHours)}h tracked vs ${int(e.activeHours)}h active<br>`
+          + (e.uselessHours
+            ? `${int(e.billableHours)}h billable, <b>${int(e.uselessHours)}h wasted</b> (${e.uselessPct}%)<br>`
+            : '')
           + `${int(e.attempts)} attempts · ${e.avgHours}h avg, ${e.medianHours}h median`,
       })),
       valueKey: 'totalHours',
@@ -292,6 +346,10 @@ async function loadInflight() {
 
 const LEVEL_LABEL = (lvl) => `L${lvl}`;
 
+// Two different kinds of blank, deliberately not merged. See renderMatchups.
+const NOT_RECORDED = '(not yet recorded)';
+const ONE_SIDE = '(one arm recorded)';
+
 function renderLayerToggles() {
   const host = $('ov-layers');
   const chips = inflight.levels.map((l) => {
@@ -326,24 +384,30 @@ function renderLayerToggles() {
 function renderMatchups() {
   const rows = inflight.rows.filter((r) => selected.has(r.level));
   const known = rows.filter((r) => r.matchup).length;
+  const half = rows.filter((r) => r.matchupState === 'one_side').length;
 
   $('ov-mu-sub').textContent = selected.size === 0
     ? 'No layers selected.'
     : `${int(rows.length)} task${rows.length === 1 ? '' : 's'} in flight across `
-      + `${selected.size} of ${inflight.levels.length} layers — ${int(known)} with a recorded matchup.`;
+      + `${selected.size} of ${inflight.levels.length} layers — ${int(known)} with a recorded matchup`
+      + (half ? `, ${int(half)} with one arm so far.` : '.');
 
   // Recount per matchup over the FILTERED rows, so the bars answer the question
   // the toggles just asked rather than showing project-wide totals.
+  //
+  // The two blank cases are kept apart. "Nothing recorded" is overwhelmingly
+  // tasks nobody has worked yet, which is an absence of work; "one arm recorded"
+  // is a task mid-generation with half its pairing already known. Merging them
+  // buries a real state inside a much larger nothing-to-see-here bucket.
   const counts = new Map();
   for (const r of rows) {
-    const k = r.matchup || '(not yet recorded)';
+    const k = r.matchup || (r.matchupState === 'one_side' ? ONE_SIDE : NOT_RECORDED);
     counts.set(k, (counts.get(k) || 0) + 1);
   }
   const bars = [...counts.entries()]
     .sort((a, b) => {
-      const an = a[0] === '(not yet recorded)', bn = b[0] === '(not yet recorded)';
-      if (an !== bn) return an ? 1 : -1;
-      return b[1] - a[1];
+      const rank = (k) => (k === NOT_RECORDED ? 2 : k === ONE_SIDE ? 1 : 0);
+      return rank(a[0]) - rank(b[0]) || b[1] - a[1];
     })
     .map(([matchup, n]) => ({
       label: matchup.replace(/\s+vs\s+/, ' vs '),
@@ -378,13 +442,106 @@ function renderMatchups() {
       el('td', { class: 'mono' }, r.taskId),
       el('td', {}, LEVEL_LABEL(r.level)),
       el('td', { class: 'ov-num' }, `${r.ageDays}d`),
+      // A half-recorded pairing still names one of the models, and saying so is
+      // strictly more useful than reporting the whole row as unknown.
       el('td', { class: r.matchup ? '' : 'ov-mu-none' },
-        r.matchup ? r.matchup.replace(/\s+vs\s+/, '  vs  ') : 'not yet recorded')))));
+        r.matchup ? r.matchup.replace(/\s+vs\s+/, '  vs  ')
+          : r.matchupState === 'one_side'
+            ? `${r.modelA ? `A: ${r.modelA}` : `B: ${r.modelB}`} · other arm pending`
+            : 'not yet recorded')))));
 
   // Say so when the table is capped, rather than letting 400 look like all of it.
   $('ov-mu-foot').textContent = sorted.length > 400
     ? `Showing the 400 oldest of ${int(sorted.length)} selected tasks.`
     : (sorted.length ? `All ${int(sorted.length)} selected tasks shown, oldest first.` : '');
+}
+
+// ---------------------------------------------------------------------------
+// blocked backlog
+// ---------------------------------------------------------------------------
+
+// L1 and L8 are not queue levels — a task lands there because something is wrong
+// with it and stays until a person fixes it. Everywhere else on this page they
+// are two small bars inside a pending count, which is exactly where the oldest
+// work in the project has been hiding.
+let blocked = null;
+const lanesOn = new Set();
+
+async function loadBlocked() {
+  const sub = $('ov-blk-sub');
+  try {
+    blocked = await api('/overview/blocked');
+  } catch (e) {
+    sub.textContent = `Could not load blocked tasks — ${e.message}`;
+    return;
+  }
+  if (!blocked.enabled) {
+    sub.textContent = 'Redash is not configured (REDASH_API_KEY unset).';
+    return;
+  }
+  for (const l of blocked.lanes) lanesOn.add(l.level);
+  renderLaneChips();
+  renderBlocked();
+}
+
+function renderLaneChips() {
+  const chips = blocked.lanes.map((l) => {
+    const on = lanesOn.has(l.level);
+    const btn = el('button', {
+      class: `ov-layer${on ? ' is-on' : ''}`, type: 'button',
+      'aria-pressed': on ? 'true' : 'false',
+      // The chip says the level. What the level MEANS goes in the tooltip —
+      // everyone here says "L8", not "the engineering issues lane".
+      title: `${l.label} — ${l.hint}. ${l.tasks} blocked, oldest ${l.oldestDays}d, ${int(l.hoursSunk)}h already spent`,
+    }, `L${l.level}`, el('span', { class: 'ov-layer__n' }, String(l.tasks)));
+    btn.addEventListener('click', () => {
+      if (lanesOn.has(l.level)) lanesOn.delete(l.level); else lanesOn.add(l.level);
+      renderLaneChips();
+      renderBlocked();
+    });
+    return btn;
+  });
+  mount($('ov-blk-lanes'), ...chips);
+}
+
+function renderBlocked() {
+  const rows = blocked.rows.filter((r) => lanesOn.has(r.level))
+    .sort((a, b) => b.daysBlocked - a.daysBlocked);
+
+  // Hours already spent is what makes this a priority rather than a curiosity:
+  // the work is done, it just cannot move.
+  const sunk = rows.reduce((a, r) => a + r.hoursSunk, 0);
+  const week = rows.filter((r) => r.daysBlocked >= 7).length;
+  $('ov-blk-sub').textContent = rows.length
+    ? `${int(rows.length)} task${rows.length === 1 ? '' : 's'} blocked — `
+      + `${int(week)} for a week or more, ${int(Math.round(sunk))} hours of work already sunk into them.`
+    : (lanesOn.size ? 'Nothing blocked in the selected lanes.' : 'No lanes selected.');
+
+  const head = el('tr', {},
+    el('th', {}, 'Task'), el('th', {}, 'Lane'),
+    el('th', { class: 'ov-num' }, 'Blocked'), el('th', {}, 'Came from'),
+    el('th', {}, 'Author'), el('th', { class: 'ov-num' }, 'Attempts'),
+    el('th', { class: 'ov-num' }, 'Hours in'));
+
+  mount($('ov-blk-table'),
+    el('thead', {}, head),
+    el('tbody', {}, ...rows.slice(0, 200).map((r) => el('tr', { class: r.daysBlocked >= 7 ? 'ov-blk-old' : '' },
+      el('td', { class: 'mono' }, r.taskId),
+      el('td', {}, `L${r.level}`),
+      el('td', { class: 'ov-num' }, `${r.daysBlocked}d`),
+      el('td', {}, r.cameFromLevel == null
+        ? el('span', { class: 'ov-mu-none' }, 'unknown')
+        : `L${r.cameFromLevel}`),
+      // A task can reach a problem lane without ever having been authored, in
+      // which case there is nobody to route it back to — say so rather than
+      // rendering an empty cell that reads like a loading failure.
+      el('td', { title: r.authorEmail || '' }, r.author || el('span', { class: 'ov-mu-none' }, 'never attempted')),
+      el('td', { class: 'ov-num' }, String(r.attempts)),
+      el('td', { class: 'ov-num' }, r.hoursSunk ? `${r.hoursSunk}h` : el('span', { class: 'ov-mu-none' }, '—'))))));
+
+  $('ov-blk-foot').textContent = rows.length > 200
+    ? `Showing the 200 longest-blocked of ${int(rows.length)}.`
+    : (rows.length ? `All ${int(rows.length)} shown, longest-blocked first.` : '');
 }
 
 function renderFoot(b) {
@@ -400,3 +557,7 @@ function renderFoot(b) {
         ` · ${b.errors.length} query error(s): ` + b.errors.map((e) => `${e.query} — ${e.error}`).join('; '))
       : null);
 }
+
+
+// Acey is available from every page, not just inside a task.
+mountAcey({ page: 'overview' });

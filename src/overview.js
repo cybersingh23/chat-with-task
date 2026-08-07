@@ -16,18 +16,32 @@ const TZ = 'America/Los_Angeles';
 const DELIVERY_WEEKDAY = 2;                 // Tuesday, 0 = Sunday
 const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-// The four stages the charts group review levels into. Six levels is more series
-// than an ordinal ramp can separate legibly; these four are also the way the work
-// is actually talked about. Levels absent from a batch simply contribute nothing.
+// The four bands the charts group work into: THE LEVELS THEMSELVES.
+//
+// These used to be invented stage names — "Production", "Early review", "Late
+// review", "Final" — which put a translation layer between every chart and the
+// way the project is actually run and talked about. L-1, L0, L10 and L12 are
+// the levels that matter, so they are what the charts say.
+//
+// L1, L4 and L8 are deliberately NOT here. They are not steps on the forward
+// path, they are where a task goes when something is wrong with it, so putting
+// them on an ordinal progress ramp implies a progression that does not exist.
+// They are rolled up separately as `blocked` and shown in their own panel —
+// counted, never dropped.
 export const STAGES = [
-  { key: 'production',   label: 'Production',   levels: ['-1'],       hint: 'authoring the trajectory' },
-  { key: 'early_review', label: 'Early review', levels: ['0', '1'],   hint: 'first and second pass' },
-  { key: 'late_review',  label: 'Late review',  levels: ['4', '8', '10'], hint: 'QM layers' },
-  { key: 'final',        label: 'Final',        levels: ['12'],       hint: 'ready to package' },
+  { key: 'l_minus1', label: 'L-1', levels: ['-1'], hint: 'authoring the trajectory' },
+  { key: 'l0',       label: 'L0',  levels: ['0'],  hint: 'first review pass' },
+  { key: 'l10',      label: 'L10', levels: ['10'], hint: 'QM' },
+  { key: 'l12',      label: 'L12', levels: ['12'], hint: 'deliverable' },
 ];
 
+// Blocked / interstitial. Everything not on the forward path.
+export const BLOCKED_LEVELS = ['1', '4', '8'];
+
 const STAGE_OF = new Map(STAGES.flatMap((s) => s.levels.map((l) => [l, s.key])));
-export const stageOf = (level) => STAGE_OF.get(String(level)) || 'late_review';
+// Null rather than a fallback band: a level with no band is blocked work, and
+// silently folding it into L10 is how it stopped being visible in the first place.
+export const stageOf = (level) => STAGE_OF.get(String(level)) || null;
 
 // ---------------------------------------------------------------------------
 // Delivery calendar
@@ -170,6 +184,17 @@ export async function buildBrief({ fresh = false, days = 30 } = {}) {
   const stages = rollUpStages(levels);
   const totalPending = levels.reduce((a, l) => a + l.pending, 0);
 
+  // Work that is off the forward path. Kept as its own figure so the four level
+  // bands plus this always reconcile to totalPending — a chart that quietly
+  // omits a level is worse than one that admits the omission.
+  const blockedLevels = levels.filter((l) => BLOCKED_LEVELS.includes(l.level));
+  const blocked = {
+    pending: blockedLevels.reduce((a, l) => a + l.pending, 0),
+    stale: blockedLevels.reduce((a, l) => a + l.stale, 0),
+    byLevel: blockedLevels.filter((l) => l.pending)
+      .map((l) => ({ level: l.level, pending: l.pending, oldestDays: l.oldestDays })),
+  };
+
   // DELIVERABLE = level 12, and nothing else.
   //
   // This was wrong before and it was the single biggest source of bad numbers on
@@ -214,6 +239,7 @@ export async function buildBrief({ fresh = false, days = 30 } = {}) {
     pipeline: {
       levels,
       stages,
+      blocked,
       totalPending,
       deliverable,
       feeder,
@@ -238,6 +264,13 @@ export async function buildBrief({ fresh = false, days = 30 } = {}) {
       totalHours: num(r.total_hours),
       activeHours: num(r.active_hours),
       pctRejected: num(r.pct_rejected),
+      // From the billing view: what was actually billable, and how much of it
+      // was thrown away. Tracked time cannot express the second one.
+      billableHours: num(r.billable_hours),
+      uselessHours: num(r.useless_hours),
+      uselessPct: num(r.useless_pct),
+      sbqPct: num(r.sbq_pct),
+      avgQms: r.avg_qms == null ? null : Number(r.avg_qms),
     })),
     throughput: (throughput.rows || []).map((r) => ({
       day: String(r.day).slice(0, 10),
@@ -365,6 +398,7 @@ export async function inflightMatchups({ fresh = false } = {}) {
     modelA: r.model_a || null,
     modelB: r.model_b || null,
     matchup: r.matchup || null,
+    matchupState: r.matchup_state || 'none',
   }));
 
   // Facets are computed server-side so the layer toggles show a FIXED set with
@@ -401,6 +435,72 @@ export async function inflightMatchups({ fresh = false } = {}) {
     matchups,
     total: rows.length,
     withMatchup: rows.filter((r) => r.matchup).length,
+    // Distinguishes "one arm recorded so far" from "nothing recorded at all".
+    // Most blanks are tasks nobody has worked yet, which is an absence of data
+    // rather than a gap in the query — but a half-recorded pairing is neither,
+    // and reporting it as unknown throws away the half we do have.
+    byState: rows.reduce((acc, r) => ({ ...acc, [r.matchupState]: (acc[r.matchupState] || 0) + 1 }), {}),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Blocked backlog
+// ---------------------------------------------------------------------------
+
+// L1 and L8 are not queue levels, they are BLOCKED levels: a task lands there
+// because something is wrong with it, and it stays until a person fixes it.
+// Everywhere else on this page they are just two more bars in a pending count,
+// which buries them — the whole L1 lane is smaller than a rounding error against
+// production, and it is also the oldest work in the project.
+const PROBLEM_LANES = [
+  { level: 1, label: 'Content issues', hint: 'wrong, unclear or unusable task content' },
+  { level: 8, label: 'Engineering issues', hint: 'blocked on something the platform has to fix' },
+];
+
+export async function blockedBacklog({ fresh = false } = {}) {
+  if (!redashEnabled()) return { enabled: false, lanes: [], rows: [] };
+
+  const results = await Promise.all(PROBLEM_LANES.map((lane) =>
+    settle(() => runRegistryQuery('blocked_backlog', { level: lane.level }, { fresh }))));
+
+  const rows = [];
+  const lanes = [];
+  results.forEach((res, i) => {
+    const lane = PROBLEM_LANES[i];
+    const laneRows = (res.rows || []).map((r) => ({
+      taskId: String(r.task_id),
+      level: String(lane.level),
+      laneLabel: lane.label,
+      enteredAt: r.entered_at,
+      daysBlocked: num(r.days_blocked),
+      cameFromLevel: r.came_from_level == null ? null : String(r.came_from_level),
+      author: r.author || null,
+      authorEmail: r.author_email || null,
+      authorTeam: r.author_team || null,
+      attempts: num(r.attempts_so_far),
+      hoursSunk: num(r.hours_sunk),
+    }));
+    rows.push(...laneRows);
+    lanes.push({
+      level: String(lane.level),
+      label: lane.label,
+      hint: lane.hint,
+      tasks: laneRows.length,
+      oldestDays: laneRows.reduce((a, r) => Math.max(a, r.daysBlocked), 0),
+      // Hours already spent on work that is now stuck. This is the number that
+      // makes the lane a priority rather than a curiosity.
+      hoursSunk: Math.round(laneRows.reduce((a, r) => a + r.hoursSunk, 0)),
+      error: res.error || null,
+    });
+  });
+
+  return {
+    enabled: true,
+    lanes,
+    rows,
+    total: rows.length,
+    errors: lanes.filter((l) => l.error).map((l) => ({ query: `blocked_backlog L${l.level}`, error: l.error })),
     generatedAt: new Date().toISOString(),
   };
 }
@@ -746,7 +846,14 @@ function buildPrompt(brief) {
   if (p) {
     lines.push('');
     lines.push(`PIPELINE (upstream, ${p.totalPending} tasks in flight):`);
-    for (const s of p.stages) lines.push(`  ${s.label} (levels ${s.levels.join(', ') || 'none'}): ${s.pending} pending${s.stale ? `, ${s.stale} stale` : ''}`);
+    // Refer to levels by their level. The model should say "L10", not invent a
+    // name for it, because that is what everyone reading the summary says.
+    for (const s of p.stages) lines.push(`  ${s.label}: ${s.pending} pending${s.stale ? `, ${s.stale} stale` : ''}`);
+    if (p.blocked?.pending) {
+      lines.push(`  BLOCKED (off the forward path): ${p.blocked.pending} — `
+        + `${p.blocked.byLevel.map((b) => `L${b.level}: ${b.pending} (oldest ${b.oldestDays}d)`).join('; ')}.`
+        + ' These need a person to unblock them; they are not moving on their own.');
+    }
     lines.push(`  DELIVERABLE NOW (at L12): ${p.deliverable} of ${brief.target} — ${p.progressPct}%. L12 is the deliverable state;`);
     lines.push(`  nothing upstream counts until it reaches L12. Feeder at L10: ${p.feeder}. Deeper upstream: ${p.upstream}.`);
     lines.push(p.gapToTarget > 0

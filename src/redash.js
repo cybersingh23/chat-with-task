@@ -298,3 +298,48 @@ export async function ping() {
 export function queryUrl(id) {
   return `${config.redash.baseUrl}/queries/${id}`;
 }
+
+// ---------------------------------------------------------------------------
+// Read-only guard
+// ---------------------------------------------------------------------------
+//
+// Lives here rather than in the route so everything that can reach a data source
+// goes through one gate — the admin SQL box, and the copilot's run_sql tool.
+// Defence in depth: the box is admin-gated and the data source should be
+// read-only anyway, but a typo'd DELETE shouldn't be able to reach Snowflake,
+// and a model composing SQL shouldn't be the only thing standing between a
+// prompt and a write.
+//
+// Comments and string literals are stripped before analysis so a keyword inside
+// a quoted string ("-- drop table" in a comment, 'DELETE' as a value) doesn't
+// false-trip the checks.
+const FORBIDDEN = /\b(insert|update|delete|drop|truncate|alter|create|grant|revoke|merge|copy|call|execute|use|set)\b/i;
+
+export function assertReadOnly(sql) {
+  const original = String(sql).trim();
+
+  // Analysis copy ONLY: comments and string literals are blanked so a keyword
+  // written inside them can't trip the checks below. It is never executed —
+  // running it would silently rewrite the user's string literals to ''.
+  const stripped = original
+    .replace(/--[^\n]*/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/'(?:[^']|'')*'/g, "''")
+    .replace(/"(?:[^"]|"")*"/g, '""');
+
+  // Reject stacked statements: anything after the first ; that isn't whitespace.
+  const semi = stripped.indexOf(';');
+  if (semi !== -1 && stripped.slice(semi + 1).trim()) {
+    throw new RedashError('only a single statement is allowed', 400);
+  }
+  const body = (semi === -1 ? stripped : stripped.slice(0, semi)).trim();
+  if (!/^(with|select)\b/i.test(body)) {
+    throw new RedashError('only SELECT / WITH queries are allowed', 400);
+  }
+  const hit = FORBIDDEN.exec(body);
+  if (hit) throw new RedashError(`statement keyword not allowed here: ${hit[1].toUpperCase()}`, 400);
+
+  // Hand back the ORIGINAL text (minus a trailing semicolon), so literals and
+  // comments survive into the query that actually runs.
+  return original.replace(/;\s*$/, '');
+}

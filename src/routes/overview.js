@@ -1,5 +1,8 @@
 import express from 'express';
-import { buildBrief, fullBrief, inflightMatchups, getSummary, clearSummaryCache, ptNow, deliveryPhase } from '../overview.js';
+import {
+  buildBrief, fullBrief, inflightMatchups, blockedBacklog,
+  getSummary, clearSummaryCache, ptNow, deliveryPhase,
+} from '../overview.js';
 
 // /api/overview/* — mounted inside the authenticated api router.
 //
@@ -22,6 +25,13 @@ overviewApi.get('/brief', wrap(async (req, res) => {
 // layer is instant instead of a round trip.
 overviewApi.get('/inflight', wrap(async (req, res) => {
   res.json(await inflightMatchups({ fresh: req.query.fresh === '1' }));
+}));
+
+// Tasks stuck in the two problem lanes. Its own endpoint for the same reason as
+// /inflight: it is two more Redash round trips and the brief is what the page
+// waits on, so it loads after first paint.
+overviewApi.get('/blocked', wrap(async (req, res) => {
+  res.json(await blockedBacklog({ fresh: req.query.fresh === '1' }));
 }));
 
 overviewApi.get('/summary', wrap(async (req, res) => {

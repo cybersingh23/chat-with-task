@@ -142,10 +142,64 @@ export const REGISTRY = {
   },
   level_economics: {
     label: 'Cost and rework per level',
-    description: 'Hours, attempts and rejection rate per review level over a trailing window.',
+    description: 'Hours, attempts, rejection rate, billable-vs-wasted hours and QMS per review level.',
     sql: 'level_economics.sql',
     params: {
       project_id: { type: 'objectId', default: () => config.redash.projectId },
+      days: { type: 'int', min: 1, max: 365, default: () => 30 },
+    },
+  },
+
+  // ---- blocked work ----
+
+  blocked_backlog: {
+    label: 'Blocked backlog for one lane',
+    description: 'Every task stuck in a review level, longest first, with who authored it and where it came from.',
+    sql: 'blocked_backlog.sql',
+    params: {
+      project_id: { type: 'objectId', default: () => config.redash.projectId },
+      // -1 (authoring) through 12 (final). 1 and 8 are the problem lanes.
+      level: { type: 'int', min: -1, max: 12, default: () => 8 },
+    },
+  },
+  lane_aging: {
+    label: 'Queue aging buckets',
+    description: 'Pending tasks per review level bucketed by how long they have waited.',
+    sql: 'lane_aging.sql',
+    params: { project_id: { type: 'objectId', default: () => config.redash.projectId } },
+  },
+
+  // ---- contributor quality ----
+  //
+  // All three read VIEW.GEN_AI_ISR rather than rebuilding quality from
+  // WORKERCOMMENTS: it is one row per attempt and already carries the QMS score,
+  // the send-back flag, wasted hours, email and team. See contributor_quality.sql.
+
+  contributor_quality: {
+    label: 'Contributor quality and actions',
+    description: 'Per-contributor QMS score, poor-rating rate, tier and the recommended ops action.',
+    sql: 'contributor_quality.sql',
+    params: {
+      project_id: { type: 'objectId', default: () => config.redash.projectId },
+      days: { type: 'int', min: 1, max: 365, default: () => 30 },
+    },
+  },
+  quality_trend: {
+    label: 'Quality trend, window over window',
+    description: 'Each contributor this window against the one before, flagging anyone whose quality slipped.',
+    sql: 'quality_trend.sql',
+    params: {
+      project_id: { type: 'objectId', default: () => config.redash.projectId },
+      window_days: { type: 'int', min: 1, max: 90, default: () => 7 },
+    },
+  },
+  reviewer_scorecard: {
+    label: 'Reviewer scorecard',
+    description: 'Per reviewer: throughput, send-back rate, how hard they grade, and trusted status.',
+    sql: 'reviewer_scorecard.sql',
+    params: {
+      project_id: { type: 'objectId', default: () => config.redash.projectId },
+      level: { type: 'int', min: -1, max: 12, default: () => 0 },
       days: { type: 'int', min: 1, max: 365, default: () => 30 },
     },
   },
@@ -167,15 +221,27 @@ export function describeRegistry() {
   }));
 }
 
+// Keyed by file, invalidated on mtime.
+//
+// This used to memoize forever, which meant a change to a .sql file did not take
+// effect until the process was restarted BY HAND: `node --watch` only watches
+// what the module graph imports, and these are read with fs, so nothing here
+// triggers a reload. The failure is quiet and expensive — you edit a query, the
+// page keeps rendering the old numbers, and the natural conclusion is that the
+// edit was wrong. A stat per call is nothing next to a Snowflake round trip.
 const sqlCache = new Map();
 function loadSql(file) {
-  if (!sqlCache.has(file)) {
-    // Guard against a registry typo escaping sql/redash/.
-    const abs = path.resolve(SQL_DIR, file);
-    if (!abs.startsWith(SQL_DIR + path.sep)) throw new RedashError(`bad sql path: ${file}`, 500);
-    sqlCache.set(file, fs.readFileSync(abs, 'utf8'));
-  }
-  return sqlCache.get(file);
+  // Guard against a registry typo escaping sql/redash/.
+  const abs = path.resolve(SQL_DIR, file);
+  if (!abs.startsWith(SQL_DIR + path.sep)) throw new RedashError(`bad sql path: ${file}`, 500);
+
+  const mtime = fs.statSync(abs).mtimeMs;
+  const hit = sqlCache.get(file);
+  if (hit && hit.mtime === mtime) return hit.sql;
+
+  const sql = fs.readFileSync(abs, 'utf8');
+  sqlCache.set(file, { mtime, sql });
+  return sql;
 }
 
 // Validate + interpolate. Every {{placeholder}} must be satisfied by a declared,
