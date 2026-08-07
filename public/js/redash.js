@@ -1,4 +1,5 @@
 import { api, el, mount, renderAppHeader } from './common.js';
+import { mountAcey } from './acey.js';
 
 // In-app Redash browser: run the curated registry, search/run any saved Redash
 // query, and (admin only) run read-only ad-hoc SQL — without leaving the studio.
@@ -228,3 +229,7 @@ else {
   await loadRegistry();
   if (me.role === 'admin' && status.adhocAllowed) await initSqlPane();
 }
+
+
+// Acey is available from every page, not just inside a task.
+mountAcey({ page: 'redash' });

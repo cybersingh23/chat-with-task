@@ -1,5 +1,7 @@
 import { api, el, renderAppHeader } from './common.js';
 import { initPipelinePanels } from './redash_panels.js';
+import { initQualityPanels } from './quality_panels.js';
+import { mountAcey } from './acey.js';
 
 const DIM_LABEL = {
   correctness: 'Correctness',
@@ -210,3 +212,8 @@ await loadScope(sel.value);
 // Redash panels load last and independently — a slow or unreachable Redash must
 // never delay or break the disk-computed sections above.
 initPipelinePanels().catch((e) => console.error('pipeline panels:', e));
+initQualityPanels().catch((e) => console.error('quality panels:', e));
+
+
+// Acey is available from every page, not just inside a task.
+mountAcey({ page: 'L12 stats' });

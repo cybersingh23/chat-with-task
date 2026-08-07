@@ -1,4 +1,5 @@
 import { api, el, mount, cap, startTour, renderAppHeader, avatar, personName } from './common.js';
+import { mountAcey } from './acey.js';
 
 const ORDER = ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'];
 const VERDICT_LABELS = {
@@ -768,3 +769,7 @@ async function startBoardTour() {
 }
 
 boot();
+
+
+// Acey is available from every page, not just inside a task.
+mountAcey({ page: 'board' });

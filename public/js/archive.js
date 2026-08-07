@@ -1,4 +1,5 @@
 import { api, el, cap, renderAppHeader, avatar, personName } from './common.js';
+import { mountAcey } from './acey.js';
 
 const SEV_LABEL = { HARD_FAIL: 'Hard', SOFT_FAIL: 'Soft', PASS: 'Pass', UNSORTED: 'Unsorted' };
 const VERDICT_LABELS = {
@@ -98,3 +99,7 @@ if (q0) searchInput.value = q0;
 
 ({ tasks } = await api('/archive'));
 render();
+
+
+// Acey is available from every page, not just inside a task.
+mountAcey({ page: 'archive' });
