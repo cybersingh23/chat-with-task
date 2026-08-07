@@ -40,7 +40,10 @@
   --ok-tint: rgba(76, 184, 122, 0.05);
 
   --muted-bg: rgba(255, 255, 255, 0.06);
-  --scrollbar: #2b303a;
+  /* Scrollbar ramp: quiet at rest, brighter as you engage it. */
+  --scrollbar: #22262e;
+  --scrollbar-hover: #39404d;
+  --scrollbar-active: #4c5464;
 
   /* type */
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
@@ -92,7 +95,9 @@
   --ok-tint: rgba(34, 122, 76, 0.05);
 
   --muted-bg: rgba(20, 23, 29, 0.05);
-  --scrollbar: #ccd0d8;
+  --scrollbar: #d8dce2;
+  --scrollbar-hover: #b7bdc7;
+  --scrollbar-active: #949ba7;
 
   color-scheme: light;
 }
@@ -136,20 +141,20 @@
    >= 0.06 apart, and the step nearest the surface clearing 2:1 (dark 2.27:1,
    light 2.11:1). Re-run the validator before changing any of these six. */
 :root {
-  --viz-stage-1: #184f95;   /* Production   — least prominent on dark */
-  --viz-stage-2: #2a78d6;   /* Early review */
-  --viz-stage-3: #6da7ec;   /* Late review  */
-  --viz-stage-4: #cde2fb;   /* Final        — most prominent on dark */
+  --viz-stage-1: #184f95;   /* L-1  — least prominent on dark */
+  --viz-stage-2: #2a78d6;   /* L0  */
+  --viz-stage-3: #6da7ec;   /* L10 */
+  --viz-stage-4: #cde2fb;   /* L12  — most prominent on dark */
   --viz-grid: var(--border);
   --viz-axis: var(--border-strong);
   --viz-context: #3a4150;   /* de-emphasised marks: present, not competing */
   --viz-runup: rgba(255, 255, 255, 0.045);
 }
 :root[data-theme="light"] {
-  --viz-stage-1: #86b6ef;   /* Production   — least prominent on light */
+  --viz-stage-1: #86b6ef;   /* L-1  — least prominent on light */
   --viz-stage-2: #2a78d6;
   --viz-stage-3: #1c5cab;
-  --viz-stage-4: #0d366b;   /* Final        — most prominent on light */
+  --viz-stage-4: #0d366b;   /* L12  — most prominent on light */
   --viz-context: #c2c8d2;
   --viz-runup: rgba(20, 23, 29, 0.05);
 }
@@ -1323,10 +1328,7 @@ a.cb-field-link:hover { background: rgba(111, 199, 232, 0.22); text-decoration: 
 .status-line { font-size: 11px; color: var(--text-3); padding: 0 18px 6px; min-height: 16px; }
 .error-line { color: var(--red); }
 
-/* scrollbars */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 5px; border: 3px solid transparent; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); background-clip: content-box; border: 3px solid transparent; }
+/* scrollbars: one definition, further down with the redesign tokens. */
 
 /* Redash pull panel (Admin Console page) */
 .l10-panel { padding: 14px 16px; margin-bottom: 22px; border-radius: 12px; }
@@ -1643,8 +1645,9 @@ a.cb-field-link:hover { background: rgba(111, 199, 232, 0.22); text-decoration: 
 .lane { display: flex; flex-direction: column; min-height: 55vh; max-height: calc(100vh - 200px); }
 .lane-head { flex: 0 0 auto; }                         /* pinned: sits above the scroll area */
 .lane-body { flex: 1 1 auto; overflow-y: auto; min-height: 60px; padding-right: 4px; }
-.lane-body::-webkit-scrollbar { width: 8px; }
-.lane-body::-webkit-scrollbar-thumb { background: var(--edge-strong); border-radius: 8px; }
+/* The board's scroll container is .lane__list since the redesign; the
+   .lane-body rules that used to live here targeted a class that no longer
+   exists and had not applied in a long time. Scrollbars are global now. */
 
 /* ================= L12 Stats dashboard ================= */
 .admin-h2 .admin-sub { font-size: 11.5px; font-weight: 400; color: var(--text-3); margin-left: 8px; letter-spacing: 0; text-transform: none; }
@@ -1762,6 +1765,35 @@ a.cb-field-link:hover { background: rgba(111, 199, 232, 0.22); text-decoration: 
 .rd-sev.sev-HARD_FAIL { color: var(--red); background: rgba(255, 97, 89, 0.13); }
 .rd-sev.sev-SOFT_FAIL { color: var(--orange); background: rgba(255, 161, 79, 0.13); }
 .rd-sev.sev-PASS { color: var(--green); background: rgba(67, 209, 124, 0.13); }
+
+/* ---------- Contributor quality panels (L12 Stats) ---------- */
+
+/* The quality tables are admin-tables, so rd-num needs to right-align there too
+   — it was previously scoped to .rd-board alone. */
+.admin-table td.rd-num, .admin-table th.rd-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Tier names are long ("Attempter - promote candidate"), so the ladder's 132px
+   name column is widened for this panel rather than truncating every row. */
+#q-mix .rd-lvl-head, #q-mix .rd-lvl { grid-template-columns: 240px 1fr 60px 110px; }
+.q-tier-name { font-size: 12.5px; }
+.q-seg-act { background: var(--orange); }
+.q-seg-ok { background: rgba(255, 255, 255, 0.16); }
+.q-flag { color: var(--orange); font-size: 11.5px; }
+
+.q-who { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.q-int {
+  margin-left: 7px; font-size: 10px; color: var(--text-3);
+  border: 1px solid var(--edge); border-radius: 4px; padding: 1px 5px;
+}
+
+.q-act { font-size: 11.5px; font-weight: 550; padding: 2px 9px; border-radius: 6px; white-space: nowrap; }
+.q-act--hot { color: var(--red); background: rgba(255, 97, 89, 0.13); }
+.q-act--warn { color: var(--orange); background: rgba(255, 161, 79, 0.13); }
+.q-act--cool { color: var(--text-2); background: rgba(255, 255, 255, 0.06); }
+
+/* A reviewer grading half a point off the project mean, in EITHER direction, is
+   the finding — so this is deliberately not a one-sided "too harsh" colour. */
+.q-off { color: var(--orange); font-variant-numeric: tabular-nums; }
 .rd-sev.sev-UNSORTED { color: var(--teal); background: rgba(100, 210, 255, 0.12); }
 
 /* ---------- Pipeline view (task page) ---------- */
@@ -2255,9 +2287,32 @@ img.avatar { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
   * { transition: none !important; }
 }
 
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 5px; }
+/* Scrollbars — ONE definition for the whole app.
+   A scrollbar is a position indicator at rest and a control once you reach for
+   it, so it gets quieter-to-louder, never the reverse: rest is a hint, hover
+   says "grabbable", active confirms you have it. There used to be three
+   competing blocks here — an early one with a hover ramp, a dead .lane-body
+   override, and a flat token version with no interaction states at all — so
+   whichever won, pressing the thumb changed nothing. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar); border-radius: 5px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); background-clip: content-box; }
+::-webkit-scrollbar-thumb:active { background: var(--scrollbar-active); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+/* Firefox, which has no pseudo-elements for this and was getting nothing.
+   MUST be gated: setting scrollbar-width/scrollbar-color unconditionally makes
+   Chrome switch to the standard scrollbar path and IGNORE every
+   ::-webkit-scrollbar rule above, so the ramp silently stops applying and the
+   browser derives its own states instead. Measured: with a bare `*` rule the
+   thumb rendered rgb(18,20,26) at rest against a declared #22262e, and the
+   active state barely moved. @supports keeps this to engines that need it. */
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+}
 ::placeholder { color: var(--text-dim); }
 
 /* ── redesign: pieces the handoff sheet leaves to the app ────────────────── */
@@ -2413,7 +2468,6 @@ img.avatar { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
 
 /* Login lives in its own sheet: public/css/login.css (design handoff). */
 
-}
 
 /* Long rubric prose: collapsed to a peek, expanded on demand. */
 .spec-desc { margin: 2px 0 12px; }
@@ -2589,9 +2643,13 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 }
 .acey__suggest button:hover::after { color: var(--accent); }
 
-/* The composer showed a permanent 9px scrollbar gutter from the global rule. */
-.acey__composer textarea { scrollbar-width: thin; }
-.acey__composer textarea::-webkit-scrollbar { width: 0; }
+/* The composer showed a permanent scrollbar gutter from the global rule.
+   `scrollbar-width: thin` was the wrong lever: setting it puts Chrome on the
+   standard scrollbar path, which makes it IGNORE the ::-webkit-scrollbar rule
+   below — so the gutter came back as a thin bar instead of going away. `none`
+   hides it in both engines, and the webkit rule stays for older Chrome. */
+.acey__composer textarea { scrollbar-width: none; }
+.acey__composer textarea::-webkit-scrollbar { width: 0; height: 0; }
 
 /* Guide card: same bubble as every other reply, no mascot inside it, no bold. */
 .guide-verdict { font-size: 13px; line-height: 1.6; color: var(--text); font-weight: 400; }
@@ -2760,10 +2818,13 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 .viz-rule-label { fill: var(--text-dim); font: 10.5px var(--font); font-weight: 600; pointer-events: none; }
 .viz-tick, .viz-rowlabel, .viz-datalabel, .viz-sublabel, .viz-note { pointer-events: none; }
 
-.viz-stage--production   { fill: var(--viz-stage-1); }
-.viz-stage--early_review { fill: var(--viz-stage-2); }
-.viz-stage--late_review  { fill: var(--viz-stage-3); }
-.viz-stage--final        { fill: var(--viz-stage-4); }
+.viz-stage--l_minus1   { fill: var(--viz-stage-1); }
+.viz-stage--l0 { fill: var(--viz-stage-2); }
+.viz-stage--l10  { fill: var(--viz-stage-3); }
+.viz-stage--l12        { fill: var(--viz-stage-4); }
+/* Blocked levels (L1/L4/L8) are not a step on the forward path, so they get
+   a neutral fill rather than a position on the ordinal ramp. */
+.viz-stage--blocked    { fill: var(--text-faint); }
 
 /* Emphasis form: the latest delivery is the judgement, the rest is context. */
 .viz-col--context { fill: var(--viz-context); }
@@ -2783,10 +2844,10 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 .viz-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; padding-left: 44px; }
 .viz-legend__item { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-muted); }
 .viz-legend__sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
-.viz-legend__sw.viz-stage--production   { background: var(--viz-stage-1); }
-.viz-legend__sw.viz-stage--early_review { background: var(--viz-stage-2); }
-.viz-legend__sw.viz-stage--late_review  { background: var(--viz-stage-3); }
-.viz-legend__sw.viz-stage--final        { background: var(--viz-stage-4); }
+.viz-legend__sw.viz-stage--l_minus1   { background: var(--viz-stage-1); }
+.viz-legend__sw.viz-stage--l0 { background: var(--viz-stage-2); }
+.viz-legend__sw.viz-stage--l10  { background: var(--viz-stage-3); }
+.viz-legend__sw.viz-stage--l12        { background: var(--viz-stage-4); }
 
 .viz-tip {
   position: fixed; top: 0; left: 0; z-index: 9000; pointer-events: none;
@@ -2796,10 +2857,10 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 }
 .viz-tip b { font-weight: 640; }
 .viz-tip__sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
-.viz-tip__sw.viz-stage--production   { background: var(--viz-stage-1); }
-.viz-tip__sw.viz-stage--early_review { background: var(--viz-stage-2); }
-.viz-tip__sw.viz-stage--late_review  { background: var(--viz-stage-3); }
-.viz-tip__sw.viz-stage--final        { background: var(--viz-stage-4); }
+.viz-tip__sw.viz-stage--l_minus1   { background: var(--viz-stage-1); }
+.viz-tip__sw.viz-stage--l0 { background: var(--viz-stage-2); }
+.viz-tip__sw.viz-stage--l10  { background: var(--viz-stage-3); }
+.viz-tip__sw.viz-stage--l12        { background: var(--viz-stage-4); }
 .viz-tip__tot { color: var(--text-dim); }
 
 /* ── layer toggles + in-flight matchup table ──────────────────────────── */
@@ -2847,3 +2908,186 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 .ov-mu-table .ov-num { text-align: right; font-variant-numeric: tabular-nums; }
 .ov-mu-none { color: var(--text-faint); font-style: italic; }
 .ov-mu-foot { margin: 9px 2px 0; font-size: 11.5px; color: var(--text-faint); }
+
+/* Blocked a week or more. A left edge rather than a row tint: the table is
+   sorted by age, so a tint would shade most of the visible rows and stop
+   reading as an exception. */
+.ov-blk-old td:first-child { box-shadow: inset 2px 0 0 var(--orange); }
+.ov-blk-old td { color: var(--text); }
+
+/* ---------- Team page ---------- */
+.tm-main { max-width: 1180px; margin: 0 auto; padding: 26px 24px 80px; }
+.tm-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 22px; }
+.tm-title { font-size: 24px; font-weight: 650; margin: 0 0 4px; }
+.tm-sub { margin: 0; font-size: 13px; color: var(--text-2); }
+.tm-actions { display: flex; align-items: center; gap: 8px; }
+.tm-toggle { font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 5px; }
+
+/* health tiles: counts by severity, then the signals themselves */
+.tm-tiles { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+.tm-tile {
+  min-width: 92px; padding: 12px 16px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--edge);
+}
+.tm-tile__n { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.tm-tile__l { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); margin-top: 2px; }
+.tm-tile.is-zero .tm-tile__n { color: var(--text-faint); }
+.tm-tile--critical .tm-tile__n { color: var(--red); }
+.tm-tile--high .tm-tile__n { color: var(--orange); }
+.tm-tile--esc { border-style: dashed; }
+
+.tm-signals { display: grid; gap: 8px; }
+.tm-sig { padding: 11px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--edge); border-left-width: 3px; }
+.tm-sig--critical { border-left-color: var(--red); }
+.tm-sig--high { border-left-color: var(--orange); }
+.tm-sig--medium { border-left-color: var(--edge); }
+.tm-sig__head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.tm-sig__title { font-weight: 550; font-size: 13.5px; }
+.tm-sig__owner { font-size: 11.5px; color: var(--text-3); margin-left: auto; font-family: var(--mono); }
+.tm-sig__detail { font-size: 12.5px; color: var(--text-2); margin-top: 5px; line-height: 1.5; }
+.tm-sig__metric { font-size: 11.5px; color: var(--text-2); margin-top: 6px; font-variant-numeric: tabular-nums; }
+
+.tm-sev { font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 5px; }
+.tm-sev--critical { color: var(--red); background: rgba(255, 97, 89, 0.14); }
+.tm-sev--high { color: var(--orange); background: rgba(255, 161, 79, 0.14); }
+.tm-sev--medium { color: var(--text-2); background: rgba(255, 255, 255, 0.07); }
+.tm-esc-chip { font-size: 10px; color: var(--orange); border: 1px dashed rgba(255, 161, 79, 0.5); border-radius: 5px; padding: 1px 6px; }
+
+.tm-clear { padding: 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--edge); font-size: 13px; color: var(--text-2); }
+.tm-empty { font-size: 12.5px; color: var(--text-faint); margin: 6px 0 0; }
+
+/* people columns */
+.tm-people { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; }
+.tm-person { padding: 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--edge); }
+.tm-person.is-me { border-color: var(--blue); }
+.tm-person__head { display: flex; align-items: center; gap: 10px; }
+.tm-person__name { font-weight: 600; font-size: 14px; }
+.tm-person__remit { font-size: 11.5px; color: var(--text-3); }
+.tm-person__n { margin-left: auto; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.tm-person__blurb { font-size: 12px; color: var(--text-3); margin: 9px 0 12px; line-height: 1.5; }
+.tm-you { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--blue); margin-left: 7px; }
+
+.tm-list, .tm-esc { display: grid; gap: 8px; }
+.tm-todo { padding: 10px 12px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--edge); }
+.tm-todo.is-closed { opacity: 0.55; }
+.tm-todo__head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tm-todo__title { font-size: 13px; font-weight: 520; }
+.tm-todo__detail { font-size: 12px; color: var(--text-2); margin: 6px 0 0; line-height: 1.5; }
+.tm-todo__meta { display: flex; align-items: center; gap: 8px; margin-top: 7px; font-size: 11px; color: var(--text-3); flex-wrap: wrap; }
+.tm-src { text-transform: uppercase; letter-spacing: 0.05em; font-size: 9.5px; border: 1px solid var(--edge); border-radius: 4px; padding: 1px 5px; }
+.tm-src--auto { color: var(--text-3); }
+.tm-src--manual { color: var(--blue); border-color: rgba(42, 120, 214, 0.4); }
+.tm-recur { color: var(--orange); }
+.tm-link { color: var(--blue); }
+.tm-todo__actions { display: flex; align-items: center; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+.tm-btn { height: 24px; padding: 0 9px; font-size: 11px; text-transform: none; letter-spacing: 0; }
+.tm-btn--danger { color: var(--red); }
+.tm-reassign { height: 24px; font-size: 11px; padding: 0 6px; }
+
+.tm-form { padding: 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--blue); margin-bottom: 14px; }
+.tm-form__row { display: flex; gap: 8px; margin-bottom: 8px; }
+.tm-form__row--end { justify-content: flex-end; margin-bottom: 0; }
+.tm-form .input { flex: 1; }
+.tm-foot { margin-top: 22px; font-size: 11.5px; color: var(--text-faint); }
+
+/* ── Acey popover (program analyst, on every page) ────────────────────────
+   The SAME component as the docked panel on the task page, floated.
+   It reuses .acey / .acey__head / .acey__body / .acey__status / .acey__composer
+   / .acey__intro / .acey__suggest / .chat-msg / .bubble / .msg-who verbatim, and
+   the launcher is the existing .acey-fab mascot. Only the shell differs.
+
+   The first attempt defined its own .acey-fab, which COLLIDED with the mascot
+   button — it set height/padding but not width, so the button kept its 52px
+   width and "Ask Acey" wrapped inside it. Hence: no new launcher, no parallel
+   design language, only a positioning modifier and the two genuinely new bits
+   (the scope chip and the SQL disclosure). */
+.acey--pop {
+  position: fixed; right: 22px; bottom: 22px; z-index: 46;
+  width: min(520px, calc(100vw - 44px));
+  height: min(660px, calc(100vh - 116px));
+  border: 1px solid var(--border-strong);
+  border-left: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.acey--pop .acey__scope {
+  font-size: 10.5px; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: var(--r-tag); padding: 1px 6px;
+}
+.acey--pop .acey__body { display: flex; flex-direction: column; gap: 14px; }
+.acey--pop .acey__body.is-empty { gap: 12px; }
+
+/* The query behind the number, in the transcript. Collapsed, but present:
+   a number without its query is an assertion. */
+.acey__sql {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-control); overflow: hidden;
+}
+.acey__sql summary {
+  display: flex; align-items: center; gap: 9px; padding: 8px 11px;
+  cursor: pointer; list-style: none;
+}
+.acey__sql summary::-webkit-details-marker { display: none; }
+.acey__sql summary::after {
+  content: '›'; margin-left: auto; color: var(--text-dim);
+  transform: rotate(90deg); transition: transform 0.16s ease;
+}
+.acey__sql[open] summary::after { transform: rotate(-90deg); }
+.acey__sql-tag {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
+  color: var(--accent); background: var(--accent-bg);
+  border: 1px solid var(--accent-border); border-radius: var(--r-tag); padding: 1px 5px;
+  flex: 0 0 auto;
+}
+.acey__sql-why { font-size: 12px; color: var(--text-muted); min-width: 0; }
+.acey__sql pre {
+  margin: 0; padding: 11px 12px; border-top: 1px solid var(--border);
+  font-family: var(--mono); font-size: 11px; line-height: 1.55;
+  color: var(--text-muted); overflow-x: auto; white-space: pre;
+}
+.acey__sql-foot { padding: 7px 11px; border-top: 1px solid var(--border); }
+.acey__sql-copy {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--accent); font-size: 11.5px; font-family: inherit;
+}
+
+/* Live step line, in the panel's existing status slot. */
+.acey__dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); margin-right: 7px; vertical-align: middle;
+  animation: acey-pulse 1.1s ease-in-out infinite;
+}
+@keyframes acey-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+@media (max-width: 640px) {
+  .acey--pop { right: 12px; left: 12px; bottom: 12px; width: auto; height: min(78vh, 620px); }
+}
+
+/* "Your todos" strip on Overview — a pointer to the Team board, not a copy of it. */
+.ov-mine { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin: 0 0 18px; font-size: 12.5px; }
+.ov-mine:empty { display: none; }
+.ov-mine__n { font-weight: 600; color: var(--text); }
+.ov-mine__clear { color: var(--text-faint); }
+.ov-mine__item {
+  color: var(--text-2); background: var(--surface); border: 1px solid var(--edge);
+  border-radius: 999px; padding: 3px 11px;
+}
+.ov-mine__item--critical { border-color: rgba(255, 97, 89, 0.45); }
+.ov-mine__item--high { border-color: rgba(255, 161, 79, 0.45); }
+.ov-mine__link { color: var(--blue); margin-left: auto; }
+
+/* Team page skeletons: the shape of the answer while the health sync runs. */
+.tm-skel {
+  position: relative; overflow: hidden;
+  background: var(--surface); border-color: var(--edge); color: transparent;
+}
+.tm-skel::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.045), transparent);
+  animation: tm-shimmer 1.35s ease-in-out infinite;
+}
+.tm-skel--row { height: 74px; }
+.tm-skel--card { height: 190px; }
+.tm-tile.tm-skel { height: 62px; }
+@keyframes tm-shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
