@@ -11,28 +11,35 @@
 <body>
   <header class="topbar" id="app-header"></header>
 
+  <!--
+    ONE job: the work on ACC, and who owns it.
+
+    The previous version rendered the same eight items three times — as a health
+    signal, again under "Escalated", and again inside a per-person column — so
+    you read a problem at the top and then scrolled past two more copies to find
+    the one with buttons on it. The severity tiles were decoration; they filtered
+    nothing.
+
+    Now there is one card per item, grouped under its owner, carrying its own
+    evidence and its own actions. The counts across the top are the filter.
+  -->
   <main class="tm-main">
-    <section class="tm-head">
-      <div>
-        <h1 class="tm-title">Team</h1>
-        <p class="tm-sub" id="tm-sub">Loading project health…</p>
+    <header class="tm-top">
+      <div class="tm-top__title">
+        <h1>Team</h1>
+        <p class="tm-sub" id="tm-sub">Loading…</p>
       </div>
-      <div class="tm-actions">
-        <button class="btn btn--ghost" id="tm-add" type="button">add todo</button>
-        <button class="btn btn--ghost" id="tm-refresh" type="button">refresh</button>
-        <label class="tm-toggle"><input type="checkbox" id="tm-closed" /> show closed</label>
+      <div class="tm-top__actions">
+        <button class="btn" id="tm-add" type="button">Add todo</button>
+        <button class="btn btn--ghost" id="tm-refresh" type="button">Refresh</button>
       </div>
-    </section>
+    </header>
 
-    <!-- health first: the todos below are derived from it, so the evidence
-         should be readable before the instruction -->
-    <section class="tm-health" id="tm-health"></section>
+    <div class="tm-filters" id="tm-filters" role="group" aria-label="Filter work"></div>
 
-    <h2 class="admin-h2">Escalated <span class="admin-sub">cross-domain or above the line — the owner still holds the work</span></h2>
-    <div class="tm-esc" id="tm-esc"></div>
+    <div id="tm-form-host"></div>
 
-    <h2 class="admin-h2">Owners <span class="admin-sub">routed by domain, not rotation</span></h2>
-    <div class="tm-people" id="tm-people"></div>
+    <div class="tm-owners" id="tm-owners"></div>
 
     <p class="tm-foot" id="tm-foot"></p>
   </main>

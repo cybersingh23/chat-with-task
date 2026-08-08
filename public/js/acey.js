@@ -46,7 +46,7 @@ export function mountAcey({ page } = {}) {
       el('button', {
         class: 'btn btn--ghost acey__clear', type: 'button',
         onclick: async () => { await api('/acey/history', { method: 'DELETE' }).catch(() => {}); showEmpty(); },
-      }, 'clear'),
+      }, 'Clear'),
       el('button', {
         class: 'btn btn--ghost acey__hide', type: 'button', title: 'hide Acey', 'aria-label': 'Hide Acey',
         onclick: () => toggle(false),
@@ -184,11 +184,11 @@ export function mountAcey({ page } = {}) {
   };
 
   function sqlBlock(e) {
-    const copy = el('button', { class: 'acey__sql-copy', type: 'button' }, 'copy');
+    const copy = el('button', { class: 'acey__sql-copy', type: 'button' }, 'Copy');
     copy.addEventListener('click', () => {
       navigator.clipboard?.writeText(e.sql);
-      copy.textContent = 'copied';
-      setTimeout(() => { copy.textContent = 'copy'; }, 1400);
+      copy.textContent = 'Copied';
+      setTimeout(() => { copy.textContent = 'Copy'; }, 1400);
     });
     return el('details', { class: 'acey__sql' },
       el('summary', {},

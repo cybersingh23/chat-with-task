@@ -83,7 +83,7 @@ async function loadSummary({ refresh }) {
   const prose = $('ov-prose');
   const btn = $('ov-regen');
   btn.disabled = true;
-  btn.textContent = refresh ? 'regenerating…' : 'regenerate';
+  btn.textContent = refresh ? 'Regenerating…' : 'regenerate';
   // On a refetch the previous synthesis is held at reduced opacity rather than
   // swapped for skeletons: the text is still true while the new one generates,
   // and replacing it would jump the layout by several lines for ~15 seconds.
@@ -117,7 +117,7 @@ async function loadSummary({ refresh }) {
   } finally {
     prose.classList.remove('is-stale');
     btn.disabled = false;
-    btn.textContent = 'regenerate';
+    btn.textContent = 'Regenerate';
     $('ov-hero').setAttribute('aria-busy', 'false');
   }
 }
@@ -149,12 +149,12 @@ async function renderMyTodos() {
   if (!mine.count) {
     return mount(host,
       el('span', { class: 'ov-mine__clear' }, 'Nothing routed to you right now.'),
-      el('a', { class: 'ov-mine__link', href: `${base}/team.html` }, 'team board'));
+      el('a', { class: 'ov-mine__link', href: `${base}/team.html` }, 'Team board'));
   }
   mount(host,
     el('span', { class: 'ov-mine__n' }, `${mine.count} for you`),
     ...mine.top.map((t) => el('span', { class: `ov-mine__item ov-mine__item--${t.severity}` }, t.title)),
-    el('a', { class: 'ov-mine__link', href: `${base}/team.html` }, 'team board'));
+    el('a', { class: 'ov-mine__link', href: `${base}/team.html` }, 'Team board'));
 }
 
 function renderAssignments(b) {
@@ -368,12 +368,12 @@ function renderLayerToggles() {
   });
 
   // All/none is the only pair of shortcuts worth having with six layers.
-  const all = el('button', { class: 'ov-layer ov-layer--act', type: 'button' }, 'all');
+  const all = el('button', { class: 'ov-layer ov-layer--act', type: 'button' }, 'All');
   all.addEventListener('click', () => {
     for (const l of inflight.levels) selected.add(l.level);
     renderLayerToggles(); renderMatchups();
   });
-  const none = el('button', { class: 'ov-layer ov-layer--act', type: 'button' }, 'none');
+  const none = el('button', { class: 'ov-layer ov-layer--act', type: 'button' }, 'None');
   none.addEventListener('click', () => {
     selected.clear(); renderLayerToggles(); renderMatchups();
   });

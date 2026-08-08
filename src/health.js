@@ -130,7 +130,9 @@ function checkBlocked(blocked) {
       severity: old.length >= THRESHOLDS.blockedCount ? 'high' : 'medium',
       title: `${int(lane.tasks)} tasks blocked at L${lane.level}`
         + (old.length ? `, ${int(old.length)} for a week or more` : ''),
-      detail: `${lane.hint}. Oldest is ${lane.oldestDays}d. `
+      // The hint is a fragment ("blocked on something the platform has to fix");
+      // it starts a sentence here, so it gets a capital.
+      detail: `${lane.hint.charAt(0).toUpperCase()}${lane.hint.slice(1)}. Oldest is ${lane.oldestDays}d. `
         + `${int(lane.hoursSunk)}h of work already spent on tasks that cannot move.`,
       metric: { value: old.length || lane.tasks, threshold: THRESHOLDS.blockedDays, unit: 'tasks' },
       link: '/overview.html',

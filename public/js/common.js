@@ -322,7 +322,7 @@ export function renderAppHeader({ active, user, extras = [] } = {}) {
           await api('/logout', { method: 'POST' }).catch(() => {});
           location.href = base + '/login.html';
         },
-      }, 'sign out'))
+      }, 'Sign out'))
     : null;
 
   mount(host, lockup, nav, el('div', { class: 'spacer' }), ...extras, themeBtn, userBlock);

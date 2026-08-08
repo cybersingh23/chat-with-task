@@ -1,21 +1,30 @@
 import { api, el, mount, renderAppHeader, avatar } from './common.js';
 import { mountAcey } from './acey.js';
 
-// The Team page: project health, and what each person owes because of it.
+// The Team page answers ONE question: what needs doing on ACC, and who owns it.
 //
-// The health signals come first and the todos below are derived from them, so
-// the page reads as evidence → instruction rather than a list of orders with the
-// reasoning hidden behind a tooltip. Every auto todo shows the number that
-// triggered it and the threshold it crossed, because a todo you cannot argue
-// with is one people quietly stop doing.
+// It used to answer three, badly. The same eight items appeared as a health
+// signal (evidence, no actions), again under "Escalated", and again inside a
+// per-person column — so you read a problem, then scrolled past two more copies
+// to find the actionable one. The severity tiles filtered nothing. Five ragged
+// columns of unequal height made scanning impossible.
+//
+// Now: one card per item, grouped under its owner, carrying its own evidence and
+// its own actions. Severity, escalation and ownership are FILTERS across the top
+// rather than separate renderings of the same data — which is also what finally
+// gives those counts a job.
+//
+// The evidence a health check produced (the value and the threshold it crossed)
+// lives on the card, because a todo you cannot argue with is one people quietly
+// stop doing. Nothing was lost by deleting the signals section; it moved.
 
-const SEV_ORDER = ['critical', 'high', 'medium'];
-const int = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
 const $ = (id) => document.getElementById(id);
+const int = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
+const SEV_RANK = { critical: 0, high: 1, medium: 2 };
 
 let data = null;
-let showClosed = false;
 let me = null;
+let view = 'all';       // all | mine | escalated | critical | high | medium | closed
 
 init();
 
@@ -25,165 +34,175 @@ async function init() {
   renderAppHeader({ active: 'team', user });
 
   $('tm-refresh').addEventListener('click', () => load({ fresh: true }));
-  $('tm-closed').addEventListener('change', (e) => { showClosed = e.target.checked; load({}); });
   $('tm-add').addEventListener('click', openAddForm);
 
   await load({});
 }
 
 async function load({ fresh }) {
-  // The board runs a full health sync — several Redash round trips, ~10s cold.
-  // Showing one line of text above two empty section headers for that long reads
-  // as a broken page, so the shape of the answer goes up immediately and fills in.
-  $('tm-sub').textContent = 'Checking project health…';
   if (!data) showSkeleton();
-
   try {
-    data = await api(`/team/board?${showClosed ? 'closed=1&' : ''}${fresh ? 'fresh=1' : ''}`);
+    data = await api(`/team/board?${view === 'closed' ? 'closed=1&' : ''}${fresh ? 'fresh=1' : ''}`);
   } catch (e) {
-    $('tm-sub').textContent = `Could not load the team board — ${e.message}`;
-    mount($('tm-health'), el('div', { class: 'tm-clear' },
+    $('tm-sub').textContent = `Could not load the board — ${e.message}`;
+    mount($('tm-filters'));
+    mount($('tm-owners'), el('div', { class: 'tm-blank' },
       'The health checks could not run, so nothing below is current. This is not a clear board.'));
-    mount($('tm-esc'));
-    mount($('tm-people'));
     return;
   }
   render();
 }
 
-// Skeletons matched to the real layout — one health block and five owner cards —
-// so the page does not jump when the data lands.
-function showSkeleton() {
-  mount($('tm-health'),
-    el('div', { class: 'tm-tiles' }, ...Array.from({ length: 4 }, () =>
-      el('div', { class: 'tm-tile tm-skel' }))),
-    el('div', { class: 'tm-signals' }, ...Array.from({ length: 4 }, () =>
-      el('div', { class: 'tm-sig tm-skel tm-skel--row' }))));
-  mount($('tm-esc'), el('div', { class: 'tm-todo tm-skel tm-skel--row' }));
-  mount($('tm-people'), ...Array.from({ length: 5 }, () =>
-    el('section', { class: 'tm-person tm-skel tm-skel--card' })));
+// Every item, exactly once. people[].todos already contains the full set;
+// `escalated` is the same objects flagged, not a second list.
+const allItems = () => data.people.flatMap((p) => p.todos);
+
+function matches(t) {
+  if (view === 'all') return true;
+  if (view === 'mine') return t.owner === me;
+  if (view === 'escalated') return !!t.escalated;
+  if (view === 'closed') return t.status === 'done' || t.status === 'resolved';
+  return t.severity === view;
 }
 
 function render() {
-  const h = data.health;
-  const c = h.context;
-  const parts = [
-    `${int(c.deliverable ?? 0)} of ${int(c.target ?? 0)} deliverable for ${c.nextDelivery} (${c.daysUntilDelivery}d away)`,
+  const items = allItems();
+  const c = data.health.context;
+
+  $('tm-sub').textContent = [
+    `${int(c.deliverable ?? 0)} of ${int(c.target ?? 0)} deliverable for ${c.nextDelivery}`,
+    `${c.daysUntilDelivery}d out`,
     `${int(c.totalPending ?? 0)} in flight`,
     c.blocked ? `${int(c.blocked)} blocked` : null,
-    `${h.counts.high + h.counts.critical} signal(s) needing attention`,
-  ].filter(Boolean);
-  $('tm-sub').textContent = parts.join(' · ');
+  ].filter(Boolean).join(' · ');
 
-  renderHealth(h);
-  renderEscalated();
-  renderPeople();
+  renderFilters(items);
+  renderOwners(items.filter(matches));
 
   const ch = data.changes;
   $('tm-foot').textContent = ch
-    ? `Auto todos reconciled: ${ch.created} created, ${ch.resolved} closed by the signal clearing, ${ch.reopened} recurred. `
-      + `Manual todos are never auto-closed. Generated ${new Date(h.generatedAt).toLocaleTimeString()}.`
+    ? `Auto items are created by a health check and close themselves when the signal clears `
+      + `(${ch.created} new, ${ch.resolved} cleared, ${ch.reopened} recurred this sync). `
+      + `Items you add by hand are never closed automatically. Checked ${new Date(data.health.generatedAt).toLocaleTimeString()}.`
     : '';
 }
 
 // ---------------------------------------------------------------------------
-// Health
+// Filters — the counts ARE the control
 // ---------------------------------------------------------------------------
 
-function renderHealth(h) {
-  if (!h.signals.length) {
-    return mount($('tm-health'), el('div', { class: 'tm-clear' },
-      'No health signal is firing. Every check passed its threshold — that is a real result, not a missing panel.'));
+function renderFilters(items) {
+  const open = items.filter((t) => t.status !== 'done' && t.status !== 'resolved');
+  const defs = [
+    { key: 'all', label: 'All', n: open.length },
+    { key: 'mine', label: 'Mine', n: open.filter((t) => t.owner === me).length },
+    { key: 'escalated', label: 'Escalated', n: open.filter((t) => t.escalated).length },
+    { key: 'critical', label: 'Critical', n: open.filter((t) => t.severity === 'critical').length },
+    { key: 'high', label: 'High', n: open.filter((t) => t.severity === 'high').length },
+    { key: 'medium', label: 'Medium', n: open.filter((t) => t.severity === 'medium').length },
+    { key: 'closed', label: 'Closed', n: null },
+  ];
+
+  mount($('tm-filters'), ...defs.map((d) => {
+    const on = view === d.key;
+    const b = el('button', {
+      class: `tm-filter${on ? ' is-on' : ''}${d.key !== 'all' && d.key !== 'closed' && !d.n ? ' is-empty' : ''}`,
+      type: 'button', 'aria-pressed': on ? 'true' : 'false',
+    }, d.label, d.n === null ? null : el('span', { class: 'tm-filter__n' }, String(d.n)));
+    b.addEventListener('click', () => {
+      const wasClosed = view === 'closed';
+      view = d.key;
+      // Closed items are not fetched by default, so switching in or out of that
+      // view needs a round trip; every other filter is in memory and instant.
+      if (wasClosed || d.key === 'closed') load({});
+      else render();
+    });
+    return b;
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// The work, grouped by owner
+// ---------------------------------------------------------------------------
+
+function renderOwners(items) {
+  if (!items.length) {
+    return mount($('tm-owners'), el('div', { class: 'tm-blank' },
+      view === 'all'
+        ? 'No open work. Every health check is under its threshold.'
+        : 'Nothing matches this filter.'));
   }
-  const tiles = SEV_ORDER.map((sev) => {
-    const n = h.counts[sev] || 0;
-    return el('div', { class: `tm-tile tm-tile--${sev}${n ? '' : ' is-zero'}` },
-      el('div', { class: 'tm-tile__n' }, String(n)),
-      el('div', { class: 'tm-tile__l' }, sev));
-  });
-  mount($('tm-health'),
-    el('div', { class: 'tm-tiles' }, ...tiles,
-      el('div', { class: 'tm-tile tm-tile--esc' },
-        el('div', { class: 'tm-tile__n' }, String(h.counts.escalated || 0)),
-        el('div', { class: 'tm-tile__l' }, 'escalated'))),
-    el('div', { class: 'tm-signals' }, ...h.signals.map(signalRow)));
-}
 
-function signalRow(s) {
-  return el('div', { class: `tm-sig tm-sig--${s.severity}` },
-    el('div', { class: 'tm-sig__head' },
-      el('span', { class: `tm-sev tm-sev--${s.severity}` }, s.severity),
-      el('span', { class: 'tm-sig__title' }, s.title),
-      s.escalated ? el('span', { class: 'tm-esc-chip' }, 'escalated') : null,
-      el('span', { class: 'tm-sig__owner' }, `→ ${s.owner}`)),
-    el('div', { class: 'tm-sig__detail' }, s.detail),
-    // The threshold is shown next to the value so the signal can be argued with
-    // rather than just obeyed.
-    s.metric
-      ? el('div', { class: 'tm-sig__metric' },
-        `${int(s.metric.value)}${s.metric.unit === '%' ? '%' : ` ${s.metric.unit}`}`,
-        el('span', { class: 'dim' }, ` · fires above ${int(s.metric.threshold)}${s.metric.unit === '%' ? '%' : ''} · domain ${s.domain}`))
-      : null);
-}
-
-// ---------------------------------------------------------------------------
-// Todos
-// ---------------------------------------------------------------------------
-
-function renderEscalated() {
-  const host = $('tm-esc');
-  if (!data.escalated.length) {
-    return mount(host, el('p', { class: 'tm-empty' }, 'Nothing escalated. Owners are handling their domains.'));
+  const byOwner = new Map();
+  for (const t of items) {
+    if (!byOwner.has(t.owner)) byOwner.set(t.owner, []);
+    byOwner.get(t.owner).push(t);
   }
-  mount(host, ...data.escalated.map((t) => todoCard(t, { showOwner: true })));
+
+  // Team order, so the page does not reshuffle as items move between people.
+  // Owners with nothing in the current filter are dropped rather than shown as
+  // empty cards — five ragged columns of "Nothing outstanding" was most of what
+  // made the old page hard to read.
+  mount($('tm-owners'), ...data.people
+    .filter((p) => byOwner.has(p.username))
+    .map((p) => ownerSection(p, sortWork(byOwner.get(p.username)))));
 }
 
-function renderPeople() {
-  mount($('tm-people'), ...data.people.map((p) => el('section', { class: `tm-person${p.username === me ? ' is-me' : ''}` },
-    el('header', { class: 'tm-person__head' },
+const sortWork = (list) => list.sort((a, b) =>
+  (SEV_RANK[a.severity] ?? 3) - (SEV_RANK[b.severity] ?? 3)
+  || String(a.createdAt).localeCompare(String(b.createdAt)));
+
+function ownerSection(p, todos) {
+  return el('section', { class: `tm-owner${p.username === me ? ' is-me' : ''}` },
+    el('header', { class: 'tm-owner__head' },
       avatar(p.username),
-      el('div', {},
-        el('div', { class: 'tm-person__name' }, p.name,
-          p.username === me ? el('span', { class: 'tm-you' }, 'you') : null),
-        el('div', { class: 'tm-person__remit' }, p.remit)),
-      el('div', { class: 'tm-person__n' }, p.live ? `${p.live} open` : el('span', { class: 'dim' }, 'clear'))),
-    el('p', { class: 'tm-person__blurb' }, p.blurb),
-    p.todos.length
-      ? el('div', { class: 'tm-list' }, ...p.todos.map((t) => todoCard(t, {})))
-      : el('p', { class: 'tm-empty' }, p.username === 'pavit'
-        ? 'Nothing routed here. Escalations appear above — the owner keeps the work.'
-        : 'Nothing outstanding.'))));
+      el('div', { class: 'tm-owner__id' },
+        el('h2', { class: 'tm-owner__name' }, p.name,
+          p.username === me ? el('span', { class: 'tm-you' }, 'You') : null),
+        el('p', { class: 'tm-owner__remit' }, p.blurb)),
+      el('span', { class: 'tm-owner__n' }, `${todos.length} open`)),
+    el('div', { class: 'tm-work' }, ...todos.map(card)));
 }
 
-function todoCard(t, { showOwner }) {
+function card(t) {
   const closed = t.status === 'done' || t.status === 'resolved';
-  const card = el('article', { class: `tm-todo tm-todo--${t.severity}${closed ? ' is-closed' : ''}` },
-    el('div', { class: 'tm-todo__head' },
+  return el('article', { class: `tm-card tm-card--${t.severity}${closed ? ' is-closed' : ''}` },
+    el('div', { class: 'tm-card__top' },
       el('span', { class: `tm-sev tm-sev--${t.severity}` }, t.severity),
-      el('span', { class: 'tm-todo__title' }, t.title),
-      showOwner ? el('span', { class: 'tm-sig__owner' }, `→ ${t.owner}`) : null),
-    t.detail ? el('p', { class: 'tm-todo__detail' }, t.detail) : null,
-    el('div', { class: 'tm-todo__meta' },
-      el('span', { class: `tm-src tm-src--${t.source}` }, t.source),
-      t.status !== 'open' ? el('span', { class: 'tm-status' }, statusLabel(t)) : null,
-      // A signal that came back is a different problem from one that never left.
-      t.recurrences ? el('span', { class: 'tm-recur' }, `recurred ${t.recurrences}×`) : null,
-      t.link ? el('a', { class: 'tm-link', href: (window.__base__ || '') + t.link }, 'evidence') : null));
+      el('h3', { class: 'tm-card__title' }, t.title),
+      t.escalated ? el('span', { class: 'tm-tag tm-tag--esc' }, 'Escalated') : null,
+      t.source === 'manual' ? el('span', { class: 'tm-tag' }, 'Added by hand') : null),
 
-  if (!closed) card.append(actions(t));
-  return card;
+    t.detail ? el('p', { class: 'tm-card__detail' }, t.detail) : null,
+
+    // The number and the threshold it crossed, so the item can be argued with
+    // rather than only obeyed.
+    t.metric
+      ? el('p', { class: 'tm-card__metric' },
+        el('b', {}, `${int(t.metric.value)}${t.metric.unit === '%' ? '%' : ` ${t.metric.unit}`}`),
+        ` · flags above ${int(t.metric.threshold)}${t.metric.unit === '%' ? '%' : ''}`,
+        t.domain ? ` · ${t.domain.replace(/_/g, ' ')}` : '')
+      : null,
+
+    el('div', { class: 'tm-card__foot' },
+      t.status !== 'open' && !closed ? el('span', { class: 'tm-state' }, stateLabel(t)) : null,
+      closed ? el('span', { class: 'tm-state' }, stateLabel(t)) : null,
+      t.recurrences ? el('span', { class: 'tm-state tm-state--warn' }, `Came back ${t.recurrences}×`) : null,
+      t.link ? el('a', { class: 'tm-evidence', href: (window.__base__ || '') + t.link }, 'Evidence') : null,
+      closed ? null : actions(t)));
 }
 
-function statusLabel(t) {
-  if (t.status === 'claimed') return `claimed by ${t.claimedBy || '?'}`;
-  if (t.status === 'snoozed') return `snoozed to ${String(t.snoozeUntil || '').slice(0, 10)}`;
-  if (t.status === 'done') return `done by ${t.doneBy || '?'}`;
-  if (t.status === 'resolved') return 'closed — signal cleared';
-  return t.status;
+function stateLabel(t) {
+  if (t.status === 'claimed') return `Claimed by ${t.claimedBy || 'someone'}`;
+  if (t.status === 'snoozed') return `Snoozed until ${String(t.snoozeUntil || '').slice(0, 10)}`;
+  if (t.status === 'done') return `Done by ${t.doneBy || 'someone'}`;
+  if (t.status === 'resolved') return 'Closed — the signal cleared';
+  return '';
 }
 
 function actions(t) {
-  const row = el('div', { class: 'tm-todo__actions' });
+  const row = el('div', { class: 'tm-card__actions' });
+  const patch = (body) => api(`/team/todos/${t.id}`, { method: 'PATCH', body });
   const btn = (label, fn, cls = '') => {
     const b = el('button', { class: `btn btn--ghost tm-btn ${cls}`, type: 'button' }, label);
     b.addEventListener('click', async () => {
@@ -192,50 +211,51 @@ function actions(t) {
     });
     return b;
   };
-  const patch = (body) => api(`/team/todos/${t.id}`, { method: 'PATCH', body });
 
-  if (t.status !== 'claimed') row.append(btn('claim', () => patch({ status: 'claimed' })));
-  if (t.status === 'claimed') row.append(btn('release', () => patch({ status: 'open' })));
-  row.append(btn('done', () => patch({ status: 'done' })));
-  if (t.status !== 'snoozed') row.append(btn('snooze 7d', () => patch({ status: 'snoozed', snoozeDays: 7 })));
+  row.append(t.status === 'claimed'
+    ? btn('Release', () => patch({ status: 'open' }))
+    : btn('Claim', () => patch({ status: 'claimed' })));
+  row.append(btn('Done', () => patch({ status: 'done' })));
+  if (t.status !== 'snoozed') row.append(btn('Snooze 7d', () => patch({ status: 'snoozed', snoozeDays: 7 })));
 
-  // Reassignment is one select rather than four buttons: the list is short but
-  // it is the action most likely to be wrong, so it should take a deliberate act.
-  const sel = el('select', { class: 'select tm-reassign' },
-    el('option', { value: '' }, 'reassign…'),
-    ...data.people.map((p) => el('option', { value: p.username, ...(p.username === t.owner ? { disabled: true } : {}) }, p.name)));
+  // A select rather than four buttons: reassignment is the action most likely to
+  // be wrong, so it should take a deliberate act.
+  const sel = el('select', { class: 'select tm-reassign', 'aria-label': 'Reassign to' },
+    el('option', { value: '' }, 'Reassign…'),
+    ...data.people.map((p) => el('option', {
+      value: p.username, ...(p.username === t.owner ? { disabled: true } : {}),
+    }, p.name)));
   sel.addEventListener('change', async () => {
     if (!sel.value) return;
     try { await patch({ owner: sel.value }); await load({}); } catch (e) { alert(e.message); }
   });
   row.append(sel);
 
-  if (t.source === 'manual') row.append(btn('delete', () => api(`/team/todos/${t.id}`, { method: 'DELETE' }), 'tm-btn--danger'));
+  if (t.source === 'manual') row.append(btn('Delete', () => api(`/team/todos/${t.id}`, { method: 'DELETE' }), 'tm-btn--danger'));
   return row;
 }
 
 // ---------------------------------------------------------------------------
-// Manual todo
+// Add
 // ---------------------------------------------------------------------------
 
 function openAddForm() {
-  const host = $('tm-health');
-  if (document.getElementById('tm-form')) return;
+  if ($('tm-form')) return $('tm-form').querySelector('input').focus();
 
-  const owner = el('select', { class: 'select' },
-    ...data.people.map((p) => el('option', { value: p.username, ...(p.username === me ? { selected: true } : {}) }, p.name)));
-  const sev = el('select', { class: 'select' },
-    ...['high', 'medium', 'critical'].map((s) => el('option', { value: s }, s)));
   const title = el('input', { class: 'input', placeholder: 'What needs doing', maxlength: '200' });
   const detail = el('input', { class: 'input', placeholder: 'Detail (optional)', maxlength: '1000' });
+  const owner = el('select', { class: 'select', 'aria-label': 'Owner' },
+    ...data.people.map((p) => el('option', { value: p.username, ...(p.username === me ? { selected: true } : {}) }, p.name)));
+  const sev = el('select', { class: 'select', 'aria-label': 'Severity' },
+    ...['high', 'medium', 'critical'].map((s) => el('option', { value: s }, s[0].toUpperCase() + s.slice(1))));
 
   const form = el('div', { class: 'tm-form', id: 'tm-form' },
     el('div', { class: 'tm-form__row' }, title, owner, sev),
     el('div', { class: 'tm-form__row' }, detail),
     el('div', { class: 'tm-form__row tm-form__row--end' },
-      el('button', { class: 'btn btn--ghost', type: 'button', onclick: () => form.remove() }, 'cancel'),
+      el('button', { class: 'btn btn--ghost', type: 'button', onclick: () => form.remove() }, 'Cancel'),
       el('button', {
-        class: 'btn', type: 'button',
+        class: 'btn btn--primary', type: 'button',
         onclick: async () => {
           if (!title.value.trim()) return title.focus();
           try {
@@ -247,12 +267,17 @@ function openAddForm() {
             await load({});
           } catch (e) { alert(e.message); }
         },
-      }, 'add')));
+      }, 'Add todo')));
 
-  host.prepend(form);
+  mount($('tm-form-host'), form);
   title.focus();
 }
 
+// Matched to the real layout so the page does not jump when data lands.
+function showSkeleton() {
+  $('tm-sub').textContent = 'Checking project health…';
+  mount($('tm-filters'), ...Array.from({ length: 5 }, () => el('div', { class: 'tm-filter tm-skel' })));
+  mount($('tm-owners'), ...Array.from({ length: 3 }, () => el('section', { class: 'tm-owner tm-skel tm-skel--card' })));
+}
 
-// Acey is available from every page, not just inside a task.
 mountAcey({ page: 'team' });

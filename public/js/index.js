@@ -80,16 +80,16 @@ async function applyLaneChange(t, target, x, y) {
   let verdict = null, claim = null;
   if (target === 'SECOND_OPINION') verdict = 'SECOND_OPINION';
   else if (target === 'RESOLVED') { verdict = await pickResolution(x, y); if (!verdict) return; }
-  else if (target === 'REVIEW') { verdict = null; claim = 'claim'; }
-  else if (target === 'OPEN') { verdict = null; claim = t.claimedBy ? 'release' : null; }
+  else if (target === 'REVIEW') { verdict = null; claim = 'Claim'; }
+  else if (target === 'OPEN') { verdict = null; claim = t.claimedBy ? 'Release' : null; }
 
   // Optimistically update the card in place + render once — no full refetch, no flash/jump.
   // The server derives the same state from the target lane; this is just the preview.
   const orig = (currentWs[bucket] || []).find((x2) => x2.id === id);
   if (orig) {
     orig.verdict = verdict;
-    if (claim === 'claim') orig.claimedBy = me?.username || orig.claimedBy;
-    if (claim === 'release') orig.claimedBy = null;
+    if (claim === 'Claim') orig.claimedBy = me?.username || orig.claimedBy;
+    if (claim === 'Release') orig.claimedBy = null;
     if (target === 'GRAMMAR') { orig.grammarLane = 'in'; orig.inGrammarLane = true; }
     else if (from === 'GRAMMAR') { orig.grammarLane = orig.grammarOnly ? 'out' : null; orig.inGrammarLane = false; }
   }
@@ -431,7 +431,7 @@ function setDrawerTab(tab) {
     p.hidden = p.dataset.panel !== tab;
   }
   if (tab === 'history') refreshActions();
-  if (tab === 'export') renderExportIds();
+  if (tab === 'Export') renderExportIds();
 }
 
 function setDrawerOpen(open) {
