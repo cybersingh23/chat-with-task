@@ -196,9 +196,8 @@ const trajMeta = { model_a: null, model_b: null };
 function renderTabs() {
   const bar = document.getElementById('tabs');
   const menu = document.getElementById('files-menu');
-  // replaceChildren() below wipes the bar, so the two persistent controls have
-  // to be re-appended, not just left in the markup.
-  const aceyBtn = document.getElementById('show-acey');
+  // replaceChildren() below wipes the bar, so the persistent Files menu has to
+  // be re-appended, not just left in the markup.
   const nodes = TABS.map((t) => {
     const badge = tabBadge(t.key);
     return el('button', {
@@ -207,7 +206,7 @@ function renderTabs() {
       onclick: () => openTab(t.key),
     }, t.label, badge ? el('span', { class: 'badge' }, badge) : null);
   });
-  bar.replaceChildren(...nodes, el('div', { class: 'spacer' }), aceyBtn, menu);
+  bar.replaceChildren(...nodes, el('div', { class: 'spacer' }), menu);
 }
 
 async function buildSidebar() {
@@ -2219,30 +2218,29 @@ window.addEventListener('beforeunload', () => {
 });
 
 // Acey is a fixed 348px column, but it still collapses — reviewers wanted the
-// full width back for reading trajectories. The launcher is the same "Ask
-// Acey" pill every other page carries in its header (renderTabs slots it into
-// the tab bar), it stays visible in both states, and ⌘K/Ctrl+K toggles it —
-// one launcher, one place, one shortcut, everywhere. Choice persists per
-// browser.
+// full width back for reading trajectories. Collapsed, it becomes the same
+// round mascot every page keeps fixed bottom-right (one access point, one
+// corner, everywhere — user decision 2026-08-08), and ⌘K/Ctrl+K toggles it,
+// same as everywhere else. The launcher hides while the panel is open, since
+// the panel's own ✕ lives in its header. Choice persists per browser.
 const workspaceEl = document.querySelector('.workspace');
 const showAceyBtn = document.getElementById('show-acey');
 
 function setChatCollapsed(collapsed) {
   workspaceEl.classList.toggle('acey-collapsed', collapsed);
-  showAceyBtn.classList.toggle('is-open', !collapsed);
+  showAceyBtn.hidden = !collapsed;
   try { localStorage.setItem('cwt_chat_collapsed', collapsed ? '1' : ''); } catch { /* private mode */ }
 }
 // Kept as a name the tour and suggestion chips already call.
 function openCopilotWithFlair() { setChatCollapsed(false); }
 
 document.getElementById('collapse-chat').addEventListener('click', () => setChatCollapsed(true));
-showAceyBtn.addEventListener('click', () => setChatCollapsed(!workspaceEl.classList.contains('acey-collapsed')));
+showAceyBtn.addEventListener('click', () => setChatCollapsed(false));
 setChatCollapsed(!!localStorage.getItem('cwt_chat_collapsed'));
 
 // The shortcut the rest of the app already answers to. Esc is not claimed —
 // the task page's dialogs and the guide player already own it.
 if (!/Mac|iP(hone|ad|od)/.test(navigator.platform || '')) {
-  showAceyBtn.querySelector('kbd').textContent = 'Ctrl K';
   showAceyBtn.title = 'Ask Acey (Ctrl+K)';
 }
 document.addEventListener('keydown', (e) => {

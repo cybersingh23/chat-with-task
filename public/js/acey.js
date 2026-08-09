@@ -7,8 +7,9 @@ import { renderMarkdown } from './md.js';
 // a popover. It reuses that panel's markup and classes wholesale — .acey,
 // .acey__head, .acey__body, .acey__status, .acey__composer, .acey__intro,
 // .acey__suggest, .chat-msg, .bubble, .msg-who — and the launcher is the
-// existing .acey-fab mascot. Only the shell is new (.acey--pop), plus the SQL
-// disclosure, which the task copilot has no equivalent of.
+// .acey-fab mascot, fixed bottom-right on EVERY page, task page included. Only
+// the shell is new (.acey--pop), plus the SQL disclosure, which the task
+// copilot has no equivalent of.
 //
 // The first version invented a parallel design: its own pill launcher with a
 // blue "A" monogram, its own message blocks, its own composer. It also named its
@@ -32,23 +33,16 @@ export function mountAcey({ page } = {}) {
   const text = el('textarea', { placeholder: 'Ask about the pipeline, quality, cost, people…' });
   const sendBtn = el('button', { class: 'btn btn--primary', type: 'button' }, 'Send');
 
+  // The launcher is the round mascot, fixed bottom-right — the SAME access
+  // point on every page, task page included (user decision 2026-08-08, after a
+  // one-day experiment with a header pill proved the two-places version
+  // confusing). It hides while the panel is open, because the panel occupies
+  // its corner; ⌘K/Ctrl+K and the panel's ✕ are the other half of the toggle.
+  const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform || '');
   const fab = el('button', {
     class: 'acey-fab', id: 'acey-fab', type: 'button',
-    title: 'Ask Acey', 'aria-label': 'Ask Acey',
-  }, el('img', { src: MASCOT, alt: '' }));
-
-  // The primary launcher lives in the APP HEADER, next to the theme toggle —
-  // always visible, top of the visual hierarchy. It used to exist only as the
-  // corner mascot, which sat below every other thing on the page and read as an
-  // afterthought rather than a first-class surface. The corner FAB survives
-  // purely as a fallback for a page without the shared header.
-  const isMac = /Mac|iP(hone|ad|od)/.test(navigator.platform || '');
-  const launcher = el('button', {
-    class: 'acey-launch', id: 'acey-launch', type: 'button',
     title: `Ask Acey (${isMac ? '\u2318' : 'Ctrl+'}K)`, 'aria-label': 'Ask Acey',
-  }, el('img', { src: MASCOT, alt: '' }), el('span', {}, 'Ask Acey'),
-    el('kbd', {}, `${isMac ? '\u2318' : 'Ctrl '}K`));
-  let headerMode = false;
+  }, el('img', { src: MASCOT, alt: '' }));
 
   const panel = el('aside', { class: 'acey acey--pop', id: 'acey-pop', hidden: true },
     el('div', { class: 'acey__head' },
@@ -73,28 +67,6 @@ export function mountAcey({ page } = {}) {
   let busy = false;
 
   fab.addEventListener('click', () => toggle(true));
-  launcher.addEventListener('click', () => toggle(panel.hidden));
-
-  // renderAppHeader() replaces the header's children AFTER this module runs and
-  // after its own /me round trip, so a one-shot insert would be wiped. Poll
-  // until the theme toggle exists, slot in beside it, stop.
-  (function placeLauncher() {
-    const tryPlace = () => {
-      const host = document.getElementById('app-header');
-      const themeBtn = host?.querySelector('[data-theme-toggle]');
-      if (!themeBtn) return false;
-      if (!host.contains(launcher)) host.insertBefore(launcher, themeBtn);
-      headerMode = true;
-      fab.hidden = true;
-      // Opened from the top, the panel hangs from the header as a right-hand
-      // drawer instead of floating up from the corner it was not launched from.
-      panel.classList.add('acey--drawer');
-      return true;
-    };
-    if (tryPlace()) return;
-    const timer = setInterval(() => { if (tryPlace()) clearInterval(timer); }, 150);
-    setTimeout(() => clearInterval(timer), 10_000);
-  })();
   sendBtn.addEventListener('click', () => send());
   text.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -117,8 +89,7 @@ export function mountAcey({ page } = {}) {
 
   function toggle(open) {
     panel.hidden = !open;
-    fab.hidden = open || headerMode;
-    launcher.classList.toggle('is-open', open);
+    fab.hidden = open;
     try { localStorage.setItem(LS_OPEN, open ? '1' : '0'); } catch { /* private mode */ }
     if (open) {
       text.focus();
