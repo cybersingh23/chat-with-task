@@ -328,6 +328,22 @@ export function renderAppHeader({ active, user, extras = [] } = {}) {
   mount(host, lockup, nav, el('div', { class: 'spacer' }), ...extras, themeBtn, userBlock);
 }
 
+// Land a deep link on its exact element: scroll it to center, flash it once,
+// consume the hash so a manual reload does not replay the flash. No-ops —
+// and keeps the hash for a later call — while the target is missing or still
+// hidden, so pages with async panels can call this again as sections arrive.
+export function flashHash() {
+  const id = (location.hash || '').slice(1);
+  if (!id || !/^[A-Za-z][\w-]*$/.test(id)) return false;
+  const target = document.getElementById(id);
+  if (!target || !target.getClientRects().length) return false;
+  target.scrollIntoView({ block: 'center' });
+  target.classList.add('hash-flash');
+  setTimeout(() => target.classList.remove('hash-flash'), 2200);
+  history.replaceState(null, '', location.pathname + location.search);
+  return true;
+}
+
 export function fmtTime(ms) {
   return ms ? new Date(ms).toISOString().replace('T', ' ').slice(0, 19) + 'Z' : '';
 }

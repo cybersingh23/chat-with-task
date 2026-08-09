@@ -99,6 +99,10 @@ export function mountAcey({ page } = {}) {
 
   async function restore() {
     const h = await api('/acey/history').catch(() => ({ messages: [] }));
+    // A question can arrive while this fetch is in flight — ask() injects and
+    // sends immediately on open. A live conversation always beats the replay:
+    // wiping it with the empty state was a race that ate the injected turn.
+    if (body.querySelector('.chat-msg')) return;
     if (!h.messages?.length) return showEmpty();
     body.classList.remove('is-empty');
     mount(body);
@@ -361,4 +365,16 @@ export function mountAcey({ page } = {}) {
   }
 
   try { if (localStorage.getItem(LS_OPEN) === '1') toggle(true); } catch { /* private mode */ }
+
+  // Other surfaces hand Acey a question: the Team board's "Ask Acey" evidence
+  // fallback opens the panel and sends it, so the answer arrives already in
+  // conversation instead of the user re-typing the card into the composer.
+  const ask = (q) => {
+    toggle(true);
+    text.value = String(q || '');
+    grow();
+    send();
+  };
+  window.__acey = { ask, open: () => toggle(true) };
+  return window.__acey;
 }

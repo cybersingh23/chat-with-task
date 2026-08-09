@@ -34,6 +34,7 @@ async function init() {
   renderAppHeader({ active: 'team', user });
 
   $('tm-refresh').addEventListener('click', () => load({ fresh: true }));
+  $('tm-export').addEventListener('click', exportItems);
 
   await load({});
 }
@@ -92,32 +93,49 @@ function render() {
 
 function renderFilters(items) {
   const open = items.filter((t) => t.status !== 'done' && t.status !== 'resolved');
-  const defs = [
-    { key: 'all', label: 'All', n: open.length },
-    { key: 'mine', label: 'Mine', n: open.filter((t) => t.owner === me).length },
-    { key: 'escalated', label: 'Escalated', n: open.filter((t) => t.escalated).length },
-    { key: 'critical', label: 'Critical', n: open.filter((t) => t.severity === 'critical').length },
-    { key: 'high', label: 'High', n: open.filter((t) => t.severity === 'high').length },
-    { key: 'medium', label: 'Medium', n: open.filter((t) => t.severity === 'medium').length },
-    { key: 'closed', label: 'Closed', n: null },
-  ];
+  const count = (pred) => open.filter(pred).length;
 
-  mount($('tm-filters'), ...defs.map((d) => {
+  // Seven chips was a control per concept; the shape that matters day-to-day is
+  // three questions (everything / mine / escalated) plus an occasional slice,
+  // so the slices live in one dropdown instead of four more buttons.
+  const chips = [
+    { key: 'all', label: 'All', n: open.length },
+    { key: 'mine', label: 'Mine', n: count((t) => t.owner === me) },
+    { key: 'escalated', label: 'Escalated', n: count((t) => t.escalated) },
+  ].map((d) => {
     const on = view === d.key;
     const b = el('button', {
-      class: `tm-filter${on ? ' is-on' : ''}${d.key !== 'all' && d.key !== 'closed' && !d.n ? ' is-empty' : ''}`,
+      class: `tm-filter${on ? ' is-on' : ''}${d.key !== 'all' && !d.n ? ' is-empty' : ''}`,
       type: 'button', 'aria-pressed': on ? 'true' : 'false',
-    }, d.label, d.n === null ? null : el('span', { class: 'tm-filter__n' }, String(d.n)));
-    b.addEventListener('click', () => {
-      const wasClosed = view === 'closed';
-      view = d.key;
-      // Closed items are not fetched by default, so switching in or out of that
-      // view needs a round trip; every other filter is in memory and instant.
-      if (wasClosed || d.key === 'closed') load({});
-      else render();
-    });
+    }, d.label, el('span', { class: 'tm-filter__n' }, String(d.n)));
+    b.addEventListener('click', () => setView(d.key));
     return b;
-  }));
+  });
+
+  const MORE = [
+    ['critical', `Critical · ${count((t) => t.severity === 'critical')}`],
+    ['high', `High · ${count((t) => t.severity === 'high')}`],
+    ['medium', `Medium · ${count((t) => t.severity === 'medium')}`],
+    ['closed', 'Closed'],
+  ];
+  const inMore = MORE.some(([k]) => k === view);
+  const more = el('select', {
+    class: `tm-filter tm-filter--sel${inMore ? ' is-on' : ''}`, 'aria-label': 'More filters',
+  },
+    el('option', { value: '' }, 'More…'),
+    ...MORE.map(([k, label]) => el('option', { value: k, ...(view === k ? { selected: true } : {}) }, label)));
+  more.addEventListener('change', () => setView(more.value || 'all'));
+
+  mount($('tm-filters'), ...chips, more);
+}
+
+function setView(key) {
+  const wasClosed = view === 'closed';
+  view = key;
+  // Closed items are not fetched by default, so crossing that boundary needs a
+  // round trip; every other switch is in memory and instant.
+  if (wasClosed || key === 'closed') load({});
+  else render();
 }
 
 // ---------------------------------------------------------------------------
@@ -158,8 +176,8 @@ function flashFromHash() {
   const target = document.getElementById(m[1]);
   if (!target) return;
   target.scrollIntoView({ block: 'center' });
-  target.classList.add('flash');
-  setTimeout(() => target.classList.remove('flash'), 2200);
+  target.classList.add('hash-flash');
+  setTimeout(() => target.classList.remove('hash-flash'), 2200);
   history.replaceState(null, '', location.pathname + location.search);
 }
 
@@ -287,8 +305,41 @@ function card(t) {
       t.status !== 'open' && !closed ? el('span', { class: 'tm-state' }, stateLabel(t)) : null,
       closed ? el('span', { class: 'tm-state' }, stateLabel(t)) : null,
       t.recurrences ? el('span', { class: 'tm-state tm-state--warn' }, `Came back ${t.recurrences}×`) : null,
+      // Evidence goes to the exact chart or table that proves the number; when
+      // no anchor exists (hand-added items), Acey walks it instead.
       t.link ? el('a', { class: 'tm-evidence', href: (window.__base__ || '') + t.link }, 'Evidence') : null,
-      closed ? null : actions(t)));
+      !t.link && !closed ? (() => {
+        const b = el('button', { class: 'btn btn--ghost tm-btn', type: 'button' }, 'Ask Acey');
+        b.addEventListener('click', () => window.__acey?.ask(
+          `Walk me through the evidence behind this action item: "${t.title}"`
+          + (t.detail ? ` — context: ${t.detail.slice(0, 300)}` : '')));
+        return b;
+      })() : null,
+      closed ? null : actions(t),
+      // Deleting is destruction, so it lives at the card's corner as ✕ — with an
+      // Undo toast after, not a confirm before. Auto items are not deletable
+      // (the next health sync would just recreate them), so no ✕ there.
+      t.source === 'manual' && !closed ? (() => {
+        const x = el('button', { class: 'tm-card__x', type: 'button', title: 'Delete', 'aria-label': 'Delete' }, '✕');
+        x.addEventListener('click', async () => {
+          x.disabled = true;
+          try {
+            await api(`/team/todos/${t.id}`, { method: 'DELETE' });
+            await load({});
+            toast(`Deleted "${t.title.slice(0, 44)}${t.title.length > 44 ? '…' : ''}"`, {
+              label: 'Undo',
+              fn: async () => {
+                await api('/team/todos', {
+                  method: 'POST',
+                  body: { owner: t.owner, title: t.title, detail: t.detail, severity: t.severity },
+                });
+                await load({});
+              },
+            });
+          } catch (e) { x.disabled = false; alert(e.message); }
+        });
+        return x;
+      })() : null));
 }
 
 function stateLabel(t) {
@@ -300,37 +351,82 @@ function stateLabel(t) {
 }
 
 function actions(t) {
+  // One control where four buttons used to be: assigning IS the verb — picking
+  // yourself is what Claim was, picking someone else is what Reassign was, and
+  // Snooze earned its keep for nobody. The checkbox owns completion; ✕ owns
+  // deletion.
   const row = el('div', { class: 'tm-card__actions' });
-  const patch = (body) => api(`/team/todos/${t.id}`, { method: 'PATCH', body });
-  const btn = (label, fn, cls = '') => {
-    const b = el('button', { class: `btn btn--ghost tm-btn ${cls}`, type: 'button' }, label);
-    b.addEventListener('click', async () => {
-      b.disabled = true;
-      try { await fn(); await load({}); } catch (e) { alert(e.message); b.disabled = false; }
-    });
-    return b;
-  };
-
-  row.append(t.status === 'claimed'
-    ? btn('Release', () => patch({ status: 'open' }))
-    : btn('Claim', () => patch({ status: 'claimed' })));
-  if (t.status !== 'snoozed') row.append(btn('Snooze 7d', () => patch({ status: 'snoozed', snoozeDays: 7 })));
-
-  // A select rather than four buttons: reassignment is the action most likely to
-  // be wrong, so it should take a deliberate act.
-  const sel = el('select', { class: 'select tm-reassign', 'aria-label': 'Reassign to' },
-    el('option', { value: '' }, 'Reassign…'),
+  const sel = el('select', { class: 'select tm-reassign', 'aria-label': 'Assign to' },
+    el('option', { value: '' }, `Assign · ${firstName(t.owner)}`),
     ...data.people.map((p) => el('option', {
       value: p.username, ...(p.username === t.owner ? { disabled: true } : {}),
-    }, p.name)));
+    }, p.username === me ? `Me (${p.name.split(' ')[0]})` : p.name)));
   sel.addEventListener('change', async () => {
     if (!sel.value) return;
-    try { await patch({ owner: sel.value }); await load({}); } catch (e) { alert(e.message); }
+    try {
+      await api(`/team/todos/${t.id}`, { method: 'PATCH', body: { owner: sel.value } });
+      await load({});
+    } catch (e) { alert(e.message); }
   });
   row.append(sel);
-
-  if (t.source === 'manual') row.append(btn('Delete', () => api(`/team/todos/${t.id}`, { method: 'DELETE' }), 'tm-btn--danger'));
   return row;
+}
+
+const firstName = (username) => (data.people.find((p) => p.username === username)?.name || username).split(' ')[0];
+
+// ---------------------------------------------------------------------------
+// Export — one-liners for the running-history doc
+// ---------------------------------------------------------------------------
+
+// The SSOT gdoc keeps a running history of action items; this turns the
+// visible view into paste-ready bullets. Clipboard first; if the browser
+// refuses (permissions, plain http), a selectable box appears instead of a
+// silent failure.
+function exportItems() {
+  const items = allItems().filter(matches);
+  if (!items.length) return toast('Nothing to export in this view.');
+  const day = new Date().toISOString().slice(0, 10);
+  const text = [
+    `ACC action items — ${day}${view === 'all' ? '' : ` (${view})`}`,
+    ...items.map((t) => `• [${t.severity.toUpperCase()}] ${firstName(t.owner)} — ${t.title}`
+      + (t.status === 'done' || t.status === 'resolved' ? ' (closed)' : '')),
+  ].join('\n');
+
+  const fallback = () => showExportBox(text);
+  if (!navigator.clipboard) return fallback();
+  navigator.clipboard.writeText(text).then(
+    () => toast(`Copied ${items.length} action item${items.length === 1 ? '' : 's'} — paste into the doc.`),
+    fallback);
+}
+
+function showExportBox(text) {
+  const ta = el('textarea', { class: 'tm-export__ta', readonly: 'readonly' }, text);
+  const box = el('div', { class: 'tm-export' },
+    el('div', { class: 'tm-export__head' }, 'Select and copy',
+      el('button', { class: 'btn btn--ghost tm-btn', type: 'button', onclick: () => box.remove() }, 'Close')),
+    ta);
+  document.body.append(box);
+  ta.focus();
+  ta.select();
+}
+
+// One toast at a time, bottom-center, with an optional action — the Undo after
+// a delete lives here.
+let toastEl = null;
+function toast(message, action) {
+  toastEl?.remove();
+  const t = el('div', { class: 'tm-toast', role: 'status' }, el('span', {}, message));
+  if (action) {
+    const b = el('button', { class: 'tm-toast__act', type: 'button' }, action.label);
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      try { await action.fn(); t.remove(); } catch (e) { alert(e.message); }
+    });
+    t.append(b);
+  }
+  document.body.append(t);
+  toastEl = t;
+  setTimeout(() => { if (t.isConnected) t.remove(); }, 7000);
 }
 
 // Matched to the real layout so the page does not jump when data lands.

@@ -1,4 +1,4 @@
-import { api, el, mount, renderAppHeader, avatar } from './common.js';
+import { api, el, mount, renderAppHeader, avatar, flashHash } from './common.js';
 import { mountChart, clearChart, deliveryColumns, intakeColumns, readinessFunnel, stackedArea, hBars, legend } from './charts.js';
 import { mountAcey } from './acey.js';
 
@@ -55,6 +55,8 @@ async function init() {
   loadSummary({});
   loadInflight();
   loadBlocked();
+  // Evidence deep links from the Team board land on a chart or section id.
+  flashHash();
 }
 
 // ---------------------------------------------------------------------------

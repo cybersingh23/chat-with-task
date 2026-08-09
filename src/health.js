@@ -77,7 +77,7 @@ function checkDelivery(brief) {
       detail: `${int(p.deliverable)} deliverable at L12 (${p.progressPct}% of target). `
         + `${int(p.feeder)} at L10 and ${int(p.upstream)} further back.`,
       metric: { value: p.gapToTarget, threshold: Math.round((target * THRESHOLDS.deliveryGapPct) / 100), unit: 'tasks' },
-      link: '/overview.html',
+      link: '/overview.html#chart-deliveries',
     }));
   }
 
@@ -89,7 +89,7 @@ function checkDelivery(brief) {
       title: `${int(p.stale.count)} tasks have stopped moving`,
       detail: p.stale.byLevel.map((s) => `L${s.level}: ${s.stale} (oldest ${s.oldestDays}d)`).join(', '),
       metric: { value: p.stale.count, threshold: THRESHOLDS.staleCount, unit: 'tasks' },
-      link: '/overview.html',
+      link: '/overview.html#chart-funnel',
     }));
   }
   return out;
@@ -110,7 +110,7 @@ function checkWaste(brief) {
       detail: `Work that was paid for and thrown away, over the last ${brief.windowDays} days. `
         + `Send-back rate at this level is ${e.sbqPct == null ? 'unknown' : pct(e.sbqPct)}.`,
       metric: { value: Math.round(e.uselessPct), threshold: THRESHOLDS.wastedHoursPct, unit: '%' },
-      link: '/l12.html',
+      link: '/overview.html#chart-cost',
     }));
   }
   return out;
@@ -138,7 +138,7 @@ function checkBlocked(blocked) {
       detail: `${lane.hint.charAt(0).toUpperCase()}${lane.hint.slice(1)}. Oldest is ${lane.oldestDays}d. `
         + `${int(lane.hoursSunk)}h of work already spent on tasks that cannot move.`,
       metric: { value: old.length || lane.tasks, threshold: THRESHOLDS.blockedDays, unit: 'tasks' },
-      link: '/overview.html',
+      link: '/overview.html#ov-blocked',
     }));
   }
   return out;
@@ -183,7 +183,7 @@ function checkEvalGap(brief, board) {
         ? ` Delivery is ${brief.calendar.daysUntil} day(s) out and the target is ${int(p.gapToTarget)} short — each of these converts directly into deliverable volume now.`
         : ''),
     metric: { value: gap, threshold: THRESHOLDS.evalGap, unit: 'tasks' },
-    link: '/l12.html',
+    link: '/l12.html#rd-split',
   })];
 }
 
@@ -202,7 +202,7 @@ function checkContributors(q) {
       detail: `${int(disable.length)} attempters at "should disable", ${int(demote.length)} reviewers at "should demote". `
         + `Thresholds match the ops QC list.`,
       metric: { value: disable.length + demote.length, threshold: THRESHOLDS.disableCount, unit: 'people' },
-      link: '/l12.html',
+      link: '/l12.html#q-actions',
     }));
   }
 
@@ -216,7 +216,7 @@ function checkContributors(q) {
       detail: 'Attempters scoring 4.0+ with a poor-rate under 5%. These are the superattempter '
         + 'cohort intake — they go stale if they sit.',
       metric: { value: promote.length, threshold: 1, unit: 'people' },
-      link: '/l12.html',
+      link: '/l12.html#q-actions',
     }));
   }
 
@@ -229,7 +229,7 @@ function checkContributors(q) {
       detail: `Quality dropped ≥0.4, poor-rate climbed ≥10pp, or they fell below the trusted line, `
         + `over ${q.windowDays} days. These are what fills L1 and L8 next week.`,
       metric: { value: q.slipping.length, threshold: THRESHOLDS.slippingCount, unit: 'people' },
-      link: '/l12.html',
+      link: '/l12.html#q-slipping',
     }));
   }
 
@@ -251,7 +251,7 @@ function checkContributors(q) {
         + `${r.sbqPct}% sent back over ${r.reviews} reviews)`).join('; ')
         + (off.length > 5 ? `; +${off.length - 5} more` : ''),
       metric: { value: off.length, threshold: 1, unit: 'reviewers' },
-      link: '/l12.html',
+      link: '/l12.html#q-reviewers',
     }));
   }
   return out;
