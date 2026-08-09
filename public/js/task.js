@@ -2219,23 +2219,38 @@ window.addEventListener('beforeunload', () => {
 });
 
 // Acey is a fixed 348px column, but it still collapses — reviewers wanted the
-// full width back for reading trajectories. No floating mascot this time: the
-// panel hides and an "Acey ▸" button appears in the tab bar, which is the same
-// chrome as "Files ▾" sitting next to it. Choice persists per browser.
+// full width back for reading trajectories. The launcher is the same "Ask
+// Acey" pill every other page carries in its header (renderTabs slots it into
+// the tab bar), it stays visible in both states, and ⌘K/Ctrl+K toggles it —
+// one launcher, one place, one shortcut, everywhere. Choice persists per
+// browser.
 const workspaceEl = document.querySelector('.workspace');
 const showAceyBtn = document.getElementById('show-acey');
 
 function setChatCollapsed(collapsed) {
   workspaceEl.classList.toggle('acey-collapsed', collapsed);
-  showAceyBtn.hidden = !collapsed;
+  showAceyBtn.classList.toggle('is-open', !collapsed);
   try { localStorage.setItem('cwt_chat_collapsed', collapsed ? '1' : ''); } catch { /* private mode */ }
 }
 // Kept as a name the tour and suggestion chips already call.
 function openCopilotWithFlair() { setChatCollapsed(false); }
 
 document.getElementById('collapse-chat').addEventListener('click', () => setChatCollapsed(true));
-showAceyBtn.addEventListener('click', () => setChatCollapsed(false));
+showAceyBtn.addEventListener('click', () => setChatCollapsed(!workspaceEl.classList.contains('acey-collapsed')));
 setChatCollapsed(!!localStorage.getItem('cwt_chat_collapsed'));
+
+// The shortcut the rest of the app already answers to. Esc is not claimed —
+// the task page's dialogs and the guide player already own it.
+if (!/Mac|iP(hone|ad|od)/.test(navigator.platform || '')) {
+  showAceyBtn.querySelector('kbd').textContent = 'Ctrl K';
+  showAceyBtn.title = 'Ask Acey (Ctrl+K)';
+}
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    setChatCollapsed(!workspaceEl.classList.contains('acey-collapsed'));
+  }
+});
 
 // Drag the panel's left edge to resize. Width persists; below MIN it collapses
 // to the mascot rather than becoming a useless sliver.

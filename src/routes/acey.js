@@ -2,12 +2,12 @@ import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { runAgentLoop } from '../llm.js';
+import { runAgentLoop, chatCompletion } from '../llm.js';
 import { recordUsage } from '../usage.js';
 import { ANALYST_TOOL_DEFS, makeAnalystExecutor, SCHEMA_BRIEF, queryCatalogue } from '../analyst_tools.js';
-import { teamBrief } from '../team.js';
+import { TEAM, teamBrief, personByUsername } from '../team.js';
 import { projectHealth } from '../health.js';
-import { todoSummary } from '../todos.js';
+import { todoSummary, addTodo } from '../todos.js';
 import { listWorkspace } from '../workspace.js';
 
 // /api/acey/* — Acey outside a task.
@@ -107,6 +107,22 @@ async function buildSystem(username) {
   return parts.join('\n\n');
 }
 
+// Owner mentions in an answer — usernames, first names, full names, on word
+// boundaries (markdown emphasis around a name does not defeat \b). This only
+// ever OFFERS a button, so a contributor who happens to share a first name
+// with an owner costs one ignorable affordance, never a wrong todo.
+function detectOwners(text) {
+  const out = [];
+  for (const p of TEAM) {
+    const names = [p.username, p.name, p.name.split(' ')[0]]
+      .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    if (new RegExp(`\\b(?:${names.join('|')})\\b`, 'i').test(text || '')) {
+      out.push({ username: p.username, name: p.name.split(' ')[0] });
+    }
+  }
+  return out;
+}
+
 aceyApi.post('/chat', wrap(async (req, res) => {
   const user = req.user.username;
   const message = String(req.body?.message || '').slice(0, 50_000);
@@ -141,6 +157,12 @@ aceyApi.post('/chat', wrap(async (req, res) => {
       onUsage,
     });
     HISTORY.set(user, [...history, userMsg, ...messages].slice(-MAX_TURNS));
+    // If the answer names an owner, offer to turn it into an action item on
+    // the Team board — the model routes, the human authorizes with a click.
+    const final = [...messages].reverse()
+      .find((m) => m.role === 'assistant' && m.content && !m.tool_calls?.length);
+    const owners = detectOwners(final?.content);
+    if (owners.length) send({ type: 'actions', owners });
     send({ type: 'done' });
   } catch (e) {
     send({ type: 'error', message: e.message });
@@ -172,7 +194,9 @@ aceyApi.get('/history', (req, res) => {
     }
     // Content alongside tool_calls is the model narrating its next step, not the
     // answer. Only the message that ends the loop is the reply.
-    if (m.content && !m.tool_calls?.length) out.push({ role: 'assistant', content: m.content });
+    if (m.content && !m.tool_calls?.length) {
+      out.push({ role: 'assistant', content: m.content, owners: detectOwners(m.content) });
+    }
   }
   res.json({ messages: out });
 });
@@ -185,6 +209,54 @@ aceyApi.delete('/history', (req, res) => {
 // Starter questions, so the empty state teaches what this can do rather than
 // showing a blank box. Read from disk when present so they can be tuned without
 // a deploy, same pattern as the rubric override.
+// "Add as action item": one click turns an answer into a todo for the owner it
+// named. The human's click is the authorization; the model only DRAFTS the
+// wording, because a deterministic title ("Follow up: <question>") produces
+// junk cards on a board that now stays clean. If the draft comes back
+// unparseable, a plain fallback ships instead of an error.
+aceyApi.post('/action', wrap(async (req, res) => {
+  const person = personByUsername(String(req.body?.owner || ''));
+  if (!person) return res.status(400).json({ error: `unknown owner: ${req.body?.owner}` });
+  const question = String(req.body?.question || '').slice(0, 2000);
+  const answer = String(req.body?.answer || '').slice(0, 6000);
+  if (!answer) return res.status(400).json({ error: 'answer required' });
+
+  const acc = { prompt_tokens: 0, completion_tokens: 0 };
+  let draft = null;
+  try {
+    const msg = await chatCompletion({
+      messages: [
+        {
+          role: 'system',
+          content: 'You turn an analyst\'s answer into ONE action item for a named owner. Reply with JSON '
+            + 'only, no code fences: {"title":"...","detail":"...","severity":"high"|"medium"}. The title is '
+            + 'imperative, at most 90 characters, and carries the key figure when there is one ("Coach the 5 '
+            + 'reviewers grading off the standard"). The detail is one or two plain sentences with the '
+            + 'supporting numbers from the answer — no markdown. severity is "high" only when the answer shows '
+            + 'money, quality or a delivery actively at risk; otherwise "medium".',
+        },
+        { role: 'user', content: `Owner: ${person.name} — ${person.remit}
+Question asked: ${question}
+Answer:
+${answer}` },
+      ],
+      maxTokens: 300,
+      onUsage: (u) => { acc.prompt_tokens += u.prompt_tokens || 0; acc.completion_tokens += u.completion_tokens || 0; },
+    });
+    draft = JSON.parse(String(msg.content || '').replace(/^```(?:json)?\s*|\s*```$/g, ''));
+  } catch { /* fall back to the deterministic wording below */ }
+
+  const todo = addTodo({
+    owner: person.username,
+    title: String(draft?.title || `Follow up: ${question || answer}`).slice(0, 140),
+    detail: `${String(draft?.detail || answer.slice(0, 300)).slice(0, 600)} — drafted by Acey from a question ${req.user.username} asked.`,
+    severity: ['high', 'medium'].includes(draft?.severity) ? draft.severity : 'medium',
+    by: req.user.username,
+  });
+  recordUsage({ user: req.user.username, taskId: null, kind: 'acey', model: config.litellm.model, usage: acc, text: `action for ${person.username}` });
+  res.json({ todo });
+}));
+
 aceyApi.get('/suggestions', (req, res) => {
   const custom = path.join(config.dataDir, 'acey_suggestions.json');
   try {

@@ -132,9 +132,13 @@ export function mountAcey({ page } = {}) {
     body.classList.remove('is-empty');
     mount(body);
     // Queries replay in place, so reopening keeps the evidence beside the answer
-    // it produced rather than leaving a bare number behind.
+    // it produced rather than leaving a bare number behind. Action offers replay
+    // too — the owner detection runs server-side on the stored transcript.
+    let lastQ = '';
     for (const m of h.messages) {
+      if (m.role === 'user') lastQ = m.content;
       body.append(m.role === 'sql' ? sqlBlock(m) : turn(m.role, m.content));
+      if (m.role === 'assistant' && m.owners?.length) body.append(actionRow(m.owners, lastQ, m.content));
     }
     scroll();
   }
@@ -189,6 +193,7 @@ export function mountAcey({ page } = {}) {
     scroll();
 
     let answer = null;
+    let owners = [];
     try {
       await stream(q, (e) => {
         if (e.type === 'tool') {
@@ -200,6 +205,8 @@ export function mountAcey({ page } = {}) {
           answer = e.content;
         } else if (e.type === 'assistant') {
           setStatus(e.content.replace(/\s+/g, ' ').slice(0, 64));
+        } else if (e.type === 'actions') {
+          owners = e.owners || [];
         } else if (e.type === 'truncated') {
           answer = `${answer || ''}\n\n_Stopped at the step limit — ask again to continue._`;
         } else if (e.type === 'error') {
@@ -213,6 +220,7 @@ export function mountAcey({ page } = {}) {
 
     setStatus('');
     body.append(turn('assistant', answer || 'No answer came back.'));
+    if (answer && owners.length) body.append(actionRow(owners, q, answer));
     scroll();
     busy = false;
     sendBtn.disabled = false;
@@ -224,6 +232,36 @@ export function mountAcey({ page } = {}) {
     read_query: 'reading an existing query',
     redash_query: 'running a saved query',
   };
+
+  // The answer named an owner, so offer to put it on their queue. The click is
+  // the authorization; the server drafts the wording and creates the todo.
+  function actionRow(owners, question, answer) {
+    const row = el('div', { class: 'acey__actions' });
+    for (const o of owners) {
+      const btn = el('button', { class: 'btn btn--ghost', type: 'button' },
+        `Add as action item · ${o.name}`);
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = 'Drafting…';
+        try {
+          const { todo } = await api('/acey/action', {
+            method: 'POST',
+            body: { owner: o.username, question, answer },
+          });
+          btn.replaceWith(el('span', { class: 'acey__action-done' },
+            `✓ Added for ${o.name}: `,
+            el('a', { href: `${window.__base__ || ''}/team.html`, title: todo.title }, todo.title.slice(0, 60)),
+          ));
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = `Add as action item · ${o.name}`;
+          alert(err.message);
+        }
+      });
+      row.append(btn);
+    }
+    return row;
+  }
 
   function sqlBlock(e) {
     const copy = el('button', { class: 'acey__sql-copy', type: 'button' }, 'Copy');
