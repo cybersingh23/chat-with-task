@@ -284,6 +284,11 @@ export function mountAcey({ page } = {}) {
             method: 'POST',
             body: { owner: owner.value, title: title.value, detail: detail.value, severity: sev.value },
           });
+          // The Team page (or Overview) may be sitting right behind this panel
+          // showing the board from before the write — tell it to catch up. The
+          // confirmation reading "Added" while the list beside it lacked the
+          // item was this exact gap.
+          document.dispatchEvent(new CustomEvent('acey:todos-changed'));
           success(todo, owner.selectedOptions[0].textContent.split(' ')[0]);
         } catch (e) {
           add.disabled = false;
@@ -311,8 +316,11 @@ export function mountAcey({ page } = {}) {
       const undo = el('button', { class: 'acey-linkbtn', type: 'button' }, 'Undo');
       undo.addEventListener('click', async () => {
         undo.disabled = true;
-        try { await api(`/team/todos/${todo.id}`, { method: 'DELETE' }); offers(); }
-        catch (e) { undo.disabled = false; alert(e.message); }
+        try {
+          await api(`/team/todos/${todo.id}`, { method: 'DELETE' });
+          document.dispatchEvent(new CustomEvent('acey:todos-changed'));
+          offers();
+        } catch (e) { undo.disabled = false; alert(e.message); }
       });
       mount(row, el('div', { class: 'acey__action-done' },
         `✓ Added to ${name}'s queue — `,

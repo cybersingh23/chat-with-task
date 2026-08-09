@@ -57,6 +57,8 @@ async function init() {
   loadBlocked();
   // Evidence deep links from the Team board land on a chart or section id.
   flashHash();
+  // Acey adds items from its panel on this very page; keep the block current.
+  document.addEventListener('acey:todos-changed', renderActionItems);
 }
 
 // ---------------------------------------------------------------------------

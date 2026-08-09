@@ -44,6 +44,13 @@ async function init() {
   $('tm-refresh').addEventListener('click', () => load({ fresh: true }));
   $('tm-export').addEventListener('click', exportItems);
 
+  // Acey creates and undoes items from its panel while this page sits behind
+  // it — reload so the list is never staler than the confirmation beside it.
+  document.addEventListener('acey:todos-changed', () => load({}));
+  // Clicking Acey's "Added" deep link while already on this page changes only
+  // the hash; land it the same way a cross-page arrival lands.
+  window.addEventListener('hashchange', flashFromHash);
+
   await load({});
 }
 
