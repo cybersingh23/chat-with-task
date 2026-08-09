@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import { buildBrief, blockedBacklog } from './overview.js';
 import { qualitySnapshot } from './quality.js';
+import { boardPipeline } from './pipeline.js';
 import { routeSignal } from './team.js';
 
 // Project health, expressed as SIGNALS rather than a score.
@@ -41,6 +42,8 @@ export const THRESHOLDS = {
   calibrationMinScores: 20,  // ...over at least this many grades
   staleCount: 15,            // tasks past the stale threshold at their level
   deliveryGapPct: 20,        // how far short of target the deliverable pool can be
+  evalGap: 20,               // L10 tasks with no eval on the board before it is a work item
+  evalCrunchDays: 2,         // within this of delivery, every un-evalled L10 task matters
 };
 
 function signal(s) {
@@ -141,6 +144,49 @@ function checkBlocked(blocked) {
   return out;
 }
 
+// The first question of an assignment pass: how many tasks sit at L10 upstream
+// with no eval on the Audit Studio board? Only an eval pass moves them — tasks
+// do not reach L12 unevalled — so the gap routes straight to Pavit as his
+// queue, not as an escalation.
+//
+// Two ways to fire, deliberately different:
+//   * gap >= 20             a real batch is waiting, worth a sitting
+//   * delivery is close AND the target is short AND any gap at all — at that
+//     point each evalled task converts one-for-one into deliverable volume,
+//     so even a handful is worth the pass. Severity rises to critical because
+//     it is the same event as the delivery being at risk.
+//
+// "On the board" counts board tasks whose upstream node is at L10 regardless of
+// lane or status: an eval already happened to put them there, which is the
+// thing being measured. Board tasks that have moved past L10 upstream stopped
+// being part of either side of this comparison.
+function checkEvalGap(brief, board) {
+  const p = brief.pipeline;
+  if (!p || !Array.isArray(board?.rows)) return [];
+
+  const atL10 = Number(p.feeder) || 0;
+  const onBoard = board.rows.filter((r) => String(r.reviewLevel) === '10').length;
+  const gap = Math.max(0, atL10 - onBoard);
+
+  const short = (p.gapToTarget || 0) > 0;
+  const crunch = brief.calendar.daysUntil <= THRESHOLDS.evalCrunchDays && short && gap > 0;
+  if (gap < THRESHOLDS.evalGap && !crunch) return [];
+
+  return [signal({
+    id: 'eval-gap',
+    domain: 'evals',
+    severity: crunch ? 'critical' : 'high',
+    title: `Run evals on ${int(gap)} L10 task${gap === 1 ? '' : 's'} not yet on the board`,
+    detail: `${int(atL10)} tasks sit at L10 upstream and ${int(onBoard)} of them are on the Audit Studio `
+      + `board. The remaining ${int(gap)} cannot reach L12 without an eval pass.`
+      + (crunch
+        ? ` Delivery is ${brief.calendar.daysUntil} day(s) out and the target is ${int(p.gapToTarget)} short — each of these converts directly into deliverable volume now.`
+        : ''),
+    metric: { value: gap, threshold: THRESHOLDS.evalGap, unit: 'tasks' },
+    link: '/l12.html',
+  })];
+}
+
 function checkContributors(q) {
   const out = [];
   if (!q?.enabled) return out;
@@ -214,11 +260,12 @@ function checkContributors(q) {
 // A check that fires when the data behind the other checks is missing. Silence
 // because a query failed looks exactly like silence because everything is fine,
 // and that is the failure mode worth guarding hardest against.
-function checkDataHealth(brief, blocked, q) {
+function checkDataHealth(brief, blocked, q, board) {
   const errs = [
     ...(brief.errors || []),
     ...(blocked.errors || []),
     ...(q?.errors || []),
+    ...(board?.error ? [{ query: 'board_pipeline', error: board.error }] : []),
   ];
   if (!errs.length) return [];
   return [signal({
@@ -238,18 +285,23 @@ function checkDataHealth(brief, blocked, q) {
 // ---------------------------------------------------------------------------
 
 export async function projectHealth({ fresh = false, days = 30 } = {}) {
-  const [brief, blocked, quality] = await Promise.all([
+  const [brief, blocked, quality, board] = await Promise.all([
     buildBrief({ fresh, days }),
     blockedBacklog({ fresh }).catch((e) => ({ lanes: [], rows: [], errors: [{ query: 'blocked_backlog', error: e.message }] })),
     qualitySnapshot({ fresh, days }).catch((e) => ({ enabled: false, errors: [{ query: 'quality', error: e.message }] })),
+    // The board x pipeline join, for the eval-gap check. rows: null (not [])
+    // on failure so the check skips rather than reading an empty board as
+    // "nothing evalled" and inflating the gap.
+    boardPipeline({ scope: 'all', fresh }).catch((e) => ({ rows: null, error: e.message })),
   ]);
 
   const signals = [
     ...checkDelivery(brief),
     ...checkWaste(brief),
     ...checkBlocked(blocked),
+    ...checkEvalGap(brief, board),
     ...checkContributors(quality),
-    ...checkDataHealth(brief, blocked, quality),
+    ...checkDataHealth(brief, blocked, quality, board),
   ].sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity]);
 
   return {

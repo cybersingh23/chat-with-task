@@ -3015,6 +3015,122 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
   .tm-card__actions { margin-left: 0; width: 100%; }
 }
 
+/* ── Acey popover (program analyst, on every page) ────────────────────────
+   The SAME component as the docked panel on the task page, floated.
+   It reuses .acey / .acey__head / .acey__body / .acey__status / .acey__composer
+   / .acey__intro / .acey__suggest / .chat-msg / .bubble / .msg-who verbatim, and
+   the launcher is the existing .acey-fab mascot. Only the shell differs.
+
+   The first attempt defined its own .acey-fab, which COLLIDED with the mascot
+   button — it set height/padding but not width, so the button kept its 52px
+   width and "Ask Acey" wrapped inside it. Hence: no new launcher, no parallel
+   design language, only a positioning modifier and the two genuinely new bits
+   (the scope chip and the SQL disclosure). */
+.acey--pop {
+  position: fixed; right: 22px; bottom: 22px; z-index: 46;
+  width: min(520px, calc(100vw - 44px));
+  height: min(660px, calc(100vh - 116px));
+  border: 1px solid var(--border-strong);
+  border-left: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.acey--pop .acey__scope {
+  font-size: 10.5px; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: var(--r-tag); padding: 1px 6px;
+}
+.acey--pop .acey__body { display: flex; flex-direction: column; gap: 14px; }
+.acey--pop .acey__body.is-empty { gap: 12px; }
+
+/* The query behind the number, in the transcript. Collapsed, but present:
+   a number without its query is an assertion. */
+.acey__sql {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-control); overflow: hidden;
+}
+.acey__sql summary {
+  display: flex; align-items: center; gap: 9px; padding: 8px 11px;
+  cursor: pointer; list-style: none;
+}
+.acey__sql summary::-webkit-details-marker { display: none; }
+.acey__sql summary::after {
+  content: '›'; margin-left: auto; color: var(--text-dim);
+  transform: rotate(90deg); transition: transform 0.16s ease;
+}
+.acey__sql[open] summary::after { transform: rotate(-90deg); }
+.acey__sql-tag {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
+  color: var(--accent); background: var(--accent-bg);
+  border: 1px solid var(--accent-border); border-radius: var(--r-tag); padding: 1px 5px;
+  flex: 0 0 auto;
+}
+.acey__sql-why { font-size: 12px; color: var(--text-muted); min-width: 0; }
+.acey__sql pre {
+  margin: 0; padding: 11px 12px; border-top: 1px solid var(--border);
+  font-family: var(--mono); font-size: 11px; line-height: 1.55;
+  color: var(--text-muted); overflow-x: auto; white-space: pre;
+}
+.acey__sql-foot { padding: 7px 11px; border-top: 1px solid var(--border); }
+.acey__sql-copy {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--accent); font-size: 11.5px; font-family: inherit;
+}
+
+/* Live step line, in the panel's existing status slot. */
+.acey__dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); margin-right: 7px; vertical-align: middle;
+  animation: acey-pulse 1.1s ease-in-out infinite;
+}
+@keyframes acey-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+@media (max-width: 640px) {
+  .acey--pop { right: 12px; left: 12px; bottom: 12px; width: auto; height: min(78vh, 620px); }
+}
+
+/* Header launcher — Acey's primary entry point, beside the theme toggle. It
+   used to exist only as the corner mascot, below everything else on the page;
+   the FAB now survives purely as a fallback for pages without the shared
+   header. */
+.acey-launch {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer; flex: 0 0 auto;
+  height: 32px; padding: 0 13px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 550; color: var(--text);
+  background: var(--accent-bg); border: 1px solid var(--accent-border);
+  transition: background 130ms ease, border-color 130ms ease;
+}
+.acey-launch:hover { background: var(--accent-bg-hover); border-color: var(--accent); }
+.acey-launch.is-open { background: var(--surface-active); border-color: var(--border-strong); }
+.acey-launch img { width: 18px; height: 18px; object-fit: contain; }
+.acey-launch kbd {
+  font-family: var(--mono); font-size: 9.5px; line-height: 1; color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px;
+  background: var(--surface);
+}
+@media (max-width: 960px) {
+  .acey-launch span, .acey-launch kbd { display: none; }
+  .acey-launch { padding: 0 9px; }
+}
+
+/* Launched from the header, the panel hangs from the topbar (sticky, 56px) as
+   a right-hand drawer rather than floating up from a corner it did not come
+   from. */
+.acey--pop.acey--drawer { top: 66px; bottom: 16px; height: auto; }
+
+/* "Your todos" strip on Overview — a pointer to the Team board, not a copy of it. */
+.ov-mine { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin: 0 0 18px; font-size: 12.5px; }
+.ov-mine:empty { display: none; }
+.ov-mine__n { font-weight: 600; color: var(--text); }
+.ov-mine__clear { color: var(--text-faint); }
+.ov-mine__item {
+  color: var(--text-2); background: var(--surface); border: 1px solid var(--edge);
+  border-radius: 999px; padding: 3px 11px;
+}
+.ov-mine__item--critical { border-color: rgba(255, 97, 89, 0.45); }
+.ov-mine__item--high { border-color: rgba(255, 161, 79, 0.45); }
+.ov-mine__link { color: var(--blue); margin-left: auto; }
+
 /* Team page skeletons: the shape of the answer while the health sync runs. */
 .tm-skel {
   position: relative; overflow: hidden;

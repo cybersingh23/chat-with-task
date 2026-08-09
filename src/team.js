@@ -48,12 +48,13 @@ export const TEAM = [
   {
     username: ESCALATION,
     name: 'Pavit Singh',
-    remit: 'Escalation',
-    // Deliberately empty: nothing routes here by domain. Things arrive here
-    // because they are cross-cutting, because they are above the severity a
-    // single owner should absorb silently, or because no owner exists.
-    domains: [],
-    blurb: 'High-leverage and cross-domain calls, and anything the owners are blocked on.',
+    remit: 'Evals & escalation',
+    // `evals` is the one domain that routes here directly: tasks sitting at L10
+    // with no eval on the Audit Studio board can only be moved by an eval pass,
+    // and that pass is Pavit's. Everything else still arrives only by
+    // escalation — cross-cutting, above a single owner's line, or unowned.
+    domains: ['evals'],
+    blurb: 'Runs the eval passes that move L10 work onto the board, plus high-leverage and cross-domain calls.',
   },
 ];
 
