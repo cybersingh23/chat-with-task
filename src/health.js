@@ -23,10 +23,11 @@ const pct = (n) => `${Math.round(n)}%`;
 const int = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
 
 // Severity drives ordering and escalation, not colour alone.
-//   critical — the delivery or the customer is at risk this cycle
-//   high     — will cost real money or quality if it runs another week
-//   medium   — worth doing, not urgent
-const SEV_RANK = { critical: 0, high: 1, medium: 2 };
+//   p0 — asap: the delivery or the customer is at risk this cycle
+//   p1 — by end of day: costs real money or quality if it runs longer
+//   p2 — within 2-3 days
+// Signals never emit p00 — the single-most-pressing crown is a human call.
+const SEV_RANK = { p0: 0, p1: 1, p2: 2 };
 
 // Thresholds in one place so they can be argued with as a set. These are first
 // cuts from the numbers the project is currently running at, not received wisdom
@@ -69,7 +70,7 @@ function checkDelivery(brief) {
     out.push(signal({
       id: 'delivery-gap',
       domain: 'throughput',
-      severity: shortPct > 50 ? 'critical' : 'high',
+      severity: shortPct > 50 ? 'p0' : 'p1',
       // Escalates because closing a gap this late is a scope call, not a
       // throughput chore — someone has to decide what ships.
       escalate: shortPct > 50,
@@ -85,7 +86,7 @@ function checkDelivery(brief) {
     out.push(signal({
       id: 'stale-tasks',
       domain: 'throughput',
-      severity: 'medium',
+      severity: 'p2',
       title: `${int(p.stale.count)} tasks have stopped moving`,
       detail: p.stale.byLevel.map((s) => `L${s.level}: ${s.stale} (oldest ${s.oldestDays}d)`).join(', '),
       metric: { value: p.stale.count, threshold: THRESHOLDS.staleCount, unit: 'tasks' },
@@ -104,7 +105,7 @@ function checkWaste(brief) {
     out.push(signal({
       id: `waste-l${e.level}`,
       domain: 'pay_efficiency',
-      severity: e.uselessPct > 35 ? 'high' : 'medium',
+      severity: e.uselessPct > 35 ? 'p1' : 'p2',
       escalate: e.uselessPct > 35 && e.uselessHours > 1000,
       title: `L${e.level} wasted ${int(e.uselessHours)}h of ${int(e.billableHours)}h billable (${pct(e.uselessPct)})`,
       detail: `Work that was paid for and thrown away, over the last ${brief.windowDays} days. `
@@ -130,7 +131,7 @@ function checkBlocked(blocked) {
     out.push(signal({
       id: `blocked-l${lane.level}`,
       domain,
-      severity: old.length >= THRESHOLDS.blockedCount ? 'high' : 'medium',
+      severity: old.length >= THRESHOLDS.blockedCount ? 'p1' : 'p2',
       title: `${int(lane.tasks)} tasks blocked at L${lane.level}`
         + (old.length ? `, ${int(old.length)} for a week or more` : ''),
       // The hint is a fragment ("blocked on something the platform has to fix");
@@ -175,7 +176,7 @@ function checkEvalGap(brief, board) {
   return [signal({
     id: 'eval-gap',
     domain: 'evals',
-    severity: crunch ? 'critical' : 'high',
+    severity: crunch ? 'p0' : 'p1',
     title: `Run evals on ${int(gap)} L10 task${gap === 1 ? '' : 's'} not yet on the board`,
     detail: `${int(atL10)} tasks sit at L10 upstream and ${int(onBoard)} of them are on the Audit Studio `
       + `board. The remaining ${int(gap)} cannot reach L12 without an eval pass.`
@@ -197,7 +198,7 @@ function checkContributors(q) {
     out.push(signal({
       id: 'contributors-disable',
       domain: 'promotions',
-      severity: 'high',
+      severity: 'p1',
       title: `${int(disable.length + demote.length)} contributors are below the bar`,
       detail: `${int(disable.length)} attempters at "should disable", ${int(demote.length)} reviewers at "should demote". `
         + `Thresholds match the ops QC list.`,
@@ -211,7 +212,7 @@ function checkContributors(q) {
     out.push(signal({
       id: 'contributors-promote',
       domain: 'superattempters',
-      severity: 'medium',
+      severity: 'p2',
       title: `${int(promote.length)} promote candidates waiting`,
       detail: 'Attempters scoring 4.0+ with a poor-rate under 5%. These are the superattempter '
         + 'cohort intake — they go stale if they sit.',
@@ -224,7 +225,7 @@ function checkContributors(q) {
     out.push(signal({
       id: 'quality-slipping',
       domain: 'quality',
-      severity: 'high',
+      severity: 'p1',
       title: `${int(q.slipping.length)} contributors slipped this window`,
       detail: `Quality dropped ≥0.4, poor-rate climbed ≥10pp, or they fell below the trusted line, `
         + `over ${q.windowDays} days. These are what fills L1 and L8 next week.`,
@@ -241,7 +242,7 @@ function checkContributors(q) {
     out.push(signal({
       id: 'reviewer-calibration',
       domain: 'qc',
-      severity: 'high',
+      severity: 'p1',
       // Every verdict downstream of a miscalibrated reviewer inherits the error,
       // so this is worth more attention than its size suggests.
       escalate: off.some((r) => Math.abs(r.calibrationDelta) >= 1),
@@ -271,7 +272,7 @@ function checkDataHealth(brief, blocked, q, board) {
   return [signal({
     id: 'data-health',
     domain: 'redash',
-    severity: 'high',
+    severity: 'p1',
     title: `${errs.length} upstream quer${errs.length === 1 ? 'y' : 'ies'} failed`,
     detail: errs.map((e) => `${e.query}: ${e.error}`).join('; ')
       + ' — checks that depend on these are silent, not clear.',
@@ -307,9 +308,9 @@ export async function projectHealth({ fresh = false, days = 30 } = {}) {
   return {
     signals,
     counts: {
-      critical: signals.filter((s) => s.severity === 'critical').length,
-      high: signals.filter((s) => s.severity === 'high').length,
-      medium: signals.filter((s) => s.severity === 'medium').length,
+      p0: signals.filter((s) => s.severity === 'p0').length,
+      p1: signals.filter((s) => s.severity === 'p1').length,
+      p2: signals.filter((s) => s.severity === 'p2').length,
       escalated: signals.filter((s) => s.escalated).length,
     },
     // Enough of the underlying state for the page to show context without

@@ -23,6 +23,31 @@ import { TEAM, personByUsername } from './team.js';
 const TODOS_PATH = path.join(config.dataDir, 'todos.json');
 
 const STATUSES = new Set(['open', 'claimed', 'snoozed', 'done', 'resolved']);
+
+// Priorities are deadlines, not adjectives:
+//   p00  THE most pressing item — at most one open at a time
+//   p0   asap
+//   p1   by end of day
+//   p2   within 2-3 days
+// The file predates this scale, so legacy names normalize on load and on any
+// write: critical was asap, high was same-day, medium was this-week-ish.
+export const SEVERITIES = ['p00', 'p0', 'p1', 'p2'];
+const LEGACY_SEV = { critical: 'p0', high: 'p1', medium: 'p2', low: 'p2' };
+export const normSev = (x) => (SEVERITIES.includes(x) ? x : (LEGACY_SEV[x] || 'p2'));
+
+// P00 is exclusive by definition. Crowning a new one demotes every other open
+// P00 to P0 — latest crown wins — rather than erroring into a two-step dance.
+function enforceSingleP00(items, keepId) {
+  const demoted = [];
+  for (const t of items) {
+    if (t.severity !== 'p00' || String(t.id) === String(keepId)) continue;
+    if (t.status === 'done' || t.status === 'resolved') continue;
+    t.severity = 'p0';
+    t.updatedAt = new Date().toISOString();
+    demoted.push(t.id);
+  }
+  return demoted;
+}
 // What a person still owes: anything not finished and not currently snoozed.
 const isLive = (t) => t.status === 'open' || t.status === 'claimed'
   || (t.status === 'snoozed' && (!t.snoozeUntil || t.snoozeUntil <= new Date().toISOString()));
@@ -30,7 +55,9 @@ const isLive = (t) => t.status === 'open' || t.status === 'claimed'
 function load() {
   try {
     const raw = JSON.parse(fs.readFileSync(TODOS_PATH, 'utf8'));
-    return Array.isArray(raw?.items) ? raw : { items: [] };
+    const state = Array.isArray(raw?.items) ? raw : { items: [] };
+    for (const t of state.items) t.severity = normSev(t.severity);
+    return state;
   } catch {
     return { items: [] };
   }
@@ -132,7 +159,7 @@ export function board({ includeClosed = false } = {}) {
     byOwner.get(t.owner).push(t);
   }
 
-  const rank = { critical: 0, high: 1, medium: 2, low: 3 };
+  const rank = { p00: 0, p0: 1, p1: 2, p2: 3 };
   const sort = (list) => list.sort((a, b) =>
     (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3)
     || String(a.createdAt).localeCompare(String(b.createdAt)));
@@ -162,7 +189,7 @@ export function board({ includeClosed = false } = {}) {
 // Write
 // ---------------------------------------------------------------------------
 
-export function addTodo({ owner, title, detail = '', severity = 'medium', domain = null, link = null, by }) {
+export function addTodo({ owner, title, detail = '', severity = 'p2', domain = null, link = null, by }) {
   if (!title?.trim()) throw new Error('title is required');
   if (!personByUsername(owner)) throw new Error(`unknown owner: ${owner}`);
   const state = load();
@@ -173,7 +200,7 @@ export function addTodo({ owner, title, detail = '', severity = 'medium', domain
     owner,
     title: title.trim(),
     detail: String(detail || '').trim(),
-    severity,
+    severity: normSev(severity),
     domain,
     link,
     status: 'open',
@@ -183,11 +210,12 @@ export function addTodo({ owner, title, detail = '', severity = 'medium', domain
     escalated: false,
   };
   state.items.push(item);
+  if (item.severity === 'p00') item.demoted = enforceSingleP00(state.items, item.id);
   save(state);
   return item;
 }
 
-export function updateTodo(id, { status, owner, note, snoozeDays, by }) {
+export function updateTodo(id, { status, owner, severity, note, snoozeDays, by }) {
   const state = load();
   const t = state.items.find((x) => String(x.id) === String(id));
   if (!t) throw new Error(`unknown todo: ${id}`);
@@ -213,6 +241,12 @@ export function updateTodo(id, { status, owner, note, snoozeDays, by }) {
     if (!personByUsername(owner)) throw new Error(`unknown owner: ${owner}`);
     t.owner = owner;
     t.reassignedBy = by;
+  }
+  if (severity) {
+    t.severity = normSev(severity);
+    // The response says who lost the crown, so the UI can explain the demotion
+    // instead of the board just looking different.
+    if (t.severity === 'p00') t.demoted = enforceSingleP00(state.items, t.id);
   }
   if (note) t.notes = [...(t.notes || []), { by, at: now, text: String(note).slice(0, 2000) }];
 
@@ -240,7 +274,7 @@ export function todoSummary(username) {
   return {
     count: mine.length,
     top: mine
-      .sort((a, b) => ({ critical: 0, high: 1, medium: 2 }[a.severity] ?? 3) - ({ critical: 0, high: 1, medium: 2 }[b.severity] ?? 3))
+      .sort((a, b) => ({ p00: 0, p0: 1, p1: 2, p2: 3 }[a.severity] ?? 4) - ({ p00: 0, p0: 1, p1: 2, p2: 3 }[b.severity] ?? 4))
       .slice(0, 3)
       .map((t) => ({ id: t.id, title: t.title, severity: t.severity, status: t.status })),
   };

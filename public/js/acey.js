@@ -269,9 +269,11 @@ export function mountAcey({ page } = {}) {
       const owner = el('select', { class: 'select', 'aria-label': 'Owner' },
         ...(team.length ? team : [{ username: o.username, name: o.name }]).map((t) =>
           el('option', { value: t.username, ...(t.username === o.username ? { selected: true } : {}) }, t.name)));
-      const sev = el('select', { class: 'select', 'aria-label': 'Severity' },
-        ...['medium', 'high', 'critical'].map((x) =>
-          el('option', { value: x, ...(x === d.severity ? { selected: true } : {}) }, x[0].toUpperCase() + x.slice(1))));
+      // Deadlines, not adjectives. P00 is absent on purpose: the crown is
+      // handed out on the board, not from a draft.
+      const sev = el('select', { class: 'select', 'aria-label': 'Priority' },
+        ...[['p0', 'P0 · asap'], ['p1', 'P1 · by EOD'], ['p2', 'P2 · 2–3 days']].map(([v, label]) =>
+          el('option', { value: v, ...(v === d.severity ? { selected: true } : {}) }, label)));
 
       const add = el('button', { class: 'btn btn--primary', type: 'button' }, 'Add to board');
       add.addEventListener('click', async () => {

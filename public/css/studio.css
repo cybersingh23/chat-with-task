@@ -2924,8 +2924,9 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
   border-left: 3px solid var(--border-strong);
   border-radius: var(--r-control); padding: 13px 15px;
 }
-.tm-card--critical { border-left-color: var(--fail); }
-.tm-card--high { border-left-color: var(--warn); }
+.tm-card--p00 { border-left-color: var(--fail); box-shadow: inset 0 0 0 1px var(--fail-border); }
+.tm-card--p0 { border-left-color: var(--fail); }
+.tm-card--p1 { border-left-color: var(--warn); }
 .tm-card.is-closed { opacity: 0.55; }
 .tm-card__top { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .tm-card__title { font-size: 13.5px; font-weight: 600; margin: 0; }
@@ -2937,9 +2938,15 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
   font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
   padding: 3px 7px; border-radius: var(--r-tag); flex: 0 0 auto;
 }
-.tm-sev--critical { color: var(--fail); background: var(--fail-bg); }
-.tm-sev--high { color: var(--warn); background: var(--warn-bg); }
-.tm-sev--medium { color: var(--text-dim); background: var(--surface-2); }
+.tm-sev--p00 { color: #fff; background: var(--fail); }
+.tm-sev--p0 { color: var(--fail); background: var(--fail-bg); }
+.tm-sev--p1 { color: var(--warn); background: var(--warn-bg); }
+.tm-sev--p2 { color: var(--text-dim); background: var(--surface-2); }
+/* The chip doubles as the priority control on open cards. */
+.tm-sev--sel {
+  appearance: none; -webkit-appearance: none; border: none; cursor: pointer;
+  font-family: inherit; text-align: center;
+}
 
 .tm-tag {
   font-size: 10px; color: var(--text-dim);
@@ -3103,8 +3110,9 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
   flex: 0 0 auto; width: 12px; height: 12px; border-radius: 50%; cursor: pointer;
   border: 1.5px solid var(--border-strong); background: transparent; padding: 0;
 }
-.tm-qa__sev--high { border-color: var(--warn); background: var(--warn-bg); }
-.tm-qa__sev--critical { border-color: var(--fail); background: var(--fail-bg); }
+.tm-qa__sev--p1 { border-color: var(--warn); background: var(--warn-bg); }
+.tm-qa__sev--p0 { border-color: var(--fail); background: var(--fail-bg); }
+.tm-qa__sev--p00 { border-color: var(--fail); background: var(--fail); }
 .tm-qa__input {
   flex: 1; border: none; outline: none; background: none;
   font: inherit; font-size: 12.5px; color: var(--text); padding: 7px 0;

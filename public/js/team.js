@@ -20,7 +20,15 @@ import { mountAcey } from './acey.js';
 
 const $ = (id) => document.getElementById(id);
 const int = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
-const SEV_RANK = { critical: 0, high: 1, medium: 2 };
+const SEV_RANK = { p00: 0, p0: 1, p1: 2, p2: 3 };
+// Priorities are deadlines. P00 is the crown: at most one open item wears it,
+// and the server demotes the previous holder to P0 when it moves.
+const SEV_META = {
+  p00: 'P00 — THE most pressing item (only one, ever)',
+  p0: 'P0 — asap',
+  p1: 'P1 — by end of day',
+  p2: 'P2 — within 2–3 days',
+};
 
 let data = null;
 let me = null;
@@ -62,6 +70,7 @@ function matches(t) {
   if (view === 'mine') return t.owner === me;
   if (view === 'escalated') return !!t.escalated;
   if (view === 'closed') return t.status === 'done' || t.status === 'resolved';
+  if (view === 'p0') return t.severity === 'p0' || t.severity === 'p00';
   return t.severity === view;
 }
 
@@ -83,7 +92,8 @@ function render() {
   $('tm-foot').textContent = ch
     ? `Auto items are created by a health check and close themselves when the signal clears `
       + `(${ch.created} new, ${ch.resolved} cleared, ${ch.reopened} recurred this sync). `
-      + `Items you add by hand are never closed automatically. Checked ${new Date(data.health.generatedAt).toLocaleTimeString()}.`
+      + `Items you add by hand are never closed automatically. Checked ${new Date(data.health.generatedAt).toLocaleTimeString()}. `
+      + 'Priorities: P00 = the one most pressing (only one) · P0 = asap · P1 = by EOD · P2 = 2–3 days.'
     : '';
 }
 
@@ -113,9 +123,9 @@ function renderFilters(items) {
   });
 
   const MORE = [
-    ['critical', `Critical · ${count((t) => t.severity === 'critical')}`],
-    ['high', `High · ${count((t) => t.severity === 'high')}`],
-    ['medium', `Medium · ${count((t) => t.severity === 'medium')}`],
+    ['p0', `P0 · ${count((t) => t.severity === 'p0' || t.severity === 'p00')}`],
+    ['p1', `P1 · ${count((t) => t.severity === 'p1')}`],
+    ['p2', `P2 · ${count((t) => t.severity === 'p2')}`],
     ['closed', 'Closed'],
   ];
   const inMore = MORE.some(([k]) => k === view);
@@ -216,16 +226,16 @@ function ownerSection(p, todos) {
 let refocusOwner = null;
 
 function quickAdd(p) {
-  const SEVS = ['medium', 'high', 'critical'];
+  const SEVS = ['p2', 'p1', 'p0', 'p00'];
   let idx = 0;
   const dot = el('button', {
-    class: 'tm-qa__sev tm-qa__sev--medium', type: 'button',
-    title: 'Severity: Medium — click to change', 'aria-label': 'Severity',
+    class: 'tm-qa__sev tm-qa__sev--p2', type: 'button',
+    title: `${SEV_META.p2} — click to change`, 'aria-label': 'Priority',
   });
   dot.addEventListener('click', () => {
     idx = (idx + 1) % SEVS.length;
     dot.className = `tm-qa__sev tm-qa__sev--${SEVS[idx]}`;
-    dot.title = `Severity: ${SEVS[idx][0].toUpperCase()}${SEVS[idx].slice(1)} — click to change`;
+    dot.title = `${SEV_META[SEVS[idx]]} — click to change`;
   });
 
   const input = el('input', {
@@ -285,7 +295,9 @@ function card(t) {
   return el('article', { class: `tm-card tm-card--${t.severity}${closed ? ' is-closed' : ''}`, id: String(t.id) },
     el('div', { class: 'tm-card__top' },
       check,
-      el('span', { class: `tm-sev tm-sev--${t.severity}` }, t.severity),
+      closed
+        ? el('span', { class: `tm-sev tm-sev--${t.severity}`, title: SEV_META[t.severity] }, t.severity)
+        : sevControl(t),
       el('h3', { class: 'tm-card__title' }, t.title),
       t.escalated ? el('span', { class: 'tm-tag tm-tag--esc' }, 'Escalated') : null,
       t.source === 'manual' ? el('span', { class: 'tm-tag' }, 'Added by hand') : null),
@@ -370,6 +382,28 @@ function actions(t) {
   });
   row.append(sel);
   return row;
+}
+
+// The priority chip is also the way priority changes — including crowning a
+// new P00. The server enforces the singleton; the toast explains the demotion
+// so the board does not just silently look different.
+function sevControl(t) {
+  const sel = el('select', {
+    class: `tm-sev tm-sev--${t.severity} tm-sev--sel`,
+    'aria-label': 'Priority', title: `${SEV_META[t.severity]} — click to change`,
+  }, ...Object.keys(SEV_META).map((k) =>
+    el('option', { value: k, ...(k === t.severity ? { selected: true } : {}) }, k.toUpperCase())));
+  sel.addEventListener('change', async () => {
+    const crowning = sel.value === 'p00';
+    const previous = crowning && allItems().find((x) =>
+      x.severity === 'p00' && x.id !== t.id && x.status !== 'done' && x.status !== 'resolved');
+    try {
+      await api(`/team/todos/${t.id}`, { method: 'PATCH', body: { severity: sel.value } });
+      await load({});
+      if (previous) toast(`P00 is exclusive — "${previous.title.slice(0, 40)}…" moved down to P0.`);
+    } catch (e) { alert(e.message); }
+  });
+  return sel;
 }
 
 const firstName = (username) => (data.people.find((p) => p.username === username)?.name || username).split(' ')[0];

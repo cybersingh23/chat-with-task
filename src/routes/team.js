@@ -59,8 +59,8 @@ teamApi.post('/todos', wrap(async (req, res) => {
 }));
 
 teamApi.patch('/todos/:id', wrap(async (req, res) => {
-  const { status, owner, note, snoozeDays } = req.body || {};
-  res.json(updateTodo(req.params.id, { status, owner, note, snoozeDays, by: req.user.username }));
+  const { status, owner, severity, note, snoozeDays } = req.body || {};
+  res.json(updateTodo(req.params.id, { status, owner, severity, note, snoozeDays, by: req.user.username }));
 }));
 
 teamApi.delete('/todos/:id', wrap(async (req, res) => {

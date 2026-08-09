@@ -83,7 +83,7 @@ async function buildSystem(username) {
       'LIVE PROJECT STATE (already fetched — do not re-query for these):',
       `  ${c.deliverable} of ${c.target} deliverable at L12 for ${c.nextDelivery} (${c.daysUntilDelivery} days away).`,
       `  ${c.totalPending} tasks in flight, ${c.blocked} of them blocked at L1/L8. ${c.contributors} contributors active.`,
-      `  Health signals firing: ${h.counts.critical} critical, ${h.counts.high} high, ${h.counts.medium} medium.`,
+      `  Health signals firing: ${h.counts.p0} P0 (asap), ${h.counts.p1} P1 (by EOD), ${h.counts.p2} P2.`,
       ...h.signals.map((s) => `    [${s.severity}] ${s.title} → ${s.owner}${s.escalated ? ' (escalated)' : ''}`),
     ];
     parts.push(lines.join('\n'));
@@ -235,11 +235,12 @@ aceyApi.post('/action/draft', wrap(async (req, res) => {
         {
           role: 'system',
           content: 'You turn an analyst\'s answer into ONE action item for a named owner. Reply with JSON '
-            + 'only, no code fences: {"title":"...","detail":"...","severity":"high"|"medium"}. The title is '
+            + 'only, no code fences: {"title":"...","detail":"...","severity":"p0"|"p1"|"p2"}. The title is '
             + 'imperative, at most 90 characters, and carries the key figure when there is one ("Coach the 5 '
             + 'reviewers grading off the standard"). The detail is one or two plain sentences with the '
-            + 'supporting numbers from the answer — no markdown. severity is "high" only when the answer shows '
-            + 'money, quality or a delivery actively at risk; otherwise "medium".',
+            + 'supporting numbers from the answer — no markdown. Priorities are deadlines: "p0" means it '
+            + 'cannot wait (delivery or customer actively at risk), "p1" means it should land by end of '
+            + 'day, "p2" (the default) means within 2-3 days.',
         },
         { role: 'user', content: `Owner: ${person.name} — ${person.remit}\nQuestion asked: ${question}\nAnswer:\n${answer}` },
       ],
@@ -254,7 +255,7 @@ aceyApi.post('/action/draft', wrap(async (req, res) => {
     draft: {
       title: String(draft?.title || `Follow up: ${question || answer}`).slice(0, 140),
       detail: String(draft?.detail || answer.slice(0, 300)).slice(0, 600),
-      severity: ['high', 'medium'].includes(draft?.severity) ? draft.severity : 'medium',
+      severity: ['p0', 'p1', 'p2'].includes(draft?.severity) ? draft.severity : 'p2',
     },
   });
 }));
@@ -269,7 +270,8 @@ aceyApi.post('/action', wrap(async (req, res) => {
     owner: person.username,
     title,
     detail: detail ? `${detail} — via Acey, added by ${req.user.username}.` : `Via Acey, added by ${req.user.username}.`,
-    severity: ['critical', 'high', 'medium'].includes(req.body?.severity) ? req.body.severity : 'medium',
+    // p00 is allowed here — a human picked it — and addTodo enforces the singleton.
+    severity: ['p00', 'p0', 'p1', 'p2'].includes(req.body?.severity) ? req.body.severity : 'p2',
     by: req.user.username,
   });
   res.json({ todo });
