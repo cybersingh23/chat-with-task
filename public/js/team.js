@@ -34,7 +34,6 @@ async function init() {
   renderAppHeader({ active: 'team', user });
 
   $('tm-refresh').addEventListener('click', () => load({ fresh: true }));
-  $('tm-add').addEventListener('click', openAddForm);
 
   await load({});
 }
@@ -140,12 +139,28 @@ function renderOwners(items) {
   }
 
   // Team order, so the page does not reshuffle as items move between people.
-  // Owners with nothing in the current filter are dropped rather than shown as
-  // empty cards — five ragged columns of "Nothing outstanding" was most of what
-  // made the old page hard to read.
+  // In the All view every owner renders — an empty owner is one thin row whose
+  // quick-add is the way work gets typed in for them. In a filtered view,
+  // owners with no matches are dropped; empty rows there would just be noise.
   mount($('tm-owners'), ...data.people
-    .filter((p) => byOwner.has(p.username))
-    .map((p) => ownerSection(p, sortWork(byOwner.get(p.username)))));
+    .filter((p) => view === 'all' || byOwner.has(p.username))
+    .map((p) => ownerSection(p, sortWork(byOwner.get(p.username) || []))));
+
+  flashFromHash();
+}
+
+// Deep links from the Overview and from Acey confirmations: #t<id> scrolls to
+// that card and flashes it; #owner-<username> lands on a person's section. The
+// hash is consumed after one flash so a later manual reload does not replay it.
+function flashFromHash() {
+  const m = /^#(t\d+|owner-[a-z]+)$/.exec(location.hash || '');
+  if (!m) return;
+  const target = document.getElementById(m[1]);
+  if (!target) return;
+  target.scrollIntoView({ block: 'center' });
+  target.classList.add('flash');
+  setTimeout(() => target.classList.remove('flash'), 2200);
+  history.replaceState(null, '', location.pathname + location.search);
 }
 
 const sortWork = (list) => list.sort((a, b) =>
@@ -153,21 +168,105 @@ const sortWork = (list) => list.sort((a, b) =>
   || String(a.createdAt).localeCompare(String(b.createdAt)));
 
 function ownerSection(p, todos) {
-  return el('section', { class: `tm-owner${p.username === me ? ' is-me' : ''}` },
+  // "N open · M closed this week" is the completion tracking: the difference
+  // between a queue that is stuck and one that is churning, per person.
+  const stats = el('div', { class: 'tm-owner__stats' },
+    el('span', {}, `${p.live} open`),
+    p.doneWeek ? el('span', { class: 'tm-owner__done' }, `${p.doneWeek} closed this week`) : null);
+  const total = p.live + p.doneWeek;
+
+  return el('section', { class: `tm-owner${p.username === me ? ' is-me' : ''}`, id: `owner-${p.username}` },
     el('header', { class: 'tm-owner__head' },
       avatar(p.username),
       el('div', { class: 'tm-owner__id' },
         el('h2', { class: 'tm-owner__name' }, p.name,
           p.username === me ? el('span', { class: 'tm-you' }, 'You') : null),
         el('p', { class: 'tm-owner__remit' }, p.blurb)),
-      el('span', { class: 'tm-owner__n' }, `${todos.length} open`)),
-    el('div', { class: 'tm-work' }, ...todos.map(card)));
+      el('div', { class: 'tm-owner__meta' },
+        stats,
+        total ? el('div', { class: 'tm-progress', title: `${p.doneWeek} of ${total} closed this week` },
+          el('span', { style: `width:${Math.round((p.doneWeek / total) * 100)}%` })) : null)),
+    el('div', { class: 'tm-work' },
+      ...todos.map(card),
+      view === 'closed' ? null : quickAdd(p)));
+}
+
+// Quick add, the Todoist pattern: one input at the bottom of the list, type and
+// press Enter, everything else optional. The dot cycles severity so the common
+// case never needs a form; focus returns to the same input after the reload so
+// entering three items in a row is three lines of typing.
+let refocusOwner = null;
+
+function quickAdd(p) {
+  const SEVS = ['medium', 'high', 'critical'];
+  let idx = 0;
+  const dot = el('button', {
+    class: 'tm-qa__sev tm-qa__sev--medium', type: 'button',
+    title: 'Severity: Medium — click to change', 'aria-label': 'Severity',
+  });
+  dot.addEventListener('click', () => {
+    idx = (idx + 1) % SEVS.length;
+    dot.className = `tm-qa__sev tm-qa__sev--${SEVS[idx]}`;
+    dot.title = `Severity: ${SEVS[idx][0].toUpperCase()}${SEVS[idx].slice(1)} — click to change`;
+  });
+
+  const input = el('input', {
+    class: 'tm-qa__input', maxlength: '200',
+    placeholder: `Add an item for ${p.name.split(' ')[0]}…`,
+    'aria-label': `Add an item for ${p.name}`,
+  });
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape') return input.blur();
+    if (e.key !== 'Enter' || !input.value.trim()) return;
+    input.disabled = true;
+    try {
+      await api('/team/todos', {
+        method: 'POST',
+        body: { owner: p.username, title: input.value.trim(), severity: SEVS[idx] },
+      });
+      refocusOwner = p.username;
+      await load({});
+    } catch (err) {
+      input.disabled = false;
+      alert(err.message);
+    }
+  });
+
+  const row = el('div', { class: 'tm-qa' }, dot, input);
+  if (refocusOwner === p.username) {
+    refocusOwner = null;
+    requestAnimationFrame(() => input.focus());
+  }
+  return row;
 }
 
 function card(t) {
   const closed = t.status === 'done' || t.status === 'resolved';
-  return el('article', { class: `tm-card tm-card--${t.severity}${closed ? ' is-closed' : ''}` },
+
+  // The universal completion affordance: a circle that becomes a check. Marks
+  // done optimistically so the strike is felt at the moment of the click, then
+  // reloads for the real state.
+  const check = el('button', {
+    class: `tm-check${closed ? ' is-done' : ''}`, type: 'button',
+    title: closed ? stateLabel(t) : 'Mark done',
+    'aria-label': closed ? 'Completed' : 'Mark done',
+    ...(closed ? { disabled: true } : {}),
+  });
+  if (!closed) {
+    check.addEventListener('click', async () => {
+      check.disabled = true;
+      check.classList.add('is-done');
+      check.closest('.tm-card')?.classList.add('is-closing');
+      try { await api(`/team/todos/${t.id}`, { method: 'PATCH', body: { status: 'done' } }); await load({}); }
+      catch (e) { check.disabled = false; check.classList.remove('is-done'); alert(e.message); }
+    });
+  }
+
+  // Todo ids are already t-prefixed (t12), so they are used as the element id
+  // verbatim — a second prefix made #t12 links miss the card entirely.
+  return el('article', { class: `tm-card tm-card--${t.severity}${closed ? ' is-closed' : ''}`, id: String(t.id) },
     el('div', { class: 'tm-card__top' },
+      check,
       el('span', { class: `tm-sev tm-sev--${t.severity}` }, t.severity),
       el('h3', { class: 'tm-card__title' }, t.title),
       t.escalated ? el('span', { class: 'tm-tag tm-tag--esc' }, 'Escalated') : null,
@@ -215,7 +314,6 @@ function actions(t) {
   row.append(t.status === 'claimed'
     ? btn('Release', () => patch({ status: 'open' }))
     : btn('Claim', () => patch({ status: 'claimed' })));
-  row.append(btn('Done', () => patch({ status: 'done' })));
   if (t.status !== 'snoozed') row.append(btn('Snooze 7d', () => patch({ status: 'snoozed', snoozeDays: 7 })));
 
   // A select rather than four buttons: reassignment is the action most likely to
@@ -233,44 +331,6 @@ function actions(t) {
 
   if (t.source === 'manual') row.append(btn('Delete', () => api(`/team/todos/${t.id}`, { method: 'DELETE' }), 'tm-btn--danger'));
   return row;
-}
-
-// ---------------------------------------------------------------------------
-// Add
-// ---------------------------------------------------------------------------
-
-function openAddForm() {
-  if ($('tm-form')) return $('tm-form').querySelector('input').focus();
-
-  const title = el('input', { class: 'input', placeholder: 'What needs doing', maxlength: '200' });
-  const detail = el('input', { class: 'input', placeholder: 'Detail (optional)', maxlength: '1000' });
-  const owner = el('select', { class: 'select', 'aria-label': 'Owner' },
-    ...data.people.map((p) => el('option', { value: p.username, ...(p.username === me ? { selected: true } : {}) }, p.name)));
-  const sev = el('select', { class: 'select', 'aria-label': 'Severity' },
-    ...['high', 'medium', 'critical'].map((s) => el('option', { value: s }, s[0].toUpperCase() + s.slice(1))));
-
-  const form = el('div', { class: 'tm-form', id: 'tm-form' },
-    el('div', { class: 'tm-form__row' }, title, owner, sev),
-    el('div', { class: 'tm-form__row' }, detail),
-    el('div', { class: 'tm-form__row tm-form__row--end' },
-      el('button', { class: 'btn btn--ghost', type: 'button', onclick: () => form.remove() }, 'Cancel'),
-      el('button', {
-        class: 'btn btn--primary', type: 'button',
-        onclick: async () => {
-          if (!title.value.trim()) return title.focus();
-          try {
-            await api('/team/todos', {
-              method: 'POST',
-              body: { owner: owner.value, title: title.value, detail: detail.value, severity: sev.value },
-            });
-            form.remove();
-            await load({});
-          } catch (e) { alert(e.message); }
-        },
-      }, 'Add todo')));
-
-  mount($('tm-form-host'), form);
-  title.focus();
 }
 
 // Matched to the real layout so the page does not jump when data lands.

@@ -1,4 +1,4 @@
-import { api, el, mount, renderAppHeader, avatar, personName } from './common.js';
+import { api, el, mount, renderAppHeader, avatar } from './common.js';
 import { mountChart, clearChart, deliveryColumns, intakeColumns, readinessFunnel, stackedArea, hBars, legend } from './charts.js';
 import { mountAcey } from './acey.js';
 
@@ -26,11 +26,13 @@ const int = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
 const $ = (id) => document.getElementById(id);
 
 let brief = null;
+let me = null;
 
 init();
 
 async function init() {
   const user = await api('/me').catch(() => null);
+  me = user?.username || null;
   renderAppHeader({ active: 'overview', user });
 
   $('ov-regen').addEventListener('click', () => loadSummary({ refresh: true }));
@@ -45,8 +47,7 @@ async function init() {
   }
 
   renderClock(brief);
-  renderMyTodos();
-  renderAssignments(brief);
+  renderActionItems();
   renderCharts(brief);
   renderFoot(brief);
   // Both are slower than the brief and independent of each other, so neither
@@ -122,73 +123,54 @@ async function loadSummary({ refresh }) {
   }
 }
 
-// Who does what. Every item carries the system it belongs to, so "chase this
-// upstream" and "triage your own review list" can never be mistaken for each
-// other — that separation was the point of splitting them in the first place.
-const SYSTEM_LABEL = {
-  board: 'Board', pipeline: 'Pipeline',
-  decision: 'Decision', 'cross-functional': 'Cross-functional', direction: 'Direction',
-};
-
-// What YOU owe, routed by domain and persisted — as opposed to the weekly split
-// below, which is board chores shared out evenly. Two different things, so they
-// are two different blocks rather than one merged list.
+// Action items, read straight off the Team board and linked back into it.
 //
-// Fetched separately from the brief: it is cheap, and a failure here must not
-// take the delivery numbers with it.
-async function renderMyTodos() {
-  const host = $('ov-mine');
+// This replaces two earlier surfaces: a personal "N for you" strip and a
+// weekly round-robin of board chores that treated four people with different
+// jobs as interchangeable. One block now, showing the same cards the Team page
+// renders — same ids, same severities — so clicking any item lands on that
+// exact card over there, flashed. Never a derived copy that can drift.
+async function renderActionItems() {
+  const host = $('ov-actions');
   if (!host) return;
-  let mine;
+  let board;
   try {
-    mine = await api('/team/mine');
+    board = await api('/team/items');
   } catch {
-    return; // the Team page is the source of truth; silence beats an error strip here
+    return; // the Team page is the source of truth; a broken block beats a wrong one
   }
   const base = window.__base__ || '';
-  if (!mine.count) {
-    return mount(host,
-      el('span', { class: 'ov-mine__clear' }, 'Nothing routed to you right now.'),
-      el('a', { class: 'ov-mine__link', href: `${base}/team.html` }, 'Team board'));
+  // Me first, then team order — the question this block answers starts with
+  // "what do I owe", then widens.
+  const people = board.people
+    .filter((p) => p.todos.length)
+    .sort((a, b) => (b.username === me) - (a.username === me));
+
+  const head = el('div', { class: 'ov-actions__head' },
+    el('h2', {}, 'Action items'),
+    el('span', { class: 'ov-actions__hint' }, 'Live from the Team board — click through to claim or close.'),
+    el('a', { class: 'ov-actions__link', href: `${base}/team.html` }, 'Team board →'));
+
+  if (!people.length) {
+    return mount(host, head,
+      el('p', { class: 'ov-actions__empty' }, 'Nothing open on the team board.'));
   }
-  mount(host,
-    el('span', { class: 'ov-mine__n' }, `${mine.count} for you`),
-    ...mine.top.map((t) => el('span', { class: `ov-mine__item ov-mine__item--${t.severity}` }, t.title)),
-    el('a', { class: 'ov-mine__link', href: `${base}/team.html` }, 'Team board'));
+
+  const TOP = 3;
+  mount(host, head, el('div', { class: 'ov-actions__grid' }, ...people.map((p) => el('article', { class: 'ova-person' },
+    el('header', { class: 'ova-person__head' },
+      avatar(p.username),
+      el('span', { class: 'ova-person__name' }, p.name.split(' ')[0]),
+      el('span', { class: 'ova-person__n' },
+        `${p.live} open${p.doneWeek ? ` · ${p.doneWeek} done` : ''}`)),
+    ...p.todos.slice(0, TOP).map((t) => el('div', { class: 'ova-item' },
+      el('span', { class: `tm-sev tm-sev--${t.severity}` }, t.severity),
+      el('a', { href: `${base}/team.html#${t.id}`, title: t.title }, t.title))),
+    p.todos.length > TOP
+      ? el('a', { class: 'ova-more', href: `${base}/team.html#owner-${p.username}` },
+        `+${p.todos.length - TOP} more`)
+      : null))));
 }
-
-function renderAssignments(b) {
-  const a = b.assignments;
-  if (!a) return;
-
-  // Every card is identical — no accent tint, no separate row, no ordering
-  // privilege beyond being first. The lead's items differ in KIND, and the tag on
-  // each item already says so; styling the whole card differently made it read as
-  // a management panel sitting above the team rather than one of five people.
-  const card = (person) => el('article', { class: 'ov-person' },
-    el('header', { class: 'ov-person__head' },
-      avatar(person.name, { cls: 'ov-person__pic' }),
-      el('h3', { class: 'ov-person__name' }, personName(person.name))),
-    person.items.length
-      ? el('ul', { class: 'ov-person__list' },
-        ...person.items.map((it) => el('li', { class: 'ov-task' },
-          el('span', { class: `ov-tag ov-tag--${it.system.replace(/[^a-z]/g, '')}` }, SYSTEM_LABEL[it.system] || it.system),
-          el('span', { class: 'ov-task__text' }, it.text),
-          el('span', { class: 'ov-task__detail' }, it.detail))))
-      : el('p', { class: 'ov-person__clear' }, 'Nothing queued.'));
-
-  // All five in one grid. This only works because the lead's items are now capped
-  // at two, so no card is tall enough to strand the others on a second row — the
-  // earlier version had a six-item lead column that did exactly that.
-  mount($('ov-assign'),
-    el('div', { class: 'ov-assign__head' },
-      el('h2', {}, 'This week'),
-      el('span', { class: 'ov-assign__hint' },
-        'Split from live board and pipeline state — claim before you start. Rotates weekly.')),
-    el('div', { class: 'ov-assign__grid' },
-      ...[a.lead, ...a.reviewers].map((p) => card(p))));
-}
-
 
 // ---------------------------------------------------------------------------
 // charts

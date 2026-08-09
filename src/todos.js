@@ -124,7 +124,8 @@ export function listTodos({ includeClosed = false } = {}) {
 // so a cross-cutting item appears BOTH with its owner and on the escalation
 // list — the owner still has the work; the escalation is a second pair of eyes.
 export function board({ includeClosed = false } = {}) {
-  const items = listTodos({ includeClosed });
+  const all = load().items;
+  const items = includeClosed ? all : all.filter((t) => t.status !== 'done' && t.status !== 'resolved');
   const byOwner = new Map(TEAM.map((p) => [p.username, []]));
   for (const t of items) {
     if (!byOwner.has(t.owner)) byOwner.set(t.owner, []);
@@ -136,11 +137,20 @@ export function board({ includeClosed = false } = {}) {
     (rank[a.severity] ?? 3) - (rank[b.severity] ?? 3)
     || String(a.createdAt).localeCompare(String(b.createdAt)));
 
+  // Completion is tracked per owner over the trailing week, from the full file
+  // regardless of the includeClosed filter — "3 open · 4 closed this week" is
+  // the difference between a queue that is stuck and one that is churning.
+  const weekAgo = new Date(Date.now() - 7 * 86400e3).toISOString();
+  const doneWeek = (username) => all.filter((t) => t.owner === username
+    && (t.status === 'done' || t.status === 'resolved')
+    && String(t.doneAt || t.resolvedAt || t.updatedAt) >= weekAgo).length;
+
   return {
     people: TEAM.map((p) => ({
       ...p,
       todos: sort(byOwner.get(p.username) || []),
       live: (byOwner.get(p.username) || []).filter(isLive).length,
+      doneWeek: doneWeek(p.username),
     })),
     escalated: sort(items.filter((t) => t.escalated)),
     unowned: sort(items.filter((t) => !personByUsername(t.owner))),

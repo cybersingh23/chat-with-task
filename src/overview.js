@@ -366,12 +366,6 @@ function pipelineHealth({ levels, economics, throughput, now }) {
   };
 }
 
-// Assignments depend on the assembled brief, so they are attached after the fact
-// rather than threaded through every branch above.
-export async function fullBrief(opts) {
-  const brief = await buildBrief(opts);
-  return { ...brief, assignments: buildAssignments(brief) };
-}
 
 // ---------------------------------------------------------------------------
 // In-flight tasks and their model matchups
@@ -558,181 +552,11 @@ function boardSnapshot() {
 }
 
 // ---------------------------------------------------------------------------
-// Per-person action items
+// (The per-person assignment engine that lived here — a weekly round-robin of
+// board chores across four people treated as interchangeable — is retired. The
+// Team board (src/todos.js, /team.html) is the single source of action items,
+// routed by domain, and the Overview reads it via /api/team/items.)
 // ---------------------------------------------------------------------------
-
-// Deterministic, and deliberately NOT the model's job. These name a person and a
-// number, and being confidently wrong about either is worse than saying nothing.
-// The prose above is synthesis, which is what an LLM is good at; this is a list of
-// claims with owners attached, which is what it is worst at. Computing it here
-// means it is exact, always present, and survives the model being down. The model
-// is told these exist only so its prose does not duplicate them.
-//
-// Split, not duplicated: an even share means four people can work in parallel
-// without two of them opening the same task. Remainders go to the people earliest
-// in the rotation rather than all to one person.
-function splitEvenly(total, n) {
-  const base = Math.floor(total / n);
-  const extra = total % n;
-  return Array.from({ length: n }, (_, i) => base + (i < extra ? 1 : 0));
-}
-
-// Rotate week to week so the same person doesn't inherit the same chore forever,
-// but stay stable inside a week so the page doesn't reshuffle between loads.
-function rotate(list, isoDate) {
-  const week = Math.floor(Date.parse(`${isoDate}T00:00:00Z`) / (7 * 86400e3));
-  const k = ((week % list.length) + list.length) % list.length;
-  return [...list.slice(k), ...list.slice(0, k)];
-}
-
-export function buildAssignments(brief) {
-  const b = brief.board;
-  const p = brief.pipeline;
-  const c = brief.calendar;
-  const roster = rotate(config.overview.reviewers, c.nextDeliveryDate);
-  const items = Object.fromEntries(roster.map((r) => [r, []]));
-  const add = (who, system, text, detail) => items[who]?.push({ system, text, detail });
-
-  // Claimed work, before any suggested split. A task someone already holds must
-  // never be silently re-offered to somebody else, and — the case that actually
-  // bit here — must never just vanish because its owner isn't a reviewer.
-  const parked = [];
-  if (b) {
-    for (const [who, e] of Object.entries(b.byOwner || {})) {
-      const risk = e.hardNoRemediation
-        ? ` ${e.hardNoRemediation} of them ${e.hardNoRemediation === 1 ? 'is a hard fail with' : 'are hard fails with'} no remediation.md, which reships as a failure-to-remediate finding.`
-        : '';
-      if (items[who]) {
-        add(who, 'board', `Finish the ${e.count} task${e.count === 1 ? '' : 's'} you have claimed`,
-          `Already yours on the board.${risk}`);
-      } else {
-        // Held by the lead, or by someone outside the review team. Either way it
-        // is the lead's to finish or hand off, so it surfaces there rather than
-        // dropping out of the page entirely.
-        parked.push({ who, ...e, risk });
-      }
-    }
-
-    // Every per-task pool splits across the WHOLE roster. An earlier version sent
-    // hard fails to just two people on a "highest stakes, fewest hands" theory,
-    // which was only tolerable while the pool was small: at 29 outstanding it
-    // handed two people 15 each and left a third reviewer with nothing to do.
-    // This work parallelises per task, so there is no reason to concentrate it.
-    const pools = [
-      {
-        n: b.hardNoRemediation,
-        label: (n) => `Write remediation for ${n} hard fail${n === 1 ? '' : 's'}`,
-        detail: `${b.hardNoRemediation} hard fails have no remediation.md. Reshipped unchanged, each becomes a failure-to-remediate finding — this is the highest-stakes queue on the board.`,
-      },
-      {
-        n: b.unsortedOpen,
-        label: (n) => `Triage ${n} of the ${b.unsortedOpen} unclaimed unsorted`,
-        detail: 'Claim before you start so two of you do not open the same task.',
-      },
-      {
-        // Computed but previously never assigned, so it was invisible work.
-        n: b.unauditedSoft,
-        label: (n) => `Review ${n} soft fail${n === 1 ? '' : 's'} with no review.md`,
-        detail: `${b.unauditedSoft} soft fails are unclaimed and un-audited. Each needs a review doc before it can be resolved.`,
-      },
-    ];
-    for (const pool of pools) {
-      if (pool.n <= 0) continue;
-      splitEvenly(pool.n, roster.length).forEach((n, i) => {
-        if (n > 0) add(roster[i], 'board', pool.label(n), pool.detail);
-      });
-    }
-
-    if (b.grammarLane > 0) {
-      const who = roster[roster.length - 1];
-      add(who, 'board', `Run grammar fixes on ${b.grammarLane} task${b.grammarLane === 1 ? '' : 's'}`,
-        'Grammar-only tasks — everything else on them is already clean.');
-    }
-  }
-
-  // Stale pipeline work goes to one owner: chasing the same four tasks in
-  // parallel is how two people both wait for the other to do it.
-  if (p?.stale?.count > 0) {
-    const worst = p.stale.byLevel.slice().sort((a, b2) => b2.stale - a.stale)[0];
-    add(roster[1 % roster.length], 'pipeline',
-      `Chase the ${p.stale.count} stale task${p.stale.count === 1 ? '' : 's'} upstream`,
-      `${p.stale.byLevel.map((s) => `L${s.level}: ${s.stale}`).join(', ')}. Biggest cluster is L${worst.level}. These sit in the layer feeding delivery.`);
-  }
-
-  const reviewers = roster.map((name) => ({ name, items: items[name] }));
-
-  // ---- the lead: direction and cross-functional, never a share of the queue ----
-  const lead = [];
-
-  // The one exception to "no queue work for the lead": tasks already claimed by
-  // them or by someone off the review roster. Not a share of the backlog — a
-  // handoff decision, which is theirs to make.
-  for (const q of parked) {
-    const mine = q.who === config.overview.lead;
-    lead.push({
-      system: 'board',
-      text: mine
-        ? `${q.count} board task${q.count === 1 ? '' : 's'} still claimed by you`
-        : `${q.count} task${q.count === 1 ? '' : 's'} claimed by ${q.who}, outside the review team`,
-      detail: `${mine ? 'Finish or release so a reviewer can pick them up.' : 'No reviewer can claim these while they are held.'}${q.risk}`,
-    });
-  }
-
-  if (p && p.gapToTarget > 0) {
-    lead.push({
-      system: 'decision',
-      text: `Commit to ${brief.target} for ${c.isDeliveryDay ? 'today' : c.nextDeliveryDate} or reset it`,
-      detail: `${p.deliverable} deliverable at L12 now, ${p.gapToTarget} short of ${brief.target}. `
-        + `${p.feeder} are sitting at L10 and still have to reach L12`
-        + `${p.supplyShortfall > 0 ? `, and even everything in flight is ${p.supplyShortfall} short` : ''}`
-        + '. Cheaper decided early than discovered on delivery day.',
-    });
-  }
-  for (const e of brief.economics || []) {
-    if (e.attempts >= 50 && e.pctRejected >= 100) {
-      lead.push({
-        system: 'cross-functional',
-        text: `Raise L${e.level} with the pipeline owners`,
-        detail: `It rejected all ${fmtInt(e.attempts)} of its attempts in ${brief.windowDays} days. Nobody on this team can fix a gate's configuration, and every capacity plan behind it is wrong until someone does.`,
-      });
-    }
-  }
-  const costly = (brief.economics || []).filter((e) => e.totalHours >= 100)
-    .map((e) => ({ ...e, idle: e.totalHours ? 1 - e.activeHours / e.totalHours : 0 }))
-    .sort((a, b2) => b2.totalHours - a.totalHours)[0];
-  if (costly && costly.idle >= 0.5) {
-    lead.push({
-      system: 'cross-functional',
-      text: `Take the L${costly.level} billed-vs-active gap to whoever owns cost`,
-      detail: `${fmtInt(costly.totalHours)}h billed against ${fmtInt(costly.activeHours)}h active — ${Math.round(costly.idle * 100)}% idle on the project's largest line item.`,
-    });
-  }
-  if (brief.deliveries?.trailingAvg && brief.deliveries.trailingAvg < brief.target) {
-    lead.push({
-      system: 'direction',
-      text: `Set expectations against the trailing average, not the last result`,
-      detail: `Four-delivery average is ${brief.deliveries.trailingAvg} against a ${brief.target} target. One batch hitting ${brief.target} is not yet a capacity change, and planning as though it is will keep producing near-misses.`,
-    });
-  }
-  if (!lead.length) {
-    lead.push({ system: 'direction', text: 'Nothing needs escalating', detail: 'Target is covered, no gate is misbehaving and cost is proportionate.' });
-  }
-
-  // Capped, and ranked before capping. Handing the lead every escalation-shaped
-  // item turned their card into a six-entry backlog, which is the opposite of
-  // useful for someone whose job is picking what matters. Two is enough to act on
-  // this week; the underlying signals are all still on the charts.
-  const RANK = { board: 0, decision: 1, 'cross-functional': 2, direction: 3 };
-  const leadTop = lead
-    .slice()
-    .sort((a, b2) => (RANK[a.system] ?? 9) - (RANK[b2.system] ?? 9))
-    .slice(0, 2);
-
-  return {
-    lead: { name: config.overview.lead, items: leadTop },
-    reviewers,
-  };
-}
 
 const fmtInt = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
 
@@ -906,7 +730,7 @@ function buildPrompt(brief) {
   }
 
   lines.push('');
-  lines.push('Per-person action items are generated separately and shown directly below your summary,');
+  lines.push('Per-person action items live on the Team board and are shown directly below your summary,');
   lines.push('so do not assign work or name anyone.');
   lines.push('');
   lines.push('Write the summary now. Open with the headline verbatim, then THREE short paragraphs under 110');

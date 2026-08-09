@@ -2738,45 +2738,6 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 @keyframes ov-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) { .ov-skeleton { animation: none; } }
 
-/* ── who does what ────────────────────────────────────────────────────── */
-.ov-assign { margin-bottom: 20px; }
-.ov-assign__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 2px 11px; }
-.ov-assign__head h2 { margin: 0; font-size: 14.5px; font-weight: 620; color: var(--text); }
-.ov-assign__hint { font-size: 12px; color: var(--text-dim); }
-
-/* All five people, one row at desk width, reflowing without a per-count
-   breakpoint. 196px is what fits five inside .ov-main's 1180px max-width; a
-   larger minimum silently wrapped the fifth card onto its own row. */
-.ov-assign__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); gap: 12px; align-items: start; }
-.ov-person {
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--r-card); padding: 14px 15px 15px; min-width: 0;
-}
-/* No lead-specific styling. The lead's items differ in KIND, which the per-item
-   tag already communicates; tinting and separating the whole card made it read as
-   a management panel above the team instead of one of five equal cards. */
-.ov-person__head { display: flex; align-items: center; gap: 9px; margin-bottom: 11px; }
-/* Bigger than the 22px chrome avatar: on this card the person IS the subject. */
-.ov-person__pic { width: 30px; height: 30px; border-radius: 50%; font-size: 12px; }
-.ov-person__name { margin: 0; font-size: 13.5px; font-weight: 650; color: var(--text); }
-.ov-person__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px; }
-.ov-person__clear { margin: 0; font-size: 12px; color: var(--text-faint); }
-
-.ov-task__text { display: block; font-size: 12.5px; font-weight: 560; line-height: 1.42; color: var(--text); margin-top: 3px; }
-.ov-task__detail { display: block; font-size: 11.5px; line-height: 1.48; color: var(--text-dim); margin-top: 2px; }
-
-/* Which system an item belongs to, never inferred from wording. */
-.ov-tag {
-  display: inline-block; font-size: 9.5px; font-weight: 660; text-transform: uppercase;
-  letter-spacing: 0.06em; padding: 2px 5px; border-radius: var(--r-tag);
-  background: var(--muted-bg); color: var(--text-dim);
-}
-.ov-tag--board { background: var(--accent-bg-hover); color: var(--accent); }
-.ov-tag--pipeline { background: var(--warn-bg); color: var(--warn); }
-.ov-tag--decision { background: var(--fail-bg); color: var(--fail); }
-.ov-tag--crossfunctional { background: var(--ok-bg); color: var(--ok); }
-.ov-tag--direction { background: var(--muted-bg); color: var(--text-muted); }
-
 /* ── chart cards ──────────────────────────────────────────────────────── */
 .ov-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .ov-card {
@@ -3090,24 +3051,94 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 }
 
 /* "Add as action item" offers under an answer that named an owner. */
+.acey-draft {
+  display: grid; gap: 8px; padding: 12px 13px;
+  background: var(--surface); border: 1px solid var(--accent-border); border-radius: var(--r-control);
+}
+.acey-draft--busy { display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--text-dim); }
+.acey-draft__label {
+  font-size: 10px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-dim);
+}
+.acey-draft__detail { min-height: 64px; resize: vertical; font: inherit; font-size: 12.5px; line-height: 1.5; }
+.acey-draft__row { display: flex; align-items: center; gap: 8px; }
+.acey-draft .btn--primary { height: 28px; padding: 0 13px; font-size: 12px; }
+.acey-linkbtn { background: none; border: none; padding: 0; cursor: pointer; color: var(--accent); font-size: 11.5px; font-family: inherit; }
+.acey__action-err { font-size: 12px; color: var(--fail); }
 .acey__actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: -6px; }
 .acey__actions .btn { height: 26px; padding: 0 11px; font-size: 11.5px; border: 1px solid var(--accent-border); color: var(--accent); }
 .acey__actions .btn:hover { background: var(--accent-bg); border-color: var(--accent); }
 .acey__action-done { font-size: 12px; color: var(--ok); }
 .acey__action-done a { color: var(--accent); }
 
-/* "Your todos" strip on Overview — a pointer to the Team board, not a copy of it. */
-.ov-mine { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin: 0 0 18px; font-size: 12.5px; }
-.ov-mine:empty { display: none; }
-.ov-mine__n { font-weight: 600; color: var(--text); }
-.ov-mine__clear { color: var(--text-faint); }
-.ov-mine__item {
-  color: var(--text-2); background: var(--surface); border: 1px solid var(--edge);
-  border-radius: 999px; padding: 3px 11px;
+/* Completion: the circle that becomes a check — the universal affordance. */
+.tm-check {
+  flex: 0 0 auto; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;
+  background: transparent; border: 1.5px solid var(--border-strong);
+  display: grid; place-items: center; padding: 0;
+  color: transparent; font-size: 11px; line-height: 1;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 }
-.ov-mine__item--critical { border-color: rgba(255, 97, 89, 0.45); }
-.ov-mine__item--high { border-color: rgba(255, 161, 79, 0.45); }
-.ov-mine__link { color: var(--blue); margin-left: auto; }
+.tm-check::after { content: '✓'; }
+.tm-check:hover { border-color: var(--ok); color: var(--ok); }
+.tm-check.is-done { background: var(--ok); border-color: var(--ok); color: #fff; cursor: default; }
+.tm-card.is-closing { opacity: 0.45; transition: opacity 200ms ease; }
+
+/* Quick add — the Todoist pattern: one input at the foot of each list. */
+.tm-qa {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 15px; border: 1px dashed var(--border); border-radius: var(--r-control);
+}
+.tm-qa:focus-within { border-color: var(--accent-border); border-style: solid; }
+.tm-qa__sev {
+  flex: 0 0 auto; width: 12px; height: 12px; border-radius: 50%; cursor: pointer;
+  border: 1.5px solid var(--border-strong); background: transparent; padding: 0;
+}
+.tm-qa__sev--high { border-color: var(--warn); background: var(--warn-bg); }
+.tm-qa__sev--critical { border-color: var(--fail); background: var(--fail-bg); }
+.tm-qa__input {
+  flex: 1; border: none; outline: none; background: none;
+  font: inherit; font-size: 12.5px; color: var(--text); padding: 7px 0;
+}
+.tm-qa__input::placeholder { color: var(--text-faint); }
+
+/* Per-owner completion tracking in the section header. */
+.tm-owner__meta { flex: 0 0 auto; text-align: right; }
+.tm-owner__stats { display: flex; gap: 10px; justify-content: flex-end; font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.tm-owner__done { color: var(--ok); }
+.tm-progress {
+  margin-top: 5px; margin-left: auto; width: 120px; height: 3px; border-radius: 2px;
+  background: var(--surface-2); overflow: hidden;
+}
+.tm-progress span { display: block; height: 100%; background: var(--ok); border-radius: 2px; }
+
+/* Deep-link landing: one flash on the card or section the hash named. */
+.tm-card.flash, .tm-owner.flash { animation: tm-flash 2.2s ease-out; }
+@keyframes tm-flash {
+  0%, 55% { box-shadow: 0 0 0 2px var(--accent); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
+
+/* Overview action items — the Team board's cards, linked, never copied. */
+.ov-actions { margin: 0 0 26px; }
+.ov-actions__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.ov-actions__head h2 { font-size: 15px; font-weight: 640; margin: 0; }
+.ov-actions__hint { font-size: 12px; color: var(--text-dim); }
+.ov-actions__link { margin-left: auto; font-size: 12.5px; color: var(--accent); flex: 0 0 auto; }
+.ov-actions__empty { font-size: 12.5px; color: var(--text-faint); margin: 0; }
+.ov-actions__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }
+.ova-person { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 13px 15px; min-width: 0; }
+.ova-person__head { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+.ova-person__name { font-size: 13px; font-weight: 600; }
+.ova-person__n { margin-left: auto; font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.ova-item { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0; min-width: 0; }
+.ova-item a {
+  color: var(--text-muted); font-size: 12.5px; line-height: 1.45; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.ova-item a:hover { color: var(--text); }
+.ova-more { font-size: 11.5px; color: var(--accent); }
 
 /* Team page skeletons: the shape of the answer while the health sync runs. */
 .tm-skel {

@@ -204,33 +204,98 @@ export function mountAcey({ page } = {}) {
     redash_query: 'running a saved query',
   };
 
-  // The answer named an owner, so offer to put it on their queue. The click is
-  // the authorization; the server drafts the wording and creates the todo.
+  // The answer named an owner, so offer to put it on their queue.
+  //
+  // Three-step flow, one party per step: the model ROUTES (these buttons exist
+  // because the answer named someone), the model DRAFTS (clicking an offer
+  // fetches a title/detail the human can read), and the human AUTHORIZES —
+  // nothing lands on a teammate's queue until they have seen the exact wording,
+  // edited it if they want, and pressed Add. The first version created the todo
+  // straight from the click, sight unseen, which is how junk lands on boards.
+  let ROSTER = null;
+  const roster = async () => {
+    if (!ROSTER) ROSTER = (await api('/team/roster').catch(() => ({ team: [] }))).team || [];
+    return ROSTER;
+  };
+
   function actionRow(owners, question, answer) {
     const row = el('div', { class: 'acey__actions' });
-    for (const o of owners) {
-      const btn = el('button', { class: 'btn btn--ghost', type: 'button' },
-        `Add as action item · ${o.name}`);
-      btn.addEventListener('click', async () => {
-        btn.disabled = true;
-        btn.textContent = 'Drafting…';
+
+    const offers = () => mount(row, ...owners.map((o) => {
+      const btn = el('button', { class: 'btn btn--ghost', type: 'button' }, `Add as action item · ${o.name}`);
+      btn.addEventListener('click', () => openDraft(o));
+      return btn;
+    }));
+
+    async function openDraft(o) {
+      mount(row, el('div', { class: 'acey-draft acey-draft--busy' },
+        el('span', { class: 'acey__dot' }), ` Acey is drafting an item for ${o.name}…`));
+      const [team, r] = await Promise.all([
+        roster(),
+        api('/acey/action/draft', { method: 'POST', body: { owner: o.username, question, answer } })
+          .catch((e) => ({ error: e.message })),
+      ]);
+      if (r.error) {
+        mount(row, el('span', { class: 'acey__action-err' }, `Draft failed — ${r.error}. `));
+        return setTimeout(offers, 1800);
+      }
+      form(o, team, r.draft);
+    }
+
+    function form(o, team, d) {
+      const title = el('input', { class: 'input', maxlength: '140', value: d.title });
+      const detail = el('textarea', { class: 'input acey-draft__detail', maxlength: '600' }, d.detail);
+      const owner = el('select', { class: 'select', 'aria-label': 'Owner' },
+        ...(team.length ? team : [{ username: o.username, name: o.name }]).map((t) =>
+          el('option', { value: t.username, ...(t.username === o.username ? { selected: true } : {}) }, t.name)));
+      const sev = el('select', { class: 'select', 'aria-label': 'Severity' },
+        ...['medium', 'high', 'critical'].map((x) =>
+          el('option', { value: x, ...(x === d.severity ? { selected: true } : {}) }, x[0].toUpperCase() + x.slice(1))));
+      const add = el('button', { class: 'btn btn--primary', type: 'button' }, 'Add to board');
+      add.addEventListener('click', async () => {
+        add.disabled = true;
+        add.textContent = 'Adding…';
         try {
           const { todo } = await api('/acey/action', {
             method: 'POST',
-            body: { owner: o.username, question, answer },
+            body: { owner: owner.value, title: title.value, detail: detail.value, severity: sev.value },
           });
-          btn.replaceWith(el('span', { class: 'acey__action-done' },
-            `✓ Added for ${o.name}: `,
-            el('a', { href: `${window.__base__ || ''}/team.html`, title: todo.title }, todo.title.slice(0, 60)),
-          ));
-        } catch (err) {
-          btn.disabled = false;
-          btn.textContent = `Add as action item · ${o.name}`;
-          alert(err.message);
+          const name = owner.selectedOptions[0].textContent.split(' ')[0];
+          success(todo, name);
+        } catch (e) {
+          add.disabled = false;
+          add.textContent = 'Add to board';
+          alert(e.message);
         }
       });
-      row.append(btn);
+      mount(row, el('div', { class: 'acey-draft' },
+        el('div', { class: 'acey-draft__label' }, 'Action item — review before it lands'),
+        title,
+        detail,
+        el('div', { class: 'acey-draft__row' }, owner, sev,
+          el('div', { class: 'spacer' }),
+          el('button', { class: 'btn btn--ghost', type: 'button', onclick: offers }, 'Cancel'),
+          add)));
+      title.focus();
     }
+
+    // The confirmation keeps an exit: Undo deletes the todo (manual items are
+    // deletable) and puts the offers back, so a misfire costs two clicks.
+    function success(todo, name) {
+      const undo = el('button', { class: 'acey-linkbtn', type: 'button' }, 'Undo');
+      undo.addEventListener('click', async () => {
+        undo.disabled = true;
+        try { await api(`/team/todos/${todo.id}`, { method: 'DELETE' }); offers(); }
+        catch (e) { undo.disabled = false; alert(e.message); }
+      });
+      mount(row, el('div', { class: 'acey__action-done' },
+        `✓ Added to ${name}'s queue — `,
+        el('a', { href: `${window.__base__ || ''}/team.html#${todo.id}`, title: todo.title },
+          todo.title.length > 56 ? `${todo.title.slice(0, 56)}…` : todo.title),
+        ' · ', undo));
+    }
+
+    offers();
     return row;
   }
 

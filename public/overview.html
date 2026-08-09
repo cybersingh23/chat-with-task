@@ -32,11 +32,9 @@
       </div>
     </section>
 
-    <!-- what YOU owe, routed by domain and persisted on the Team page -->
-    <div class="ov-mine" id="ov-mine"></div>
-
-    <!-- who does what, generated from board + pipeline state (not the model) -->
-    <section class="ov-assign" id="ov-assign"></section>
+    <!-- Action items, read live from the Team board (/api/team/items) and
+         deep-linked into it — the same cards, never a derived copy. -->
+    <section class="ov-actions" id="ov-actions"></section>
 
     <!-- the charts -->
     <div class="ov-grid">

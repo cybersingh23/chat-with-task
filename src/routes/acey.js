@@ -209,12 +209,18 @@ aceyApi.delete('/history', (req, res) => {
 // Starter questions, so the empty state teaches what this can do rather than
 // showing a blank box. Read from disk when present so they can be tuned without
 // a deploy, same pattern as the rubric override.
-// "Add as action item": one click turns an answer into a todo for the owner it
-// named. The human's click is the authorization; the model only DRAFTS the
-// wording, because a deterministic title ("Follow up: <question>") produces
-// junk cards on a board that now stays clean. If the draft comes back
-// unparseable, a plain fallback ships instead of an error.
-aceyApi.post('/action', wrap(async (req, res) => {
+// "Add as action item" is two endpoints on purpose, one per party:
+//
+//   POST /action/draft   the MODEL drafts — one small completion turns the
+//                        answer into a title/detail/severity the human can read
+//   POST /action         the HUMAN creates — deterministic addTodo() of exactly
+//                        the fields they saw and possibly edited
+//
+// The first version drafted AFTER the click, inside the create call, which
+// meant authorizing text you had never seen onto a teammate's queue. Splitting
+// them puts the review step where it belongs: between the model's wording and
+// the board.
+aceyApi.post('/action/draft', wrap(async (req, res) => {
   const person = personByUsername(String(req.body?.owner || ''));
   if (!person) return res.status(400).json({ error: `unknown owner: ${req.body?.owner}` });
   const question = String(req.body?.question || '').slice(0, 2000);
@@ -235,25 +241,37 @@ aceyApi.post('/action', wrap(async (req, res) => {
             + 'supporting numbers from the answer — no markdown. severity is "high" only when the answer shows '
             + 'money, quality or a delivery actively at risk; otherwise "medium".',
         },
-        { role: 'user', content: `Owner: ${person.name} — ${person.remit}
-Question asked: ${question}
-Answer:
-${answer}` },
+        { role: 'user', content: `Owner: ${person.name} — ${person.remit}\nQuestion asked: ${question}\nAnswer:\n${answer}` },
       ],
       maxTokens: 300,
       onUsage: (u) => { acc.prompt_tokens += u.prompt_tokens || 0; acc.completion_tokens += u.completion_tokens || 0; },
     });
     draft = JSON.parse(String(msg.content || '').replace(/^```(?:json)?\s*|\s*```$/g, ''));
-  } catch { /* fall back to the deterministic wording below */ }
+  } catch { /* fall through to the plain fallback */ }
 
+  recordUsage({ user: req.user.username, taskId: null, kind: 'acey', model: config.litellm.model, usage: acc, text: `draft for ${person.username}` });
+  res.json({
+    draft: {
+      title: String(draft?.title || `Follow up: ${question || answer}`).slice(0, 140),
+      detail: String(draft?.detail || answer.slice(0, 300)).slice(0, 600),
+      severity: ['high', 'medium'].includes(draft?.severity) ? draft.severity : 'medium',
+    },
+  });
+}));
+
+aceyApi.post('/action', wrap(async (req, res) => {
+  const person = personByUsername(String(req.body?.owner || ''));
+  if (!person) return res.status(400).json({ error: `unknown owner: ${req.body?.owner}` });
+  const title = String(req.body?.title || '').trim().slice(0, 140);
+  if (!title) return res.status(400).json({ error: 'title required' });
+  const detail = String(req.body?.detail || '').trim().slice(0, 600);
   const todo = addTodo({
     owner: person.username,
-    title: String(draft?.title || `Follow up: ${question || answer}`).slice(0, 140),
-    detail: `${String(draft?.detail || answer.slice(0, 300)).slice(0, 600)} — drafted by Acey from a question ${req.user.username} asked.`,
-    severity: ['high', 'medium'].includes(draft?.severity) ? draft.severity : 'medium',
+    title,
+    detail: detail ? `${detail} — via Acey, added by ${req.user.username}.` : `Via Acey, added by ${req.user.username}.`,
+    severity: ['critical', 'high', 'medium'].includes(req.body?.severity) ? req.body.severity : 'medium',
     by: req.user.username,
   });
-  recordUsage({ user: req.user.username, taskId: null, kind: 'acey', model: config.litellm.model, usage: acc, text: `action for ${person.username}` });
   res.json({ todo });
 }));
 

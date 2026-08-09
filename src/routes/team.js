@@ -42,6 +42,11 @@ teamApi.get('/health', wrap(async (req, res) => {
 
 teamApi.get('/roster', (req, res) => res.json({ team: TEAM, brief: teamBrief() }));
 
+// The Overview page's action-items block reads THE SAME board the Team page
+// renders — one source, deep-linked, never a derived copy that can drift. Pure
+// file read: no health sync, no Redash, safe on every page load.
+teamApi.get('/items', (req, res) => res.json(board({})));
+
 // What the signed-in person still owes. Cheap enough for the Overview page to
 // call on every load.
 teamApi.get('/mine', wrap(async (req, res) => {
