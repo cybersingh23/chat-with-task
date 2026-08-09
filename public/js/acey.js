@@ -242,15 +242,33 @@ export function mountAcey({ page } = {}) {
       form(o, team, r.draft);
     }
 
+    // The draft renders as the CARD it will become — title-weight title, muted
+    // detail — with the text quietly editable in place (dashed underline on
+    // hover, accent on focus), not as a form with framed fields. Spellcheck is
+    // off: contributor handles and metric strings light up as errors otherwise.
     function form(o, team, d) {
-      const title = el('input', { class: 'input', maxlength: '140', value: d.title });
-      const detail = el('textarea', { class: 'input acey-draft__detail', maxlength: '600' }, d.detail);
+      const title = el('input', {
+        class: 'acey-draft__title', maxlength: '140', value: d.title,
+        spellcheck: 'false', 'aria-label': 'Title',
+      });
+      const detail = el('textarea', {
+        class: 'acey-draft__detail', maxlength: '600',
+        spellcheck: 'false', 'aria-label': 'Detail',
+      }, d.detail);
+      const grow = () => {
+        detail.style.height = 'auto';
+        detail.style.height = `${Math.min(170, detail.scrollHeight)}px`;
+      };
+      detail.addEventListener('input', grow);
+      requestAnimationFrame(grow);
+
       const owner = el('select', { class: 'select', 'aria-label': 'Owner' },
         ...(team.length ? team : [{ username: o.username, name: o.name }]).map((t) =>
           el('option', { value: t.username, ...(t.username === o.username ? { selected: true } : {}) }, t.name)));
       const sev = el('select', { class: 'select', 'aria-label': 'Severity' },
         ...['medium', 'high', 'critical'].map((x) =>
           el('option', { value: x, ...(x === d.severity ? { selected: true } : {}) }, x[0].toUpperCase() + x.slice(1))));
+
       const add = el('button', { class: 'btn btn--primary', type: 'button' }, 'Add to board');
       add.addEventListener('click', async () => {
         add.disabled = true;
@@ -260,20 +278,22 @@ export function mountAcey({ page } = {}) {
             method: 'POST',
             body: { owner: owner.value, title: title.value, detail: detail.value, severity: sev.value },
           });
-          const name = owner.selectedOptions[0].textContent.split(' ')[0];
-          success(todo, name);
+          success(todo, owner.selectedOptions[0].textContent.split(' ')[0]);
         } catch (e) {
           add.disabled = false;
           add.textContent = 'Add to board';
           alert(e.message);
         }
       });
+
       mount(row, el('div', { class: 'acey-draft' },
-        el('div', { class: 'acey-draft__label' }, 'Action item — review before it lands'),
+        el('div', { class: 'acey-draft__meta' },
+          el('span', { class: 'acey-draft__tag' }, 'Draft'),
+          owner, sev,
+          el('span', { class: 'acey-draft__hint' }, 'Edit anything — nothing lands until you add it')),
         title,
         detail,
-        el('div', { class: 'acey-draft__row' }, owner, sev,
-          el('div', { class: 'spacer' }),
+        el('div', { class: 'acey-draft__foot' },
           el('button', { class: 'btn btn--ghost', type: 'button', onclick: offers }, 'Cancel'),
           add)));
       title.focus();
