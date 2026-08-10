@@ -163,7 +163,6 @@ const TABS = [
   { key: 'trajectories', label: 'Trajectories', open: () => (lastTraj === 'sbs' ? showSideBySide() : showTrajectory(lastTraj)) },
   { key: 'cb',           label: 'CB responses', open: () => showCbResponses() },
   { key: 'qcspec',       label: 'QC spec',      open: () => showQcSpec() },
-  { key: 'checklist',    label: 'Checklist',    open: () => showChecklist() },
   { key: 'pipeline',     label: 'Pipeline',     open: () => showPipeline() },
 ];
 
@@ -332,6 +331,10 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
   viewerTitle.textContent = doc.file;
   viewReopeners.set(`doc:${doc.key}`, { label: doc.label, reopen: () => openDoc(doc, findDocNav(doc.label)) });
   let missing = false;
+  // Remediation is a WORKING surface (fix decisions + findings checklist +
+  // verdict live below the prose), so it always rebuilds; caching it would
+  // show stale decisions — the exact staleness class this app keeps meeting.
+  if (doc.key === 'remediation') refresh = true;
   if (refresh || !viewCache.has(`doc:${doc.key}`)) {
     let content;
     try {
@@ -340,11 +343,16 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
       // The remediation doc is a working surface: its fix blocks carry live
       // Approve / Edit / Deny controls wired below.
       content.innerHTML = renderMarkdown(f.text, { fixControls: doc.key === 'remediation' });
-      if (doc.key === 'remediation') decorateFixDocs(content);
+      if (doc.key === 'remediation') {
+        decorateFixDocs(content);
+        await appendChecklistSections(content);
+      }
     } catch {
       missing = true;
-      content = el('p', { class: 'hint-line' },
-        me.role === 'admin' ? `No ${doc.file} yet — generate it from the button above.` : `${doc.label} hasn't been generated for this task yet.`);
+      content = el('div', { class: 'md' },
+        el('p', { class: 'hint-line' },
+          me.role === 'admin' ? `No ${doc.file} yet — generate it from the button above.` : `${doc.label} hasn't been generated for this task yet.`));
+      if (doc.key === 'remediation') await appendChecklistSections(content);
     }
     mountView(`doc:${doc.key}`, () => content, { refresh: true });
   } else {
@@ -1302,30 +1310,62 @@ function buildFixesView(data) {
   return container;
 }
 
+// The Checklist tab is merged INTO the Remediation tab (operator request —
+// "include checklist functionality on the remediation page"): one working
+// surface with the doc's reasoning on top and every decision below it.
+// showChecklist survives as the alias for verdict flows and old deep links.
 async function showChecklist() {
-  setActiveTab('checklist');
-  hideTrajToolbar();
-  viewerTitle.textContent = 'Checklist';
-  document.querySelector('.doc__regen')?.remove();
-  viewReopeners.set('checklist', { label: 'Checklist', reopen: () => { setActive(findDocNav('Checklist')); showChecklist(); } });
-  let reviewText = '';
-  try { reviewText = (await api(`/task/${bucket}/${taskId}/file?path=review.md`)).text; } catch { /* no review yet */ }
-  const state = await api(`/task/${bucket}/${taskId}/state`);
-  // Fixes render inside the checklist — one mental model for "what needs a
-  // decision on this task" (spec §5.6, and Pavit: "club our checklist and new
-  // remediation approach"). The Fixes tab stays for focused work + deep links.
+  const doc = DOCS.find((d) => d.key === 'remediation');
+  await openDoc(doc, findDocNav(doc.label), { refresh: true });
+}
+
+// The merged lower half of the Remediation tab:
+//   1. fixes that have no ```fix fence in the doc (the seeded grammar edits on
+//      v1-doc tasks) — same approve/deny controls, so no task loses its
+//      decision UI just because its doc predates the fence format;
+//   2. the findings checklist + verdict recording, verbatim from the old tab.
+async function appendChecklistSections(content) {
   let fixData = null;
-  try { fixData = await api(`/task/${bucket}/${taskId}/fixes`); } catch { /* no fixes payload */ }
-  mountView('checklist', () => {
-    const view = buildChecklistView(parseFindings(reviewText), state.checklist || {}, state.verdict, state.verdict_note);
-    if (fixData?.items?.length) {
-      const fixes = buildFixesView(fixData);
-      fixes.querySelector('h1')?.remove();
-      view.append(el('h2', { class: 'fix-h2' }, `Fixes from this batch (${fixData.pending} awaiting a decision)`), fixes);
+  let reviewText = '';
+  let state = {};
+  try {
+    [fixData, state] = await Promise.all([
+      api(`/task/${bucket}/${taskId}/fixes`).catch(() => null),
+      api(`/task/${bucket}/${taskId}/state`),
+    ]);
+    reviewText = (await api(`/task/${bucket}/${taskId}/file?path=review.md`).catch(() => ({ text: '' }))).text || '';
+  } catch { /* sections degrade individually below */ }
+
+  if (fixData?.items?.length) {
+    // Which fixes are already interactive fence blocks above? Join on id, then
+    // on path+old (APPLIED fences carry their own ids, the seeded ledger uses
+    // G-ids — same edit, two names).
+    const covered = new Set();
+    for (const box of content.querySelectorAll('.fixdoc[data-fix-id]')) {
+      covered.add(box.dataset.fixId);
+      const oldText = box.querySelector('.fixdoc__old')?.textContent ?? '';
+      covered.add(`${box.dataset.fixPath}\u0000${oldText}`);
     }
-    return view;
-  }, { refresh: true });
-  if (focusNoteNext) { focusNoteNext = false; setTimeout(() => viewerBody.querySelector('.check-note-input')?.focus(), 80); }
+    const residual = fixData.items.filter((i) =>
+      !covered.has(i.id) && !(i.path && covered.has(`${i.path}\u0000${String(i.old)}`)));
+    if (residual.length) {
+      const sub = buildFixesView({ ...fixData, items: residual,
+        pending: residual.filter((i) => i.kind === 'proposed' && i.decision === 'pending').length });
+      sub.querySelector('h1')?.remove();
+      content.append(
+        el('hr', { class: 'merged-rule' }),
+        el('h2', { class: 'fix-h2' }, 'Fixes without a block above'),
+        sub);
+    }
+  }
+
+  content.append(
+    el('hr', { class: 'merged-rule' }),
+    buildChecklistView(parseFindings(reviewText), state.checklist || {}, state.verdict, state.verdict_note));
+  if (focusNoteNext) {
+    focusNoteNext = false;
+    setTimeout(() => content.querySelector('.check-note-input')?.focus(), 120);
+  }
 }
 let focusNoteNext = false;
 
@@ -2405,7 +2445,7 @@ verdictSelect.addEventListener('change', async () => {
   await api(`/task/${bucket}/${taskId}/verdict`, { method: 'POST', body: { verdict: v } });
   refreshState();
   // Second Opinion needs a "why" — jump to the checklist and focus the note box.
-  if (v === 'SECOND_OPINION') { focusNoteNext = true; setActive(findDocNav('Checklist')); showChecklist(); }
+  if (v === 'SECOND_OPINION') { focusNoteNext = true; showChecklist(); }
 });
 
 document.getElementById('logout-btn').addEventListener('click', async () => {
