@@ -337,7 +337,10 @@ async function openDoc(doc, navNode, { refresh = false } = {}) {
     try {
       const f = await api(`/task/${bucket}/${taskId}/file?path=${encodeURIComponent(doc.file)}`);
       content = el('div', { class: 'md' });
-      content.innerHTML = renderMarkdown(f.text);
+      // The remediation doc is a working surface: its fix blocks carry live
+      // Approve / Edit / Deny controls wired below.
+      content.innerHTML = renderMarkdown(f.text, { fixControls: doc.key === 'remediation' });
+      if (doc.key === 'remediation') decorateFixDocs(content);
     } catch {
       missing = true;
       content = el('p', { class: 'hint-line' },
@@ -1075,6 +1078,137 @@ async function gotoFinding(fid) {
 // the same blocks read-only, with the narrative around them; decisions happen
 // here. showFixes() survives as an alias for anything holding an old deep link.
 async function showFixes() { return showChecklist(); }
+
+// ---------- interactive fix blocks in the remediation doc ----------
+// The doc shows each directive with the prose around it; these controls make
+// the doc itself the decision surface. Approve applies through the fix engine,
+// Deny takes an inline reason, Edit unfolds the proposed text for rewording —
+// an edited approval ships the reviewer's text and the ledger records what the
+// model proposed next to what actually landed (edited_from).
+async function decorateFixDocs(root) {
+  let states;
+  try { states = await api(`/task/${bucket}/${taskId}/fixes`); } catch { return; }
+  const byId = new Map(states.items.map((i) => [i.id, i]));
+  // APPLIED blocks in the doc carry their own ids; the seeded grammar entries
+  // use G-ids. Path + old-text is the stable join.
+  const byPathOld = new Map(states.items.filter((i) => i.path)
+    .map((i) => [`${i.path}\u0000${String(i.old)}`, i]));
+
+  for (const box of root.querySelectorAll('.fixdoc[data-fix-path]')) {
+    const path = box.dataset.fixPath;
+    if (!path) continue;
+    const oldText = box.querySelector('.fixdoc__old')?.textContent ?? '';
+    const item = byId.get(box.dataset.fixId) || byPathOld.get(`${path}\u0000${oldText}`);
+    if (!item) continue;
+    wireFixDoc(box, item);
+  }
+}
+
+function wireFixDoc(box, item) {
+  const decision = box.querySelector('.fixdoc__decision');
+  const act = box.querySelector('.fixdoc__act');
+  const editor = box.querySelector('.fixdoc__editor');
+  if (!decision || !act) return;
+
+  const paint = (i) => {
+    const done = i.kind === 'grammar'
+      ? (i.reverted ? { txt: `denied · reverted${i.reason ? ` — ${i.reason}` : ''}`, cls: 'is-denied' }
+        : i.decided_by && i.decided_by !== 'acc-eval' ? { txt: `approved · ${i.decided_by}`, cls: 'is-approved' }
+          : i.signed_off_by ? { txt: `signed off · ${i.signed_off_by}`, cls: 'is-approved' }
+            : { txt: 'applied by the eval — sign off, edit or deny', cls: '' })
+      : i.decision === 'approved' && !i.reverted ? { txt: `approved · ${i.decided_by}${latestEdit(i)}`, cls: 'is-approved' }
+        : i.decision === 'denied' ? { txt: `denied · ${i.decided_by}${i.reason ? ` — ${i.reason}` : ''}`, cls: 'is-denied' }
+          : i.needsReanchor ? { txt: 'NEEDS RE-ANCHOR — text drifted', cls: 'is-denied' }
+            : { txt: 'awaiting your decision', cls: '' };
+    decision.textContent = done.txt;
+    decision.className = `fixdoc__decision ${done.cls}`;
+    const decided = done.cls !== '';
+    act.hidden = decided && i.kind !== 'grammar' && i.decision === 'denied' ? false : decided;
+    // Denied stays actionable (approve-anyway is a legitimate reversal); a
+    // decided approval hides the buttons — Undo lives in the checklist.
+    if (i.decision === 'denied' || i.reverted) act.hidden = false;
+    if ((i.decision === 'approved' && !i.reverted) || i.signed_off_by) act.hidden = true;
+  };
+  const latestEdit = (i) => (i.edited_from !== undefined && i.edited_from !== null ? ' · edited' : '');
+
+  const refresh = async () => {
+    const states = await api(`/task/${bucket}/${taskId}/fixes`);
+    const next = states.items.find((x) => x.id === item.id)
+      || states.items.find((x) => x.path === item.path && String(x.old) === String(item.old));
+    if (next) {
+      item = next;
+      paint(item);
+      // An edit changes what ships — the block's green text shows the LANDED
+      // text, which for an edited approval is the reviewer's version.
+      const landed = next.applied_new !== undefined ? next.applied_new : next.new;
+      if (landed !== undefined) box.querySelector('.fixdoc__new').textContent = landed === '' ? '(delete)' : String(landed);
+    }
+  };
+
+  const call = async (action, body) => {
+    try {
+      const r = await api(`/task/${bucket}/${taskId}/fixes/${item.id}/${action}`, { method: 'POST', body: body || {} });
+      if (r.result === 'DRIFTED') alert(`${item.id}: the text is not what this fix was authored against — nothing written.`);
+      if (r.result === 'AMBIGUOUS') alert(`${item.id}: old matches more than once — route back to the eval.`);
+      await refresh();
+    } catch (e) { alert(e.message); }
+  };
+
+  act.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-fix-action]');
+    if (!btn) return;
+    e.preventDefault();
+    const action = btn.dataset.fixAction;
+    if (action === 'approve') return call('approve');
+    if (action === 'edit') return openEditor();
+    if (action === 'deny') return openDeny();
+  });
+
+  function openEditor() {
+    const current = box.querySelector('.fixdoc__new').textContent;
+    const ta = el('textarea', { class: 'fixdoc__ta', spellcheck: 'false' },
+      current === '(delete)' ? '' : current);
+    const grow = () => { ta.style.height = 'auto'; ta.style.height = `${Math.min(220, ta.scrollHeight)}px`; };
+    ta.addEventListener('input', grow);
+    editor.replaceChildren(
+      el('div', { class: 'fixdoc__editor-label' }, 'Your replacement — this exact text ships:'),
+      ta,
+      el('div', { class: 'fixdoc__editor-row' },
+        el('button', { class: 'btn btn--ghost', type: 'button', onclick: () => { editor.hidden = true; } }, 'Cancel'),
+        el('button', {
+          class: 'btn btn--primary', type: 'button',
+          onclick: async (ev) => {
+            if (!ta.value.trim()) return ta.focus();
+            ev.target.disabled = true;
+            await call('approve', { new: ta.value });
+            editor.hidden = true;
+          },
+        }, 'Apply my version')));
+    editor.hidden = false;
+    requestAnimationFrame(() => { grow(); ta.focus(); });
+  }
+
+  function openDeny() {
+    const input = el('input', { class: 'fixdoc__ta fixdoc__reason', placeholder: 'Why this fix is wrong — recorded for the vendor dispute trail' });
+    editor.replaceChildren(
+      input,
+      el('div', { class: 'fixdoc__editor-row' },
+        el('button', { class: 'btn btn--ghost', type: 'button', onclick: () => { editor.hidden = true; } }, 'Cancel'),
+        el('button', {
+          class: 'btn btn--primary', type: 'button',
+          onclick: async (ev) => {
+            if (!input.value.trim()) return input.focus();
+            ev.target.disabled = true;
+            await call('deny', { reason: input.value.trim() });
+            editor.hidden = true;
+          },
+        }, item.kind === 'grammar' ? 'Deny & revert' : 'Deny')));
+    editor.hidden = false;
+    input.focus();
+  }
+
+  paint(item);
+}
 
 function buildFixesView(data) {
   const container = el('div', { class: 'fixes' });

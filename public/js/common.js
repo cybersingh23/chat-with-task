@@ -75,7 +75,7 @@ const RANK_FIELD_RE = /^\/(?:ranking_rationale|preference_rating|problem_stateme
 
 // Markdown -> sanitized HTML. traj://model_a/12 links become "Show in
 // trajectory" buttons; clicks are delegated via the data-traj attributes.
-export function renderMarkdown(md) {
+export function renderMarkdown(md, opts = {}) {
   const renderer = new marked.Renderer();
 
   // Give finding headings (### [HARD] F1 — …) an id so the checklist can deep-link to them.
@@ -162,16 +162,30 @@ export function renderMarkdown(md) {
           fix.rule ? `<a class="spec-link" href="#" data-spec-key="${escapeHtml(fix.rule)}">${escapeHtml(fix.rule)}</a>` : '',
           chip(fix.status || '', 'fixdoc__status'),
           fix.meaning_changing ? chip('meaning-changing', 'fixdoc__meaning') : '',
-          '<span class="fixdoc__hint">decide in the Checklist tab</span>',
+          opts.fixControls ? '<span class="fixdoc__decision"></span>' : '<span class="fixdoc__hint">decide in the Checklist tab</span>',
         ].filter(Boolean).join(' ');
+        // With controls on (the task page's remediation doc), each block carries
+        // Approve / Edit / Deny and a decision slot — task.js decorateFixDocs()
+        // wires them to the fixes API and keeps the state current. Matching key
+        // is the block id, with path+old as fallback for APPLIED blocks whose id
+        // differs from the seeded ledger id.
+        const controls = opts.fixControls && fix.path
+          ? '<div class="fixdoc__act">'
+            + '<button type="button" class="btn btn--ghost fixdoc-btn" data-fix-action="approve">Approve</button>'
+            + '<button type="button" class="btn btn--ghost fixdoc-btn" data-fix-action="edit">Edit</button>'
+            + '<button type="button" class="btn btn--ghost fixdoc-btn fixdoc-btn--deny" data-fix-action="deny">Deny</button>'
+            + '</div><div class="fixdoc__editor" hidden></div>'
+          : '';
+        const attrs = `data-fix-id="${escapeHtml(fix.id || '')}" data-fix-status="${escapeHtml(fix.status || '')}"`
+          + ` data-fix-path="${escapeHtml(fix.path || '')}"`;
         if (!fix.path) {
-          return `<div class="fixdoc"><div class="fixdoc__head">${head}</div>`
+          return `<div class="fixdoc" ${attrs}><div class="fixdoc__head">${head}</div>`
             + `<div class="fixdoc__instruction">${escapeHtml(fix.instruction || '(instruction-only fix)')}</div></div>`;
         }
-        return `<div class="fixdoc"><div class="fixdoc__head">${head}</div>`
+        return `<div class="fixdoc" ${attrs}><div class="fixdoc__head">${head}</div>`
           + `<div class="fixdoc__path">${escapeHtml(fix.path)}</div>`
           + `<div class="fixdoc__old">${escapeHtml(String(fix.old))}</div>`
-          + `<div class="fixdoc__new">${fix.new === '' ? '(delete)' : escapeHtml(String(fix.new))}</div></div>`;
+          + `<div class="fixdoc__new">${fix.new === '' ? '(delete)' : escapeHtml(String(fix.new))}</div>${controls}</div>`;
       } catch { /* unparseable — fall through to a plain code block */ }
     }
     if (lang.trim() === 'alerts') {

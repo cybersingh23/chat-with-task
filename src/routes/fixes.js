@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { taskDir } from '../workspace.js';
 import {
-  fixStates, loadFixBlocks, applyFix, denyFix, revertFix, readLedger,
+  fixStates, loadFixBlocks, applyFix, approveWithText, denyFix, revertFix, readLedger,
   ptrGet, sourcePath, rankPath,
 } from '../fixes.js';
 
@@ -48,6 +48,11 @@ function findBlock(dir, fixId) {
 fixesApi.post('/:fixId/approve', wrap(async (req, res) => {
   const dir = dirOf(req);
   const item = findBlock(dir, req.params.fixId);
+  // An edited approval carries the reviewer's replacement text; it applies
+  // their wording and the ledger records edited_from.
+  if (typeof req.body?.new === 'string' && req.body.new !== '') {
+    return res.json(approveWithText(dir, item, req.user.username, String(req.body.new).slice(0, 4000)));
+  }
   if (item.kind === 'grammar') {
     // Grammar arrives applied; approval is sign-off, recorded without touching text.
     const ledger = readLedger(dir);

@@ -263,7 +263,7 @@ export function fixApplicability(live, fix) {
 // One PROPOSED fix. Refuses — and says why — rather than writing on any doubt:
 // DRIFTED means the text is not what the fix was authored against, AMBIGUOUS
 // means the eval must widen `old` (§5.2). Never called for APPLIED blocks.
-export function applyFix(dir, fix, user) {
+export function applyFix(dir, fix, user, { editedFrom = null } = {}) {
   if (fix.status !== 'PROPOSED') throw new Error(`refusing to re-apply ${fix.id}: status is ${fix.status}, not PROPOSED`);
   if (!fix.path) throw new Error(`${fix.id} is instruction-only (path: null) — not applicable`);
 
@@ -295,8 +295,32 @@ export function applyFix(dir, fix, user) {
     decided_at: new Date().toISOString(),
     reverted_at: null,
     reason: null,
+    // The reviewer replaced the proposed text with their own: the trail shows
+    // what the model proposed AND what actually shipped.
+    ...(editedFrom !== null ? { edited_from: editedFrom } : {}),
   });
   return { result: 'APPLIED' };
+}
+
+// Approve with the reviewer's own replacement text. For a PROPOSED fix this is
+// applyFix with `new` overridden; for an APPLIED grammar edit the eval's text
+// is already in the file, so it is reverted from source first and the edited
+// text applied as a fresh approved entry under the same fix id — the ledger
+// then reads: eval's edit denied-as-superseded, reviewer's edit approved.
+export function approveWithText(dir, item, user, newText) {
+  if (item.kind === 'grammar') {
+    const ledger = readLedger(dir);
+    const entry = ledger.find((e) => e.fix_id === item.id && !e.reverted_at && e.decision === 'approved' && !e.superseded_at);
+    if (!entry) throw new Error(`no active entry for ${item.id}`);
+    const r = revertEntry(dir, entry, user, 'superseded by reviewer edit');
+    if (r.failures?.length) throw new Error(`revert left unreplayable fixes on ${entry.path}: ${r.failures.join(', ')}`);
+    return applyFix(dir, {
+      id: item.id, path: entry.path, old: entry.old, occurrence: entry.occurrence ?? 1,
+      rule: entry.rule, class: entry.class, meaning_changing: true, owner: entry.owner,
+      status: 'PROPOSED', new: newText,
+    }, user, { editedFrom: entry.new });
+  }
+  return applyFix(dir, { ...item, status: 'PROPOSED', new: newText }, user, { editedFrom: item.new });
 }
 
 // Deny records a judgement. For PROPOSED that is all it does; for an APPLIED
@@ -402,6 +426,9 @@ export function fixStates(dir) {
       error_type: e.error_type, meaning_changing: !!e.meaning_changing, owner: e.owner,
       decision: current.decision, decided_by: current.decided_by, decided_at: current.decided_at,
       reverted: !!current.reverted_at, reason: current.reason || null,
+      applied_new: current.decision === 'approved' && !current.reverted_at ? current.new : undefined,
+      edited_from: current.edited_from,
+      signed_off_by: current.signed_off_by || null,
     });
   }
 
@@ -417,6 +444,11 @@ export function fixStates(dir) {
       decided_by: e?.decided_by || null,
       decided_at: e?.decided_at || null,
       reverted: !!e?.reverted_at,
+      // What actually shipped can differ from what the block proposed — an
+      // edited approval applies the reviewer's text. Surface both so the UI
+      // shows the landed text and the "edited" marker.
+      applied_new: e && e.decision === 'approved' && !e.reverted_at ? e.new : undefined,
+      edited_from: e?.edited_from,
       applicability: e ? null : (fix.path ? applicability : null),
       needsReanchor: !e && fix.path ? applicability === 'DRIFTED' : false,
     });
