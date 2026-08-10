@@ -164,7 +164,6 @@ const TABS = [
   { key: 'cb',           label: 'CB responses', open: () => showCbResponses() },
   { key: 'qcspec',       label: 'QC spec',      open: () => showQcSpec() },
   { key: 'checklist',    label: 'Checklist',    open: () => showChecklist() },
-  { key: 'fixes',        label: 'Fixes',        open: () => showFixes() },
   { key: 'pipeline',     label: 'Pipeline',     open: () => showPipeline() },
 ];
 
@@ -1070,18 +1069,12 @@ async function gotoFinding(fid) {
 }
 
 // ---------- Fixes (staging handoff §5) ----------
-// The directive fixes that arrived with the batch: grammar edits the eval
-// already applied (sign off or deny-and-revert) and PROPOSED label corrections
-// (approve applies, deny records why). Everything routes through the ledger.
-async function showFixes() {
-  setActiveTab('fixes');
-  hideTrajToolbar();
-  viewerTitle.textContent = 'Fixes';
-  document.querySelector('.doc__regen')?.remove();
-  viewReopeners.set('fixes', { label: 'Fixes', reopen: () => { setActive(findDocNav('Fixes')); showFixes(); } });
-  const data = await api(`/task/${bucket}/${taskId}/fixes`);
-  mountView('fixes', () => buildFixesView(data), { refresh: true });
-}
+// The directive fixes render INSIDE the Checklist tab — one decision surface
+// per task. There is deliberately no separate Fixes tab: it duplicated the
+// checklist item-for-item within a day of existing. The remediation DOC shows
+// the same blocks read-only, with the narrative around them; decisions happen
+// here. showFixes() survives as an alias for anything holding an old deep link.
+async function showFixes() { return showChecklist(); }
 
 function buildFixesView(data) {
   const container = el('div', { class: 'fixes' });

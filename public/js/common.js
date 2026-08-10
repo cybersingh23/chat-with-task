@@ -149,6 +149,31 @@ export function renderMarkdown(md) {
       });
       return `<div class="autoqc-panel"><div class="autoqc-head">Auto-QC read · ${lines.length} flagged</div>${items.join('')}</div>`;
     }
+    // ```fix fences (staging handoff §2.4): the remediation DOC shows the
+    // directive as a readable swap — rule, path, struck old, highlighted new —
+    // not a line of raw JSON. Read-only here; the Checklist tab is where the
+    // decision gets made, and it says so.
+    if (lang.trim() === 'fix') {
+      try {
+        const fix = JSON.parse(body);
+        const chip = (txt, cls) => `<span class="${cls}">${escapeHtml(txt)}</span>`;
+        const head = [
+          fix.id ? chip(fix.id, 'fixdoc__id') : '',
+          fix.rule ? `<a class="spec-link" href="#" data-spec-key="${escapeHtml(fix.rule)}">${escapeHtml(fix.rule)}</a>` : '',
+          chip(fix.status || '', 'fixdoc__status'),
+          fix.meaning_changing ? chip('meaning-changing', 'fixdoc__meaning') : '',
+          '<span class="fixdoc__hint">decide in the Checklist tab</span>',
+        ].filter(Boolean).join(' ');
+        if (!fix.path) {
+          return `<div class="fixdoc"><div class="fixdoc__head">${head}</div>`
+            + `<div class="fixdoc__instruction">${escapeHtml(fix.instruction || '(instruction-only fix)')}</div></div>`;
+        }
+        return `<div class="fixdoc"><div class="fixdoc__head">${head}</div>`
+          + `<div class="fixdoc__path">${escapeHtml(fix.path)}</div>`
+          + `<div class="fixdoc__old">${escapeHtml(String(fix.old))}</div>`
+          + `<div class="fixdoc__new">${fix.new === '' ? '(delete)' : escapeHtml(String(fix.new))}</div></div>`;
+      } catch { /* unparseable — fall through to a plain code block */ }
+    }
     if (lang.trim() === 'alerts') {
       const lines = String(body).split('\n').map((l) => l.trim()).filter((l) => l && l.toUpperCase() !== 'NONE');
       if (!lines.length) return '';
