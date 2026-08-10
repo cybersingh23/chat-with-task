@@ -77,6 +77,12 @@ export const REGISTRY = {
     sql: 'task_sbq.sql',
     params: { task_ids: { type: 'taskIdList', required: true, max: 1000 } },
   },
+  task_labels: {
+    label: 'Platform label fields for tasks',
+    description: 'The annotator label as platform holds it now — preference rating and winning side.',
+    sql: 'task_labels.sql',
+    params: { task_ids: { type: 'taskIdList', required: true, max: 500 } },
+  },
   task_current_level: {
     label: 'Current level for tasks',
     description: 'Where a given set of tasks sits in the pipeline right now.',

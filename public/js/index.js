@@ -130,10 +130,21 @@ async function runBackfillCheck() {
 
   const ready = r.items.filter((i) => i.ready);
   const blocked = r.items.filter((i) => !i.ready);
+  const matchChip = (m) => {
+    if (!m || m.status === 'NOT_FOUND') return el('span', { class: 'bf__match dim', title: 'No label row on platform yet' }, '—');
+    if (m.status === 'MATCH') return el('span', { class: 'bf__match is-ok', title: 'Preference + winner match platform' }, '✓ platform');
+    if (m.status === 'MISMATCH') {
+      const detail = (m.fields || []).filter((f) => !f.match)
+        .map((f) => `${f.field}: board ${f.board} vs platform ${f.platform}`).join('; ');
+      return el('span', { class: 'bf__match is-bad', title: detail }, '✗ platform');
+    }
+    return el('span', { class: 'bf__match dim', title: m.status }, '—');
+  };
   const row = (i) => el('div', { class: `bf__row${i.ready ? '' : ' bf__row--blocked'}` },
     el('span', { class: `bf__dot${i.ready ? ' is-ok' : ''}` }),
     el('a', { class: 'mono bf__id', href: `${window.__base__ || ''}/task/${i.bucket}/${i.id}` }, i.id),
     i.upstream ? el('span', { class: 'bf__lvl' }, `L${i.upstream.level} · ${i.upstream.status}`) : el('span', { class: 'bf__lvl dim' }, 'no pipeline row'),
+    matchChip(i.labelMatch),
     el('span', { class: 'bf__why' }, i.ready ? (i.grammarOnly ? 'ready · grammar-only' : 'ready') : i.blockers.join(' · ')));
 
   const body = box.querySelector('.bf__body');
@@ -142,7 +153,26 @@ async function runBackfillCheck() {
       `${r.items.length} in Staging — ${ready.length} confirmed, ${blocked.length} blocked.`
       + (r.redash ? '' : ' Redash was unreachable, so SBQ is unverified — board checks only.')),
     ...ready.map(row), ...blocked.map(row),
+    el('p', { class: 'bf__note' },
+      'Platform match covers preference + winner; prose fields land via the backfill JSON and are verified by the eval reconciler.'),
     el('div', { class: 'bf__actions' },
+      el('button', {
+        class: 'btn',
+        title: 'The wire-format JSON — original upload shape, board-edited values — for the platform backfill',
+        onclick: async (e) => {
+          e.target.disabled = true;
+          try {
+            const out = await api('/staging/backfill');
+            const blob = new Blob([JSON.stringify(out.rows, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `backfill_${new Date().toISOString().slice(0, 10)}_${out.manifest.tasks}tasks.json`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+            e.target.textContent = `Retrieved ${out.manifest.tasks} rows (${out.manifest.excluded.length} excluded)`;
+          } catch (err) { e.target.disabled = false; toast(err.message); }
+        },
+      }, 'Retrieve backfills'),
       el('button', {
         class: 'btn',
         onclick: async (e) => {
@@ -235,6 +265,24 @@ async function boot() {
 async function load() {
   currentWs = await api('/workspace');
   render();
+  loadLayers();
+}
+
+// The Redash-observed layer for every task, as a tag on the card (§7.1) — so
+// SBQ and pipeline position are facts on the board, not guesses. Batched and
+// served from a 5-minute cache; re-render happens when the answer arrives.
+let upstreamLayers = {};
+let layersLoaded = false;
+async function loadLayers() {
+  if (layersLoaded) return;
+  layersLoaded = true;
+  try {
+    const r = await api('/staging/layers');
+    if (r.layers && Object.keys(r.layers).length) {
+      upstreamLayers = r.layers;
+      render();
+    }
+  } catch { /* the tag is an extra, never a blocker */ }
 }
 
 // Flatten the workspace into tickets carrying their bucket (= severity).
@@ -261,6 +309,12 @@ function ticketCard(t) {
     el('div', { class: 'card__top' },
       // Severity is a tag, never a coloured left edge on the card.
       el('span', { class: `tag ${SEV_TAG[t.bucket] || ''}` }, SEV_LABEL[t.bucket]),
+      upstreamLayers[t.id]
+        ? el('span', {
+          class: `tag tag--layer${upstreamLayers[t.id].level === '12' ? ' tag--layer-l12' : ''}`,
+          title: `Redash: L${upstreamLayers[t.id].level} · ${upstreamLayers[t.id].status}`,
+        }, `L${upstreamLayers[t.id].level}`)
+        : null,
       t.tour ? el('span', { class: 'tag', title: 'temporary tour sandbox — deleted when the tour ends' }, 'sandbox') : null,
       t.delivered ? el('span', { class: 'tag', title: `delivered${t.deliveredAt ? ' ' + t.deliveredAt.slice(0, 10) : ''}` }, 'archived') : null,
       el('span', { class: 'spacer' }),

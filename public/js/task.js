@@ -1184,7 +1184,20 @@ async function showChecklist() {
   let reviewText = '';
   try { reviewText = (await api(`/task/${bucket}/${taskId}/file?path=review.md`)).text; } catch { /* no review yet */ }
   const state = await api(`/task/${bucket}/${taskId}/state`);
-  mountView('checklist', () => buildChecklistView(parseFindings(reviewText), state.checklist || {}, state.verdict, state.verdict_note), { refresh: true });
+  // Fixes render inside the checklist — one mental model for "what needs a
+  // decision on this task" (spec §5.6, and Pavit: "club our checklist and new
+  // remediation approach"). The Fixes tab stays for focused work + deep links.
+  let fixData = null;
+  try { fixData = await api(`/task/${bucket}/${taskId}/fixes`); } catch { /* no fixes payload */ }
+  mountView('checklist', () => {
+    const view = buildChecklistView(parseFindings(reviewText), state.checklist || {}, state.verdict, state.verdict_note);
+    if (fixData?.items?.length) {
+      const fixes = buildFixesView(fixData);
+      fixes.querySelector('h1')?.remove();
+      view.append(el('h2', { class: 'fix-h2' }, `Fixes from this batch (${fixData.pending} awaiting a decision)`), fixes);
+    }
+    return view;
+  }, { refresh: true });
   if (focusNoteNext) { focusNoteNext = false; setTimeout(() => viewerBody.querySelector('.check-note-input')?.focus(), 80); }
 }
 let focusNoteNext = false;

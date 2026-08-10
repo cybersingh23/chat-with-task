@@ -49,16 +49,19 @@ stagingApi.get('/verify', wrap(async (req, res) => {
 
   let sbq = new Map();
   let level = new Map();
+  let labels = new Map();
   let redashError = null;
   if (redashEnabled()) {
     try {
       const ids = tasks.map((t) => t.id);
-      const [sbqRes, lvlRes] = await Promise.all([
+      const [sbqRes, lvlRes, labelRes] = await Promise.all([
         runRegistryQuery('task_sbq', { task_ids: ids }, { fresh: req.query.fresh === '1' }),
         runRegistryQuery('task_current_level', { task_ids: ids }, { fresh: req.query.fresh === '1' }),
+        runRegistryQuery('task_labels', { task_ids: ids }, { fresh: req.query.fresh === '1' }),
       ]);
       sbq = new Map(sbqRes.rows.map((r) => [r.task_id, r]));
       level = new Map(lvlRes.rows.map((r) => [r.task_id, r]));
+      labels = new Map(labelRes.rows.map((r) => [r.task_id, r]));
     } catch (e) {
       redashError = e.message;
     }
@@ -88,6 +91,12 @@ stagingApi.get('/verify', wrap(async (req, res) => {
       sbq: upstreamSbq,
       lastSbqAt: s?.last_sbq_at || null,
       hasSourceRow: fs.existsSync(path.join(taskDir(m.bucket, m.id), '_source_row.json')),
+      // Did the board's label land on platform? Covers the two 1:1-mappable
+      // fields (preference rating, winning side); prose fields have no platform
+      // field map yet — the eval-side reconciler owns that (§7.5). Informational,
+      // not a gate: a grammar-only task matches trivially, a re-ranked one shows
+      // ✗ until the backfill lands.
+      labelMatch: labelMatch(taskDir(m.bucket, m.id), labels.get(m.id)),
       ready: blockers.length === 0,
       blockers,
     };
@@ -142,6 +151,58 @@ stagingApi.post('/resolve', wrap(async (req, res) => {
     });
   }
   res.json({ moved: moved.map((m) => m.id), skipped });
+}));
+
+// Normalize-then-compare for the two mappable label fields (§8: normalize both
+// sides; a naive === cries wolf on formatting).
+function labelMatch(dir, platform) {
+  if (!platform) return { status: 'NOT_FOUND' };
+  let live;
+  try { live = JSON.parse(fs.readFileSync(path.join(dir, 'rank.json'), 'utf8')); } catch { return { status: 'NO_RANK' }; }
+
+  const fields = [];
+  // preference: "+2: moderately prefer model b" -> +2, matched numerically.
+  const platPref = parseInt(String(platform.preference_rating || '').trim(), 10);
+  const boardPref = Number(live.preference_rating);
+  if (!Number.isNaN(platPref) && !Number.isNaN(boardPref)) {
+    fields.push({ field: 'preference_rating', match: platPref === boardPref, board: boardPref, platform: platPref });
+  }
+  // winner: platform says "model a"/"model b"; the board's rank-1 result key
+  // maps to a side directly (model_1/model_2) or via model_assignments.
+  const winKey = Object.entries(live.results || {}).find(([, r]) => Number(r.rank) === 1)?.[0];
+  if (winKey) {
+    let side = null;
+    if (/^model_[12]$/i.test(winKey)) side = winKey.endsWith('1') ? 'model a' : 'model b';
+    else {
+      const assign = live.model_assignments || {};
+      const entry = Object.entries(assign).find(([, code]) => code === winKey);
+      if (entry) side = entry[0] === 'model_a' ? 'model a' : 'model b';
+    }
+    const plat = String(platform.model_ranking || '').trim().toLowerCase();
+    if (side && plat) fields.push({ field: 'winner', match: plat === side, board: side, platform: plat });
+  }
+  if (!fields.length) return { status: 'UNMAPPED' };
+  return { status: fields.every((f) => f.match) ? 'MATCH' : 'MISMATCH', fields };
+}
+
+// Upstream layer for EVERY task on the board — the per-card tag (§7.1). One
+// batched query, served from the registry's cache (5-minute TTL); fresh=1 is
+// the manual refresh.
+stagingApi.get('/layers', wrap(async (req, res) => {
+  const ws = listWorkspace();
+  const ids = Object.values(ws).flat().filter((t) => !t.tour).map((t) => t.id);
+  if (!ids.length || !redashEnabled()) return res.json({ layers: {}, enabled: redashEnabled() });
+  try {
+    const out = await runRegistryQuery('task_current_level', { task_ids: ids }, { fresh: req.query.fresh === '1' });
+    res.json({
+      layers: Object.fromEntries(out.rows.map((r) => [r.task_id, { level: String(r.review_level), status: r.status }])),
+      cached: out.cached,
+      retrievedAt: out.retrievedAt,
+      enabled: true,
+    });
+  } catch (e) {
+    res.json({ layers: {}, enabled: true, error: e.message });
+  }
 }));
 
 // ---------------------------------------------------------------------------
