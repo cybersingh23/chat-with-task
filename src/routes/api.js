@@ -54,6 +54,16 @@ api.post('/logout', requireAuth, wrap(async (req, res) => {
 
 api.use(requireAuth);
 
+// NOTHING under /api may be served from a browser or proxy cache. The old
+// board's "Export CSV stopped updating" was exactly this failure — a cached
+// response reused without revalidation — and a stale JSON here mis-states task
+// state, which is worse than a stale download. The avatar route overrides this
+// with its own max-age below; it serves immutable-ish PNGs, not state.
+api.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 api.get('/me', (req, res) => res.json(req.user));
 
 // Profile photo for a user, or 404 so the client falls back to the initial disc.
@@ -318,7 +328,7 @@ api.get('/export/all.csv', wrap(async (req, res) => {
   // had no Grammar Fixes case, so 27 tasks exported as the wrong lane.
   const csv = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const ws = listWorkspace();
-  const lines = ['task_id,bucket,lane,verdict,claimed_by,tags,has_review,has_remediation,grammar_only,delivered'];
+  const lines = ['task_id,bucket,lane,verdict,claimed_by,tags,has_review,has_remediation,grammar_only,delivered,audit_tags,pending_fixes,writing_band_as_delivered'];
   for (const [bucket, tasks] of Object.entries(ws)) {
     for (const t of tasks) {
       if (t.tour) continue;   // dummy tour tasks aren't real audit tasks
@@ -328,6 +338,7 @@ api.get('/export/all.csv', wrap(async (req, res) => {
       lines.push([
         t.id, bucket, LANE_LABELS[laneOf(t)], t.verdict || '', t.claimedBy || '',
         tags, t.hasReview, t.hasRemediation, !!t.grammarOnly, !!t.delivered,
+        (t.audit?.tags || []).join('|'), t.pendingFixes ?? 0, t.audit?.writing_band_as_delivered || '',
       ].map(csv).join(','));
     }
   }

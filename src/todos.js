@@ -3,6 +3,7 @@ import path from 'node:path';
 import { config } from './config.js';
 import { projectHealth } from './health.js';
 import { TEAM, personByUsername } from './team.js';
+import { writeJsonAtomic } from './fixes.js';
 
 // Everybody's todos, in one file, with the auto-generated ones kept honest.
 //
@@ -65,7 +66,7 @@ function load() {
 
 function save(state) {
   fs.mkdirSync(config.dataDir, { recursive: true });
-  fs.writeFileSync(TODOS_PATH, JSON.stringify(state, null, 2));
+  writeJsonAtomic(TODOS_PATH, state);
   return state;
 }
 

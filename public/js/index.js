@@ -264,9 +264,24 @@ async function boot() {
 
 async function load() {
   currentWs = await api('/workspace');
+  lastLoadedAt = Date.now();
   render();
   loadLayers();
 }
+
+// A board tab left open holds the workspace from whenever it last acted. The
+// downloads are server-generated and always fresh, but the LANES ON SCREEN are
+// not — and a person reading a stale board makes stale calls. Refresh whenever
+// the tab comes back into focus, debounced so tab-flipping doesn't hammer the
+// server.
+let lastLoadedAt = 0;
+const FOCUS_REFRESH_MS = 15_000;
+async function refreshIfStale() {
+  if (document.hidden || Date.now() - lastLoadedAt < FOCUS_REFRESH_MS) return;
+  try { await load(); } catch { /* next focus retries */ }
+}
+window.addEventListener('focus', refreshIfStale);
+document.addEventListener('visibilitychange', refreshIfStale);
 
 // The Redash-observed layer for every task, as a tag on the card (§7.1) — so
 // SBQ and pipeline position are facts on the board, not guesses. Batched and
