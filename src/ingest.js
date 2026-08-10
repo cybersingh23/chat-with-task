@@ -110,6 +110,19 @@ export function ingestTask(taskId, bucket = 'UNSORTED', sourceDir = null) {
 // Pull this task's slice of any /acc audit artifacts that live next to the
 // source delivery, so the copilot and docgen start from the audit's findings.
 export function writeAuditSeed(deliveryDir, taskId, destTaskDir) {
+  // The copilot must know what the eval already corrected, or it will re-flag
+  // fixed grammar as new findings (§4.5). The seed carries the edit list.
+  try {
+    const gf = path.join(destTaskDir, 'grammar_fixes.json');
+    if (fs.existsSync(gf)) {
+      const edits = JSON.parse(fs.readFileSync(gf, 'utf8'));
+      const list = Array.isArray(edits) ? edits : edits?.fixes || [];
+      const lines = list.map((e, i) =>
+        `- G${i + 1} [${e.rule}/${e.error_type}${e.meaning_changing ? ', meaning-changing' : ''}] ${e.path}: ${JSON.stringify(e.old)} -> ${JSON.stringify(e.new)}`);
+      fs.appendFileSync(path.join(destTaskDir, '_audit_seed.md'),
+        `\n\n## Grammar fixes already applied by the eval (do not re-flag)\n${lines.join('\n')}\n`);
+    }
+  } catch { /* seed stays as-is */ }
   const auditDir = path.join(deliveryDir, '_audit');
   if (!fs.existsSync(auditDir)) return false;
   const sections = [`# Audit seed for ${taskId}`, `Source: ${auditDir}`];

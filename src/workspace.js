@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config, BUCKETS } from './config.js';
+import { fixSummary } from './fixes.js';
 
 const TASK_ID_RE = /^[a-f0-9]{24}$/;
 const TEXT_READ_CAP = 200_000; // chars served per file read
@@ -131,9 +132,26 @@ export function taskMeta(bucket, id) {
   meta.grammarOnly = g.grammarOnly;
   meta.qcDims = g.dims;          // null = un-audited; [] = audited clean ("NONE")
   meta.otherDims = g.otherDims;  // the non-grammar fails that disqualify it
+
+  // Staging handoff metadata (spec §2.1/§3): the audit row that arrived with
+  // the batch, and the fix workload. Cheap file reads, no markdown parsing.
+  try {
+    const state = JSON.parse(fs.readFileSync(path.join(dir, '_studio.json'), 'utf8'));
+    meta.audit = state.audit || null;
+  } catch { meta.audit = null; }
+  const fx = fixSummary(dir);
+  meta.pendingFixes = fx.pendingFixes;
+  meta.ledgerCount = fx.ledgerCount;
   // Grammar Fixes membership: auto for grammar-only tasks, with a manual override
   // either way ('in' for "everything else is fixed, only grammar is left").
-  meta.inGrammarLane = meta.grammarLane === 'in' || (g.grammarOnly && meta.grammarLane !== 'out');
+  // Staging membership (replaces the old Grammar Fixes rule): a task belongs in
+  // Staging when the batch brought work to sign off — a seeded ledger or a
+  // pending PROPOSED fix — and stays until it is resolved or explicitly moved
+  // out. The stored override key keeps its legacy name ('grammar_lane') so no
+  // _studio.json migration is needed; grammar-only membership remains as a
+  // fallback for pre-handoff batches with no fix files at all.
+  const stagingAuto = meta.ledgerCount > 0 || meta.pendingFixes > 0 || g.grammarOnly;
+  meta.inStagingLane = meta.grammarLane === 'in' || (stagingAuto && meta.grammarLane !== 'out');
   return meta;
 }
 

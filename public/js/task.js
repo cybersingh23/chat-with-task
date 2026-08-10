@@ -164,6 +164,7 @@ const TABS = [
   { key: 'cb',           label: 'CB responses', open: () => showCbResponses() },
   { key: 'qcspec',       label: 'QC spec',      open: () => showQcSpec() },
   { key: 'checklist',    label: 'Checklist',    open: () => showChecklist() },
+  { key: 'fixes',        label: 'Fixes',        open: () => showFixes() },
   { key: 'pipeline',     label: 'Pipeline',     open: () => showPipeline() },
 ];
 
@@ -1066,6 +1067,112 @@ async function gotoFinding(fid) {
       setTimeout(() => node.classList.remove('flash'), 2500);
     }
   }, 60);
+}
+
+// ---------- Fixes (staging handoff §5) ----------
+// The directive fixes that arrived with the batch: grammar edits the eval
+// already applied (sign off or deny-and-revert) and PROPOSED label corrections
+// (approve applies, deny records why). Everything routes through the ledger.
+async function showFixes() {
+  setActiveTab('fixes');
+  hideTrajToolbar();
+  viewerTitle.textContent = 'Fixes';
+  document.querySelector('.doc__regen')?.remove();
+  viewReopeners.set('fixes', { label: 'Fixes', reopen: () => { setActive(findDocNav('Fixes')); showFixes(); } });
+  const data = await api(`/task/${bucket}/${taskId}/fixes`);
+  mountView('fixes', () => buildFixesView(data), { refresh: true });
+}
+
+function buildFixesView(data) {
+  const container = el('div', { class: 'fixes' });
+  container.append(el('h1', {}, 'Fixes'));
+  if (!data.items.length && !data.parseErrors.length) {
+    container.append(el('p', { class: 'hint-line' }, 'This batch brought no directive fixes for this task.'));
+    return container;
+  }
+  const grammar = data.items.filter((i) => i.kind === 'grammar');
+  const proposed = data.items.filter((i) => i.kind === 'proposed');
+  const instructions = data.items.filter((i) => i.kind === 'instruction');
+  container.append(el('p', { class: 'hint-line' },
+    `${grammar.length} grammar edit${grammar.length === 1 ? '' : 's'} already applied by the eval · `
+    + `${proposed.length} proposed · ${data.pending} awaiting a decision.`
+    + (data.hasSource ? '' : ' No rank.source.json — grammar reverts are unavailable.')));
+
+  for (const e of data.parseErrors) {
+    container.append(el('div', { class: 'fix-item fix-item--warn' },
+      el('b', {}, `Unparseable fix block ${e.block}: `), e.error));
+  }
+
+  const act = async (id, action, body) => {
+    try {
+      const r = await api(`/task/${bucket}/${taskId}/fixes/${id}/${action}`, { method: 'POST', body: body || {} });
+      if (r.result === 'DRIFTED') return alert(`${id}: the text is not what this fix was authored against (drifted) — nothing written.`);
+      if (r.result === 'AMBIGUOUS') return alert(`${id}: old matches more than once — route back to the eval to widen it.`);
+      showFixes();
+    } catch (err) { alert(err.message); }
+  };
+
+  const item = (f) => {
+    const decided = f.decision !== 'pending' || f.kind === 'grammar';
+    const state = f.kind === 'grammar'
+      ? (f.reverted ? 'denied · reverted' : (f.signed_off_by ? `signed off by ${f.signed_off_by}` : 'applied by the eval'))
+      : f.decision === 'pending'
+        ? (f.needsReanchor ? 'NEEDS RE-ANCHOR' : f.applicability === 'AMBIGUOUS' ? 'AMBIGUOUS' : 'pending')
+        : `${f.decision} by ${f.decided_by}`;
+    const row = el('div', { class: `fix-item${f.meaning_changing ? ' fix-item--meaning' : ''}${f.reverted ? ' fix-item--reverted' : ''}` },
+      el('div', { class: 'fix-item__head' },
+        el('span', { class: 'fix-id mono' }, f.id),
+        f.rule ? el('a', { class: 'spec-link', href: '#', 'data-spec-key': f.rule }, f.rule) : null,
+        el('span', { class: 'fix-kind' }, f.kind),
+        f.meaning_changing ? el('span', { class: 'fix-meaning', title: 'Alters what the sentence asserts — excluded from bulk approval' }, 'meaning-changing') : null,
+        el('span', { class: 'fix-state' }, state)),
+      f.path
+        ? el('div', { class: 'fix-swap' },
+          el('div', { class: 'fix-path mono' }, f.path),
+          el('div', { class: 'fix-old' }, typeof f.old === 'string' ? f.old : String(f.old)),
+          el('div', { class: 'fix-new' }, f.new === '' ? '(delete)' : (typeof f.new === 'string' ? f.new : String(f.new))))
+        : el('div', { class: 'fix-instruction' }, f.instruction || '(instruction)'),
+    );
+    const buttons = el('div', { class: 'fix-actions' });
+    if (f.kind === 'grammar' && !f.reverted) {
+      if (!f.signed_off_by) buttons.append(el('button', { class: 'btn btn--ghost', onclick: () => act(f.id, 'approve') }, 'Sign off'));
+      buttons.append(el('button', {
+        class: 'btn btn--ghost fix-deny',
+        onclick: () => { const r = prompt('Deny reverts this edit from rank.source.json. Reason:'); if (r) act(f.id, 'deny', { reason: r }); },
+      }, 'Deny & revert'));
+    } else if (f.kind === 'proposed' && f.decision === 'pending' && !f.needsReanchor) {
+      buttons.append(el('button', { class: 'btn btn--ghost', onclick: () => act(f.id, 'approve') }, 'Approve & apply'));
+      buttons.append(el('button', {
+        class: 'btn btn--ghost fix-deny',
+        onclick: () => { const r = prompt('Reason for denying this fix:'); if (r) act(f.id, 'deny', { reason: r }); },
+      }, 'Deny'));
+    } else if (f.decision === 'approved' && !f.reverted && f.kind === 'proposed') {
+      buttons.append(el('button', { class: 'btn btn--ghost', onclick: () => act(f.id, 'revert') }, 'Undo'));
+    }
+    if (buttons.childElementCount) row.append(buttons);
+    return row;
+  };
+
+  if (proposed.length || instructions.length) {
+    container.append(el('h2', { class: 'fix-h2' }, 'Proposed'));
+    proposed.forEach((f) => container.append(item(f)));
+    instructions.forEach((f) => container.append(item(f)));
+  }
+  if (grammar.length) {
+    const mech = grammar.filter((g) => !g.meaning_changing && !g.signed_off_by && !g.reverted).length
+      + proposed.filter((f) => !f.meaning_changing && f.decision === 'pending' && f.applicability === 'OK').length;
+    container.append(el('h2', { class: 'fix-h2' }, 'Grammar (applied by the eval)',
+      mech ? el('button', {
+        class: 'btn btn--ghost fix-bulk',
+        title: 'Meaning-changing edits are excluded — they get an individual look',
+        onclick: async () => {
+          try { await api(`/task/${bucket}/${taskId}/fixes/approve-mechanical`, { method: 'POST' }); showFixes(); }
+          catch (e) { alert(e.message); }
+        },
+      }, `Approve all mechanical · ${mech}`) : null));
+    grammar.forEach((f) => container.append(item(f)));
+  }
+  return container;
 }
 
 async function showChecklist() {

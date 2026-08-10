@@ -71,6 +71,12 @@ export const REGISTRY = {
     sql: 'task_aht.sql',
     params: { task_ids: { type: 'taskIdList', required: true } },
   },
+  task_sbq: {
+    label: 'SBQ status for tasks',
+    description: 'Whether any completed review sent these tasks back, and when.',
+    sql: 'task_sbq.sql',
+    params: { task_ids: { type: 'taskIdList', required: true, max: 1000 } },
+  },
   task_current_level: {
     label: 'Current level for tasks',
     description: 'Where a given set of tasks sits in the pipeline right now.',

@@ -5,20 +5,20 @@ import { laneSnapshot, applySnapshot } from './state.js';
 // The workflow lanes, and the ONE place that maps a lane to the task state it
 // implies. The board, the bulk mover, and undo all go through here so a lane can
 // never mean two different things in two places.
-export const LANES = ['OPEN', 'GRAMMAR', 'REVIEW', 'SECOND_OPINION', 'RESOLVED'];
+export const LANES = ['OPEN', 'STAGING', 'REVIEW', 'SECOND_OPINION', 'RESOLVED'];
 export const RESOLVED_VERDICTS = ['NO_ISSUES', 'FIXES_MADE', 'GRAMMAR_ONLY', 'SBQ'];
 const RESOLVED = new Set(RESOLVED_VERDICTS);
 
 // REOPEN is a destination, not a lane: it clears the verdict and touches nothing
 // else, so each task falls back to wherever the automatic rules put it (a
-// grammar-only task returns to Grammar Fixes, a claimed one to In review). That is
+// task with fix work returns to Staging, a claimed one to In review). That is
 // what "undo the decision" means, and it can't be expressed as a lane — moving to
 // Open would also force grammar tasks out with an 'out' override.
 export const DESTINATIONS = [...LANES, 'REOPEN'];
 
 export const LANE_LABELS = {
   OPEN: 'Open',
-  GRAMMAR: 'Grammar Fixes',
+  STAGING: 'Staging',
   REVIEW: 'In review',
   SECOND_OPINION: 'Needs 2nd opinion',
   RESOLVED: 'Resolved',
@@ -30,12 +30,13 @@ export const VERDICT_LABELS = {
   SBQ: 'SBQ', SECOND_OPINION: 'Second opinion',
 };
 
-// Mirrors laneOf() on the board: a verdict decides first, then Grammar Fixes
-// membership (bulk-fixed, so a claim doesn't move it), then the claim.
+// Mirrors laneOf() on the board: a verdict decides first, then Staging
+// membership (fix sign-off and backfill happen there, so a claim doesn't move
+// it out), then the claim.
 export function laneOf(meta) {
   if (meta.verdict === 'SECOND_OPINION') return 'SECOND_OPINION';
   if (meta.verdict && RESOLVED.has(meta.verdict)) return 'RESOLVED';
-  if (meta.inGrammarLane) return 'GRAMMAR';
+  if (meta.inStagingLane) return 'STAGING';
   if (meta.claimedBy) return 'REVIEW';
   return 'OPEN';
 }
@@ -43,14 +44,14 @@ export function laneOf(meta) {
 // The state a destination lane requires, given what the task is now. Returns the
 // full snapshot to write, so callers never have to reason about which of the
 // three fields a given lane cares about.
-//   - Grammar Fixes membership is content-derived, so leaving it needs an explicit
-//     'out' override on auto-detected tasks or the automatic rule pulls them back.
+//   - Staging membership is content-derived (ledger / pending fixes), so leaving
+//     needs an explicit 'out' override or the automatic rule pulls the task back.
 //   - SECOND_OPINION/RESOLVED leave the grammar override alone: a verdict outranks
 //     it, so clearing the verdict later correctly returns the task to the lane.
 export function snapshotForLane(lane, { meta, verdict, username }) {
   if (!DESTINATIONS.includes(lane)) throw httpError(400, `unknown destination ${lane} — one of ${DESTINATIONS.join(', ')}`);
   const cur = { verdict: meta.verdict ?? null, claimed_by: meta.claimedBy ?? null, grammar_lane: meta.grammarLane ?? null };
-  const leaveGrammar = meta.grammarOnly ? 'out' : null;
+  const leaveGrammar = (meta.ledgerCount > 0 || meta.pendingFixes > 0 || meta.grammarOnly) ? 'out' : null;
   switch (lane) {
     case 'REOPEN':
       return { verdict: null, claimed_by: cur.claimed_by, grammar_lane: cur.grammar_lane };
@@ -58,7 +59,7 @@ export function snapshotForLane(lane, { meta, verdict, username }) {
       return { verdict: null, claimed_by: null, grammar_lane: leaveGrammar };
     case 'REVIEW':
       return { verdict: null, claimed_by: cur.claimed_by || username, grammar_lane: leaveGrammar };
-    case 'GRAMMAR':
+    case 'STAGING':
       return { verdict: null, claimed_by: cur.claimed_by, grammar_lane: 'in' };
     case 'SECOND_OPINION':
       return { verdict: 'SECOND_OPINION', claimed_by: cur.claimed_by, grammar_lane: cur.grammar_lane };

@@ -1,0 +1,447 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+// The fix engine: parse, validate, apply, deny, and undo the directive fixes
+// that arrive with a batch (HANDOFF_STAGING_FIXES_BACKFILL.md §2-§5).
+//
+// Two kinds of fix flow through here and they behave differently on deny:
+//
+//   APPLIED   grammar edits the eval already wrote into rank.json. Arrive
+//             pre-approved (ledger seeded decided_by acc-eval). Denying one
+//             must REVERT the span from rank.source.json — otherwise the UI
+//             says "denied" while the change ships anyway.
+//   PROPOSED  non-grammar label corrections awaiting a human. Approving one
+//             applies it; denying records the reason and touches nothing.
+//
+// Everything that changes rank.json goes through the append-only ledger, and
+// undo is field-reset-from-source + replay of the survivors — never an in-place
+// inversion of a string edit, which fails the moment two fixes touch one field.
+
+// ---------------------------------------------------------------------------
+// JSON pointers (RFC 6901)
+// ---------------------------------------------------------------------------
+
+const unescape = (s) => s.replace(/~1/g, '/').replace(/~0/g, '~');
+
+export function ptrGet(obj, pointer) {
+  if (!pointer || pointer === '/') return obj;
+  let cur = obj;
+  for (const raw of pointer.replace(/^\//, '').split('/')) {
+    const key = unescape(raw);
+    if (cur == null) return undefined;
+    cur = Array.isArray(cur) ? cur[Number(key)] : cur[key];
+  }
+  return cur;
+}
+
+export function ptrSet(obj, pointer, value) {
+  const parts = pointer.replace(/^\//, '').split('/').map(unescape);
+  let cur = obj;
+  for (const key of parts.slice(0, -1)) {
+    cur = Array.isArray(cur) ? cur[Number(key)] : cur[key];
+    if (cur == null) throw new Error(`path does not resolve: ${pointer}`);
+  }
+  const last = parts[parts.length - 1];
+  if (Array.isArray(cur)) cur[Number(last)] = value;
+  else cur[last] = value;
+}
+
+// ---------------------------------------------------------------------------
+// Files
+// ---------------------------------------------------------------------------
+
+const read = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
+const readMaybe = (p) => { try { return read(p); } catch { return null; } };
+
+export const rankPath = (dir) => path.join(dir, 'rank.json');
+export const sourcePath = (dir) => path.join(dir, 'rank.source.json');
+export const ledgerPath = (dir) => path.join(dir, 'fix_ledger.json');
+export const fixesCachePath = (dir) => path.join(dir, 'fixes.json');
+
+export function readLedger(dir) {
+  const l = readMaybe(ledgerPath(dir));
+  return Array.isArray(l) ? l : [];
+}
+
+function writeLedger(dir, entries) {
+  fs.writeFileSync(ledgerPath(dir), JSON.stringify(entries, null, 2));
+}
+
+export function appendLedger(dir, entry) {
+  const entries = readLedger(dir);
+  entries.push(entry);
+  writeLedger(dir, entries);
+  return entry;
+}
+
+// ---------------------------------------------------------------------------
+// Parsing remediation.md fix blocks
+// ---------------------------------------------------------------------------
+
+// Single-line JSON inside a ```fix fence (§2.4). Parse errors are data, not
+// exceptions — they surface as ingest warnings.
+export function parseFixBlocks(md) {
+  const blocks = [];
+  const errors = [];
+  let i = 0;
+  for (const m of String(md || '').matchAll(/```fix\n(.*?)\n```/gs)) {
+    i += 1;
+    try {
+      const fix = JSON.parse(m[1]);
+      if (!fix.id) fix.id = `F${i}`;
+      blocks.push(fix);
+    } catch (e) {
+      errors.push({ block: i, error: e.message, raw: m[1].slice(0, 200) });
+    }
+  }
+  return { blocks, errors };
+}
+
+// Parsed once at ingest and cached; the routes rebuild only if the cache is
+// missing (older batch re-opened after a deploy).
+export function loadFixBlocks(dir) {
+  const cached = readMaybe(fixesCachePath(dir));
+  if (cached) return cached;
+  let md = '';
+  try { md = fs.readFileSync(path.join(dir, 'remediation.md'), 'utf8'); } catch { /* none */ }
+  const parsed = parseFixBlocks(md);
+  try { fs.writeFileSync(fixesCachePath(dir), JSON.stringify(parsed, null, 2)); } catch { /* read-only fs */ }
+  return parsed;
+}
+
+// ---------------------------------------------------------------------------
+// Ledger seeding (§3.1)
+// ---------------------------------------------------------------------------
+
+// The eval's grammar edits arrive as history, not as pending work: one approved
+// entry per edit, decided_by acc-eval. Idempotent — seeding twice adds nothing.
+export function seedLedgerFromGrammar(dir) {
+  const grammar = readMaybe(path.join(dir, 'grammar_fixes.json'));
+  const edits = Array.isArray(grammar) ? grammar : grammar?.fixes;
+  if (!edits?.length) return 0;
+  const ledger = readLedger(dir);
+  const have = new Set(ledger.filter((e) => e.decided_by === 'acc-eval').map((e) => e.fix_id));
+  let added = 0;
+  edits.forEach((e, i) => {
+    const fixId = `G${i + 1}`;
+    if (have.has(fixId)) return;
+    ledger.push({
+      fix_id: fixId,
+      source: 'grammar_fixes.json',
+      path: e.path,
+      occurrence: e.occurrence ?? 1,
+      old: e.old,
+      new: e.new,
+      rule: e.rule,
+      class: e.class,
+      error_type: e.error_type,
+      meaning_changing: !!e.meaning_changing,
+      reanchored: !!e.reanchored,
+      owner: e.owner,
+      decision: 'approved',
+      decided_by: 'acc-eval',
+      decided_at: new Date().toISOString(),
+      reverted_at: null,
+      reason: null,
+    });
+    added += 1;
+  });
+  if (added) writeLedger(dir, ledger);
+  return added;
+}
+
+// Re-upload of CHANGED content reopens the task; replaying stale `old` strings
+// onto re-delivered text is the likeliest way to silently corrupt a label, so
+// prior BOARD decisions are marked superseded instead (§3.1). Eval-seeded
+// entries are dropped outright — the new batch re-seeds from its own
+// grammar_fixes.json, which is the current truth.
+export function supersedeLedger(entries) {
+  const now = new Date().toISOString();
+  return entries
+    .filter((e) => e.decided_by !== 'acc-eval')
+    .map((e) => ({ ...e, superseded_at: e.superseded_at || now }));
+}
+
+// ---------------------------------------------------------------------------
+// Validation (§4.6, ported from validate_fix_blocks.py)
+// ---------------------------------------------------------------------------
+
+const VERDICTS = new Set(['PASS', 'SOFT', 'HARD']);
+
+export function validateTask(dir, auditRow) {
+  const warnings = [];
+  const live = readMaybe(rankPath(dir));
+  const source = readMaybe(sourcePath(dir));
+
+  if (!auditRow) warnings.push({ check: 'verdict-missing', detail: 'task dir has no row in final_verdicts.json — it lands in UNSORTED' });
+  else if (!VERDICTS.has(String(auditRow.verdict || '').toUpperCase())) {
+    warnings.push({ check: 'verdict-unknown', detail: `verdict ${JSON.stringify(auditRow.verdict)} is outside {PASS,SOFT,HARD}` });
+  }
+
+  const { blocks, errors } = loadFixBlocks(dir);
+  for (const e of errors) warnings.push({ check: 'fix-parse', detail: `fix block ${e.block} does not parse: ${e.error}` });
+
+  for (const fix of blocks) {
+    if (!fix.path) continue; // instruction-only — render, never apply
+    if (fix.status === 'PROPOSED') {
+      const state = fixApplicability(live, fix);
+      if (state !== 'OK') warnings.push({ check: 'fix-drifted', detail: `${fix.id}: PROPOSED old does not resolve at ${fix.path} (${state})` });
+    } else if (fix.status === 'APPLIED') {
+      // Inverted assertion for applied fixes: old lives in the SOURCE, new in
+      // the LIVE file. Getting this backwards makes every correctly-applied
+      // grammar fix look broken (§4.6). reanchored blocks skip the old check.
+      const liveVal = live ? ptrGet(live, fix.path) : undefined;
+      const srcVal = source ? ptrGet(source, fix.path) : undefined;
+      if (!fix.reanchored && source && !contains(srcVal, fix.old)) {
+        warnings.push({ check: 'applied-old-missing', detail: `${fix.id}: APPLIED old not found in rank.source.json at ${fix.path}` });
+      }
+      if (live && !contains(liveVal, fix.new)) {
+        warnings.push({ check: 'applied-new-missing', detail: `${fix.id}: APPLIED new not found in rank.json at ${fix.path}` });
+      }
+    }
+  }
+
+  // The same inverted assertion over the grammar edits themselves.
+  const grammar = readMaybe(path.join(dir, 'grammar_fixes.json'));
+  const edits = Array.isArray(grammar) ? grammar : grammar?.fixes;
+  if (edits?.length && source && live) {
+    edits.forEach((e, i) => {
+      if (!e.reanchored && !contains(ptrGet(source, e.path), e.old)) {
+        warnings.push({ check: 'grammar-old-missing', detail: `G${i + 1}: old not found in rank.source.json at ${e.path}` });
+      }
+      if (!contains(ptrGet(live, e.path), e.new)) {
+        warnings.push({ check: 'grammar-new-missing', detail: `G${i + 1}: new not found in rank.json at ${e.path}` });
+      }
+    });
+  }
+  return warnings;
+}
+
+function contains(value, needle) {
+  if (value === undefined) return false;
+  if (needle === '') return true; // deletion — nothing to find
+  return typeof value === 'string' ? value.includes(needle) : String(value) === String(needle);
+}
+
+// ---------------------------------------------------------------------------
+// Apply / deny / revert (§5)
+// ---------------------------------------------------------------------------
+
+const count = (hay, needle) => (needle ? hay.split(needle).length - 1 : 0);
+
+function replaceNth(hay, oldStr, newStr, n) {
+  let idx = -1;
+  for (let i = 0; i < n; i++) {
+    idx = hay.indexOf(oldStr, idx + 1);
+    if (idx === -1) return null;
+  }
+  return hay.slice(0, idx) + newStr + hay.slice(idx + oldStr.length);
+}
+
+// Scalars keep their type: a score stays a number, "null" becomes null (the
+// reference batch really does propose code_style/score: 3 -> null).
+function coerce(newStr, original) {
+  if (newStr === 'null') return null;
+  if (typeof original === 'number') return Number(newStr);
+  if (typeof original === 'boolean') return newStr === 'true';
+  return newStr;
+}
+
+export function fixApplicability(live, fix) {
+  if (!live) return 'NO_RANK';
+  const value = ptrGet(live, fix.path);
+  if (value === undefined) return 'NO_PATH';
+  if (typeof value !== 'string') {
+    return String(value) === String(fix.old) ? 'OK' : 'DRIFTED';
+  }
+  const n = count(value, fix.old);
+  if (n === 0) return 'DRIFTED';
+  if (n > 1 && (fix.occurrence ?? 1) === 1 && (fix.occurrences_in_field ?? 1) === 1) return 'AMBIGUOUS';
+  return 'OK';
+}
+
+// One PROPOSED fix. Refuses — and says why — rather than writing on any doubt:
+// DRIFTED means the text is not what the fix was authored against, AMBIGUOUS
+// means the eval must widen `old` (§5.2). Never called for APPLIED blocks.
+export function applyFix(dir, fix, user) {
+  if (fix.status !== 'PROPOSED') throw new Error(`refusing to re-apply ${fix.id}: status is ${fix.status}, not PROPOSED`);
+  if (!fix.path) throw new Error(`${fix.id} is instruction-only (path: null) — not applicable`);
+
+  const live = read(rankPath(dir));
+  const value = ptrGet(live, fix.path);
+  const state = fixApplicability(live, fix);
+  if (state !== 'OK') return { result: state };
+
+  if (typeof value !== 'string') {
+    ptrSet(live, fix.path, coerce(fix.new, value));
+  } else {
+    ptrSet(live, fix.path, replaceNth(value, fix.old, fix.new, fix.occurrence ?? 1));
+  }
+  fs.writeFileSync(rankPath(dir), JSON.stringify(live, null, 2));
+
+  appendLedger(dir, {
+    fix_id: fix.id,
+    source: 'remediation.md',
+    path: fix.path,
+    occurrence: fix.occurrence ?? 1,
+    old: fix.old,
+    new: fix.new,
+    rule: fix.rule,
+    class: fix.class,
+    meaning_changing: !!fix.meaning_changing,
+    owner: fix.owner,
+    decision: 'approved',
+    decided_by: user,
+    decided_at: new Date().toISOString(),
+    reverted_at: null,
+    reason: null,
+  });
+  return { result: 'APPLIED' };
+}
+
+// Deny records a judgement. For PROPOSED that is all it does; for an APPLIED
+// grammar edit the text is already in the file, so deny also reverts the span —
+// driven off the block's status, never off which button was pressed (§5.1).
+export function denyFix(dir, fix, user, reason) {
+  if (fix.status === 'PROPOSED') {
+    appendLedger(dir, {
+      fix_id: fix.id, source: 'remediation.md', path: fix.path,
+      old: fix.old, new: fix.new, rule: fix.rule, meaning_changing: !!fix.meaning_changing,
+      decision: 'denied', decided_by: user, decided_at: new Date().toISOString(),
+      reverted_at: null, reason: reason || null,
+    });
+    return { result: 'DENIED' };
+  }
+  // APPLIED: find the seeded ledger entry and revert it.
+  const ledger = readLedger(dir);
+  const entry = ledger.find((e) => e.fix_id === fix.id && !e.reverted_at);
+  if (!entry) throw new Error(`no active ledger entry for ${fix.id}`);
+  return revertEntry(dir, entry, user, reason);
+}
+
+// Undo = mark the entry, reset the whole field from rank.source.json, then
+// replay every surviving approved entry on that path in decision order (§5.5).
+export function revertFix(dir, fixId, user, reason) {
+  const ledger = readLedger(dir);
+  const entry = ledger.find((e) => e.fix_id === fixId && !e.reverted_at && e.decision === 'approved');
+  if (!entry) throw new Error(`no active approved entry for ${fixId}`);
+  return revertEntry(dir, entry, user, reason);
+}
+
+function revertEntry(dir, entry, user, reason) {
+  const ledger = readLedger(dir);
+  const target = ledger.find((e) => e === undefined ? false : e.fix_id === entry.fix_id && !e.reverted_at && e.decision === 'approved');
+  target.reverted_at = new Date().toISOString();
+  target.decision = 'denied';
+  target.reverted_by = user;
+  if (reason) target.reason = reason;
+
+  const source = readMaybe(sourcePath(dir));
+  const live = read(rankPath(dir));
+  const failures = [];
+
+  if (source && ptrGet(source, entry.path) !== undefined) {
+    ptrSet(live, entry.path, ptrGet(source, entry.path));
+  } else if (!source) {
+    // No source file (task had no grammar findings) — the field's pre-fix state
+    // is the live value with this entry's edit inverted. Only safe for the
+    // single-entry case; with survivors on the path and no anchor we refuse.
+    const others = ledger.filter((e) => e.path === entry.path && !e.reverted_at && !e.superseded_at && e.decision === 'approved');
+    if (others.length) { writeLedger(dir, ledger); return { result: 'NO_SOURCE_ANCHOR', failures: [entry.fix_id] }; }
+    const value = ptrGet(live, entry.path);
+    if (typeof value === 'string' && entry.new !== '' && value.includes(entry.new)) {
+      ptrSet(live, entry.path, replaceNth(value, entry.new, entry.old, 1));
+    } else if (typeof value !== 'string') {
+      ptrSet(live, entry.path, coerce(String(entry.old), value === null ? 0 : value));
+    }
+    fs.writeFileSync(rankPath(dir), JSON.stringify(live, null, 2));
+    writeLedger(dir, ledger);
+    return { result: 'REVERTED', failures: [] };
+  }
+
+  // Replay the survivors, oldest decision first.
+  const survivors = ledger
+    .filter((e) => e.path === entry.path && !e.reverted_at && !e.superseded_at && e.decision === 'approved')
+    .sort((a, b) => String(a.decided_at).localeCompare(String(b.decided_at)));
+  for (const e of survivors) {
+    const value = ptrGet(live, e.path);
+    if (typeof value !== 'string') {
+      ptrSet(live, e.path, coerce(String(e.new), value));
+    } else {
+      const replaced = replaceNth(value, e.old, e.new, e.occurrence ?? 1);
+      if (replaced === null) { failures.push(e.fix_id); continue; } // needs re-anchor — human
+      ptrSet(live, e.path, replaced);
+    }
+  }
+  fs.writeFileSync(rankPath(dir), JSON.stringify(live, null, 2));
+  writeLedger(dir, ledger);
+  return { result: 'REVERTED', failures };
+}
+
+// ---------------------------------------------------------------------------
+// The merged view the UI renders (§5.6)
+// ---------------------------------------------------------------------------
+
+export function fixStates(dir) {
+  const { blocks, errors } = loadFixBlocks(dir);
+  const ledger = readLedger(dir);
+  const live = readMaybe(rankPath(dir));
+  const latest = (fixId) => [...ledger].reverse().find((e) => e.fix_id === fixId && !e.superseded_at);
+
+  const items = [];
+
+  // Grammar edits, from their seeded entries — already applied, sign-off state
+  // comes from whether a human has touched the entry since the seed.
+  for (const e of ledger) {
+    if (e.decided_by !== 'acc-eval' && e.source !== 'grammar_fixes.json') continue;
+    if (e.superseded_at) continue;
+    const current = latest(e.fix_id);
+    items.push({
+      id: e.fix_id, kind: 'grammar', status: 'APPLIED',
+      path: e.path, old: e.old, new: e.new, rule: e.rule, class: e.class,
+      error_type: e.error_type, meaning_changing: !!e.meaning_changing, owner: e.owner,
+      decision: current.decision, decided_by: current.decided_by, decided_at: current.decided_at,
+      reverted: !!current.reverted_at, reason: current.reason || null,
+    });
+  }
+
+  // Directive blocks from remediation.md.
+  for (const fix of blocks) {
+    if (fix.status === 'APPLIED') continue; // same edit as a grammar entry above
+    const e = latest(fix.id);
+    const applicability = fix.path && !e ? fixApplicability(live, fix) : null;
+    items.push({
+      ...fix,
+      kind: fix.path ? 'proposed' : 'instruction',
+      decision: e ? e.decision : 'pending',
+      decided_by: e?.decided_by || null,
+      decided_at: e?.decided_at || null,
+      reverted: !!e?.reverted_at,
+      applicability: e ? null : (fix.path ? applicability : null),
+      needsReanchor: !e && fix.path ? applicability === 'DRIFTED' : false,
+    });
+  }
+
+  return {
+    items,
+    parseErrors: errors,
+    pending: items.filter((i) => i.kind === 'proposed' && i.decision === 'pending').length,
+    hasSource: fs.existsSync(sourcePath(dir)),
+    ledgerCount: ledger.filter((e) => !e.superseded_at).length,
+  };
+}
+
+// Cheap summary for taskMeta — called per task on every board list, so it only
+// stats files and counts, never parses markdown.
+export function fixSummary(dir) {
+  const ledger = readLedger(dir);
+  const cached = readMaybe(fixesCachePath(dir));
+  const blocks = cached?.blocks || [];
+  const decided = new Set(ledger.filter((e) => !e.superseded_at).map((e) => e.fix_id));
+  const pending = blocks.filter((b) => b.status === 'PROPOSED' && b.path && !decided.has(b.id)).length;
+  return {
+    ledgerCount: ledger.filter((e) => !e.superseded_at).length,
+    pendingFixes: pending,
+    instructions: blocks.filter((b) => !b.path).length,
+  };
+}

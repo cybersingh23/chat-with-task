@@ -28,6 +28,8 @@ import { redashApi } from './redash.js';
 import { overviewApi } from './overview.js';
 import { teamApi } from './team.js';
 import { aceyApi } from './acey.js';
+import { stagingApi } from './staging.js';
+import { fixesApi } from './fixes.js';
 import { ACTION_TOOL_DEFS, makeActionExecutor, confirmPlan, cancelPlan } from '../copilot_actions.js';
 
 export const api = express.Router();
@@ -90,6 +92,8 @@ api.use('/redash', redashApi);
 api.use('/overview', overviewApi);
 api.use('/team', teamApi);
 api.use('/acey', aceyApi);
+api.use('/staging', stagingApi);
+api.use('/task/:bucket/:id/fixes', fixesApi);
 
 api.get('/spec/rubric', (req, res) => res.json({ dimensions: getRubric() }));
 
@@ -220,24 +224,8 @@ api.post('/bulk/lane', wrap(async (req, res) => {
 // The discriminator is grammarOnly — the audit's own dimension list — not how the
 // task entered the lane. A task whose review.md still lists R13 alongside R23 had
 // more than a grammar problem, however it got here.
-api.post('/bulk/grammar-complete', wrap(async (req, res) => {
-  const candidates = selectTasks({ severity: req.body?.severity || 'ALL', fromLane: 'GRAMMAR', ids: req.body?.ids ?? null });
-  const items = [];
-  const counts = { GRAMMAR_ONLY: 0, FIXES_MADE: 0 };
-  for (const meta of candidates) {
-    const verdict = meta.grammarOnly ? 'GRAMMAR_ONLY' : 'FIXES_MADE';
-    const item = moveTaskToLane(meta.bucket, meta.id, 'RESOLVED', { verdict, username: req.user.username });
-    if (item) { items.push(item); counts[verdict]++; }
-  }
-  const parts = [];
-  if (counts.GRAMMAR_ONLY) parts.push(`${counts.GRAMMAR_ONLY} Grammar-only`);
-  if (counts.FIXES_MADE) parts.push(`${counts.FIXES_MADE} Fixes made`);
-  const act = recordAction({
-    by: req.user.username, kind: 'bulk_move', items,
-    label: `Grammar Fixes → ${parts.join(' · ') || 'nothing'}`,
-  });
-  res.json({ moved: items.length, counts, action: act && { id: act.id, label: act.label } });
-}));
+// (The /bulk/grammar-complete route is gone with the Grammar Fixes lane: the
+// Staging lane's backfill check — /api/staging/verify + /resolve — replaced it.)
 
 api.get('/actions', wrap(async (req, res) =>
   res.json({ actions: listActions(Math.min(Number(req.query.limit) || 12, 50)) })

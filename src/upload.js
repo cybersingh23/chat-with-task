@@ -1,4 +1,5 @@
 import Busboy from 'busboy';
+import { seedLedgerFromGrammar, supersedeLedger, readLedger, loadFixBlocks, validateTask } from './fixes.js';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -123,9 +124,13 @@ function bulkIngest(taskRoots, fields, forcedId = null) {
     const priorBucket = findTaskBucket(taskId);
     let studio = null;
     let reopened = false;
+    let priorLedger = null;
     if (priorBucket) {
       const priorDir = path.join(config.workspaceRoot, priorBucket, taskId);
       try { studio = fs.readFileSync(path.join(priorDir, '_studio.json'), 'utf8'); } catch { /* none */ }
+      // The ledger survives re-upload the way _studio.json does — it is the
+      // board's change history and the whole point of append-only.
+      priorLedger = readLedger(priorDir);
       fs.rmSync(priorDir, { recursive: true, force: true });
     }
     // A re-audited task left at SBQ or "Fixes made" must not silently stay
@@ -145,7 +150,25 @@ function bulkIngest(taskRoots, fields, forcedId = null) {
     if (fs.existsSync(path.join(deliveryDir, '_audit'))) {
       seeded = writeAuditSeed(deliveryDir, taskId, dest);
     }
-    (priorBucket ? replaced : ingested).push({ taskId, bucket, seeded, reopened });
+
+    // ── staging handoff (spec §3-§4) ──
+    // Prior board decisions carry over — but on a REOPEN (content changed
+    // upstream) they are superseded, never replayed onto new text.
+    if (priorLedger?.length) {
+      const entries = reopened ? supersedeLedger(priorLedger) : priorLedger;
+      fs.writeFileSync(path.join(dest, 'fix_ledger.json'), JSON.stringify(entries, null, 2));
+    }
+    seedLedgerFromGrammar(dest);
+    loadFixBlocks(dest); // parse remediation fences once, cache to fixes.json
+    const auditRow = verdicts?.get(taskId) || null;
+    const warnings = validateTask(dest, auditRow);
+    writeAuditState(dest, auditRow, warnings);
+
+    (priorBucket ? replaced : ingested).push({
+      taskId, bucket, seeded, reopened,
+      tags: auditRow?.tags || [],
+      warnings: warnings.length,
+    });
   }
 
   const all = [...ingested, ...replaced];
@@ -157,10 +180,29 @@ function bulkIngest(taskRoots, fields, forcedId = null) {
     replaced,
     reopened: all.filter((t) => t.reopened).map((t) => t.taskId),
     counts: countBy(all, (t) => t.bucket),
+    // The two silent killers from §4.6, made loud: dirs that landed UNSORTED
+    // and tasks whose fix blocks or verdict rows failed validation.
+    warnings: all.filter((t) => t.warnings).map((t) => ({ taskId: t.taskId, count: t.warnings })),
+    grammarFixed: all.filter((t) => t.tags?.includes('grammar-fixed')).length,
     skipped_bad_id: skippedBadId,
     seeded: all.some((t) => t.seeded),
     files: all.length === 1 ? countFiles(path.join(config.workspaceRoot, first.bucket, first.taskId)) : undefined,
   };
+}
+
+// The audit's own metadata lives in _studio.json under a namespaced key, so a
+// re-upload can overwrite the audit block without touching claims, checklists
+// or verdicts (§4.2).
+function writeAuditState(dest, auditRow, warnings) {
+  const p = path.join(dest, '_studio.json');
+  let state = {};
+  try { state = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { /* fresh */ }
+  state.audit = {
+    ...(auditRow || {}),
+    warnings,
+    ingested_at: new Date().toISOString(),
+  };
+  fs.writeFileSync(p, JSON.stringify(state, null, 2));
 }
 
 // Verdicts that mean "still needs work" — re-uploading such a task is a re-audit,
@@ -181,16 +223,20 @@ function reopenIfStale(studioJson) {
   return { json: JSON.stringify(state, null, 2), reopened: true };
 }
 
+// Full rows, not just the verdict string: since the staging handoff the row
+// carries tags, grammar_only_fail, writing_band_as_delivered and the fix
+// counts, and all of §2.1 depends on keeping them (older batches ship
+// {task_id, verdict} rows and flow through the same shape).
 function loadVerdicts(deliveryDir) {
   try {
     const rows = JSON.parse(fs.readFileSync(path.join(deliveryDir, '_audit', 'final_verdicts.json'), 'utf8'));
-    if (Array.isArray(rows)) return new Map(rows.map((r) => [r.task_id, r.verdict]));
+    if (Array.isArray(rows)) return new Map(rows.map((r) => [r.task_id, r]));
   } catch { /* no verdicts shipped with this upload */ }
   return null;
 }
 
-function bucketFor(verdict) {
-  const v = String(verdict || '').toUpperCase();
+function bucketFor(row) {
+  const v = String(row?.verdict || '').toUpperCase();
   if (v.startsWith('HARD')) return 'HARD_FAIL';
   if (v.startsWith('SOFT')) return 'SOFT_FAIL';
   if (v.startsWith('PASS')) return 'PASS';

@@ -26,20 +26,19 @@ const LANES = [
   { key: 'REVIEW', name: 'In review', hint: 'Claimed and being audited.' },
   { key: 'SECOND_OPINION', name: 'Needs 2nd opinion', hint: 'Flagged for another reviewer.' },
   {
-    key: 'GRAMMAR',
-    name: 'Grammar Fixes',
-    hint: 'Tasks whose only fail is spelling/grammar (R23/R24). Drop a task here when everything else is fixed.',
+    key: 'STAGING',
+    name: 'Staging',
+    hint: 'Fix sign-off and backfill. Tasks arrive here when the batch brought fixes to decide; they leave for Resolved through the backfill check.',
   },
   { key: 'RESOLVED', name: 'Resolved', hint: 'A decision has been recorded.' },
 ];
 
-// Grammar Fixes sits ahead of the claim check on purpose: these are bulk-fixed
-// locally rather than claimed one at a time, so claiming one doesn't pull it out
-// of the lane. Recording a verdict does.
+// Staging sits ahead of the claim check on purpose: fix sign-off happens in
+// bulk there, so claiming a task doesn't pull it out. Recording a verdict does.
 function laneOf(t) {
   if (t.verdict === 'SECOND_OPINION') return 'SECOND_OPINION';
   if (t.verdict && RESOLVED_VERDICTS.has(t.verdict)) return 'RESOLVED';
-  if (t.inGrammarLane) return 'GRAMMAR';
+  if (t.inStagingLane) return 'STAGING';
   if (t.claimedBy) return 'REVIEW';
   return 'OPEN';
 }
@@ -90,8 +89,8 @@ async function applyLaneChange(t, target, x, y) {
     orig.verdict = verdict;
     if (claim === 'Claim') orig.claimedBy = me?.username || orig.claimedBy;
     if (claim === 'Release') orig.claimedBy = null;
-    if (target === 'GRAMMAR') { orig.grammarLane = 'in'; orig.inGrammarLane = true; }
-    else if (from === 'GRAMMAR') { orig.grammarLane = orig.grammarOnly ? 'out' : null; orig.inGrammarLane = false; }
+    if (target === 'STAGING') { orig.grammarLane = 'in'; orig.inStagingLane = true; }
+    else if (from === 'STAGING') { orig.grammarLane = 'out'; orig.inStagingLane = false; }
   }
   render();
 
@@ -108,36 +107,64 @@ async function applyLaneChange(t, target, x, y) {
   }
 }
 
-// Bulk-complete the whole Grammar Fixes lane in one pass, SPLIT by what the audit
-// found: tasks whose only fail was spelling/grammar resolve as Grammar-only, ones
-// that also had other fails (moved in here once those were fixed) as Fixes made.
-// Tracking them apart is the point — the lane is the common source of both.
-async function completeGrammarLane(items) {
-  if (!items.length) return;
-  const only = items.filter((t) => t.grammarOnly);
-  const mixed = items.filter((t) => !t.grammarOnly);
-  const lines = [
-    only.length ? `· ${only.length} → Grammar-only (grammar was the only fail)` : null,
-    mixed.length ? `· ${mixed.length} → Fixes made (also had other fails)` : null,
-  ].filter(Boolean).join('\n');
-  if (!confirm(`Complete ${items.length} task${items.length === 1 ? '' : 's'} in Grammar Fixes?\n\n${lines}\n\nUndo from Recent actions.`)) return;
-  for (const t of items) {
-    const orig = (currentWs[t.bucket] || []).find((x) => x.id === t.id);
-    if (orig) orig.verdict = t.grammarOnly ? 'GRAMMAR_ONLY' : 'FIXES_MADE';
-  }
-  render();
+// The Staging lane's exit: run the backfill check across every task in the
+// lane, show what is confirmed and what is blocked (and why), then move the
+// confirmed set to Resolved and hand over the id list for the platform-side
+// L12 move. Flow per Pavit, 2026-08-10.
+async function runBackfillCheck() {
+  const overlay = el('div', { class: 'bf-overlay' });
+  const box = el('div', { class: 'bf glass' },
+    el('div', { class: 'bf__head' }, el('b', {}, 'Backfill check'),
+      el('button', { class: 'btn btn--ghost', onclick: () => overlay.remove() }, 'Close')),
+    el('div', { class: 'bf__body' }, el('p', { class: 'bf__note' }, 'Checking readiness and upstream SBQ…')));
+  overlay.append(box);
+  document.body.append(overlay);
+
+  let r;
   try {
-    const r = await api('/bulk/grammar-complete', { method: 'POST' });
-    await load();
-    const summary = [
-      r.counts.GRAMMAR_ONLY ? `${r.counts.GRAMMAR_ONLY} Grammar-only` : null,
-      r.counts.FIXES_MADE ? `${r.counts.FIXES_MADE} Fixes made` : null,
-    ].filter(Boolean).join(' · ');
-    if (r.action) toast(`Completed ${r.moved}: ${summary}.`, { label: 'Undo', run: () => undo(r.action.id) });
+    r = await api('/staging/verify?fresh=1');
   } catch (e) {
-    toast(e.message);
-    await load();
+    box.querySelector('.bf__body').replaceChildren(el('p', { class: 'bf__note bf__note--warn' }, `Check failed — ${e.message}`));
+    return;
   }
+
+  const ready = r.items.filter((i) => i.ready);
+  const blocked = r.items.filter((i) => !i.ready);
+  const row = (i) => el('div', { class: `bf__row${i.ready ? '' : ' bf__row--blocked'}` },
+    el('span', { class: `bf__dot${i.ready ? ' is-ok' : ''}` }),
+    el('a', { class: 'mono bf__id', href: `${window.__base__ || ''}/task/${i.bucket}/${i.id}` }, i.id),
+    i.upstream ? el('span', { class: 'bf__lvl' }, `L${i.upstream.level} · ${i.upstream.status}`) : el('span', { class: 'bf__lvl dim' }, 'no pipeline row'),
+    el('span', { class: 'bf__why' }, i.ready ? (i.grammarOnly ? 'ready · grammar-only' : 'ready') : i.blockers.join(' · ')));
+
+  const body = box.querySelector('.bf__body');
+  body.replaceChildren(
+    el('p', { class: 'bf__note' },
+      `${r.items.length} in Staging — ${ready.length} confirmed, ${blocked.length} blocked.`
+      + (r.redash ? '' : ' Redash was unreachable, so SBQ is unverified — board checks only.')),
+    ...ready.map(row), ...blocked.map(row),
+    el('div', { class: 'bf__actions' },
+      el('button', {
+        class: 'btn',
+        onclick: async (e) => {
+          const ids = ready.map((i) => i.id).join('\n');
+          try { await navigator.clipboard.writeText(ids); e.target.textContent = `Copied ${ready.length} ids`; }
+          catch { prompt('Task ids — copy for the platform L12 move:', ids); }
+        },
+      }, 'Copy task IDs'),
+      el('button', {
+        class: 'btn btn--primary',
+        disabled: ready.length ? undefined : 'disabled',
+        onclick: async (e) => {
+          e.target.disabled = true;
+          try {
+            const out = await api('/staging/resolve', { method: 'POST', body: { ids: ready.map((i) => i.id) } });
+            overlay.remove();
+            await load();
+            toast(`Moved ${out.moved.length} confirmed task${out.moved.length === 1 ? '' : 's'} to Resolved.`
+              + (out.skipped.length ? ` ${out.skipped.length} skipped.` : ''));
+          } catch (err) { e.target.disabled = false; toast(err.message); }
+        },
+      }, `Move ${ready.length} confirmed to Resolved`)));
 }
 
 // Resolved is a 3-way decision — ask which one at the drop point.
@@ -253,10 +280,12 @@ function ticketCard(t) {
       t.claimedBy ? assignee(t.claimedBy) : claimAction(t),
       el('span', { class: 'spacer' }),
       // Neutral by design so it never competes with the severity tag.
-      t.grammar
+      t.grammar || t.audit?.tags?.includes('grammar-fixed')
         ? el('span', {
           class: 'tag tag--grammar',
-          title: t.grammarOnly
+          title: t.audit?.tags?.includes('grammar-fixed')
+            ? `Grammar fixed by the eval — as-delivered band ${t.audit.writing_band_as_delivered || '?'}, ${t.audit.grammar_fixes_applied || 0} edit(s)`
+            : t.grammarOnly
             ? `Spelling / grammar is the only fail (${(t.qcDims || []).join(', ')}) — auto-routed to Grammar fixes`
             : `Spelling / grammar flagged, but not the only fail — also ${(t.otherDims || []).join(', ')}`,
         }, el('span', { 'aria-hidden': 'true' }, '✎'), 'Grammar')
@@ -294,7 +323,7 @@ function render() {
   root.replaceChildren(
     ...LANES.map((lane) => {
       const items = byLane.get(lane.key);
-      const mixed = lane.key === 'GRAMMAR' ? items.filter((t) => !t.grammarOnly).length : 0;
+      const pendingFixes = lane.key === 'STAGING' ? items.reduce((a, t) => a + (t.pendingFixes || 0), 0) : 0;
       return el('section', {
         class: 'lane',
         'data-lane': lane.key,
@@ -314,22 +343,24 @@ function render() {
           el('span', { class: 'lane__name' }, lane.name),
           el('span', { class: 'lane__count' }, String(items.length)),
         ),
-        // The split only earns a line when there is actually a mix in here.
-        lane.key === 'GRAMMAR' && items.length && mixed
+        // What is left to decide, at a glance.
+        lane.key === 'STAGING' && items.length
           ? el('div', { class: 'lane__note' },
-            `${items.length - mixed} grammar-only · ${mixed} had other fails`)
+            pendingFixes
+              ? `${pendingFixes} fix${pendingFixes === 1 ? '' : 'es'} awaiting a decision`
+              : 'All fixes decided — run the backfill check')
           : null,
         items.length
           ? el('div', { class: 'lane__list' }, items.map(ticketCard))
           : el('div', { class: 'lane__empty' }, q || sevFilter !== 'ALL' ? 'No match.' : lane.hint),
         // Lane-level action sits BELOW the cards it acts on, not in the header
         // where it competed with the lane title as a second link.
-        lane.key === 'GRAMMAR' && items.length
+        lane.key === 'STAGING' && items.length
           ? el('button', {
             class: 'lane__complete',
-            title: 'Grammar-only tasks resolve as Grammar-only, the rest as Fixes made',
-            onclick: (e) => { e.preventDefault(); completeGrammarLane(items); },
-          }, `Complete lane · ${items.length} task${items.length === 1 ? '' : 's'}`)
+            title: 'Check readiness and upstream SBQ for every task in Staging, then move the confirmed ones',
+            onclick: (e) => { e.preventDefault(); runBackfillCheck(); },
+          }, `Backfill check · ${items.length} task${items.length === 1 ? '' : 's'}`)
           : null,
       );
     })
