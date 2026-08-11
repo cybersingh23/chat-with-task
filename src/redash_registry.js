@@ -67,9 +67,15 @@ export const REGISTRY = {
     params: { task_ids: { type: 'taskIdList', required: true } },
   },
   task_aht: {
-    label: 'Task time per level',
-    description: 'Billable and active hours per review level, for specific tasks.',
+    label: 'Task tracked time per level',
+    description: 'Tracked and active hours per review level (TASKATTEMPTS clock — not billing), for specific tasks.',
     sql: 'task_aht.sql',
+    params: { task_ids: { type: 'taskIdList', required: true } },
+  },
+  task_billable: {
+    label: 'Task billable hours per level',
+    description: 'Billable hours per review level from GEN_AI_ISR — the billing source of truth.',
+    sql: 'task_billable.sql',
     params: { task_ids: { type: 'taskIdList', required: true } },
   },
   task_sbq: {

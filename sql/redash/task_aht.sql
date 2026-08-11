@@ -1,7 +1,9 @@
--- Time worked per review level for one or more tasks. V2_TIME_SPENT_SECS is the
--- billable clock; V2_ACTIVE_TIME_SPENT_SECS excludes idle, so the gap between
--- the two is the same "idle is total minus gen" distinction the audit rules use.
--- One row per (task, level).
+-- Time worked per review level for one or more tasks. V2_TIME_SPENT_SECS is
+-- the TRACKED clock — NOT billable (billing is GEN_AI_ISR.WORK_HOURS_SPENT,
+-- see task_billable.sql); V2_ACTIVE_TIME_SPENT_SECS excludes idle, so the gap
+-- between the two is the same "idle is total minus gen" distinction the audit
+-- rules use. One row per (task, level). Older task generations can have ZERO
+-- rows here while still carrying billed attempts in GEN_AI_ISR.
 SELECT
     TASK                                              AS task_id,
     ATTEMPTED_AT_REVIEW_LEVEL::string                 AS review_level,

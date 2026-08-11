@@ -36,9 +36,10 @@ const SUSPECT_TEAM_RE = /banned|cheat|fraud/i;
 // ---------------------------------------------------------------------------
 
 export async function taskPipeline(taskId, opts = {}) {
-  const [history, aht] = await Promise.all([
+  const [history, aht, billed] = await Promise.all([
     runRegistryQuery('task_pipeline', { task_ids: [taskId] }, opts),
     runRegistryQuery('task_aht', { task_ids: [taskId] }, opts),
+    runRegistryQuery('task_billable', { task_ids: [taskId] }, opts),
   ]);
 
   const nodes = history.rows.map((r) => ({
@@ -55,21 +56,46 @@ export async function taskPipeline(taskId, opts = {}) {
     suspectTeam: !!r.worker_team && SUSPECT_TEAM_RE.test(r.worker_team),
   }));
 
-  const time = aht.rows.map((r) => ({
-    reviewLevel: r.review_level,
-    attempts: Number(r.attempts) || 0,
-    hours: Number(r.hours) || 0,
-    activeHours: Number(r.active_hours) || 0,
-    lastAttemptAt: r.last_attempt_at,
-  })).sort((a, b) => lvlNum(a.reviewLevel) - lvlNum(b.reviewLevel));
+  // Two clocks merged per level: BILLABLE from GEN_AI_ISR (the billing source
+  // of truth) and tracked/active from TASKATTEMPTS. Some task generations have
+  // no TASKATTEMPTS rows at all while their attempts are fully billed — the
+  // tracked side then honestly reads 0 instead of zeroing out billing with it.
+  const byLevel = new Map();
+  const levelRow = (lvl) => {
+    const key = String(lvl);
+    if (!byLevel.has(key)) {
+      byLevel.set(key, {
+        reviewLevel: key, attempts: 0, billableHours: 0, uselessAttempts: 0,
+        hours: 0, activeHours: 0, trackedAttempts: 0, lastAttemptAt: null,
+      });
+    }
+    return byLevel.get(key);
+  };
+  for (const r of billed.rows) {
+    const t = levelRow(r.review_level);
+    t.attempts += Number(r.attempts) || 0;
+    t.billableHours = +(t.billableHours + (Number(r.billable_hours) || 0)).toFixed(2);
+    t.uselessAttempts += Number(r.useless_attempts) || 0;
+    if (!t.lastAttemptAt || String(r.last_work_day) > String(t.lastAttemptAt)) t.lastAttemptAt = r.last_work_day;
+  }
+  for (const r of aht.rows) {
+    const t = levelRow(r.review_level);
+    t.trackedAttempts += Number(r.attempts) || 0;
+    t.hours = +(t.hours + (Number(r.hours) || 0)).toFixed(2);
+    t.activeHours = +(t.activeHours + (Number(r.active_hours) || 0)).toFixed(2);
+    t.attempts = Math.max(t.attempts, t.trackedAttempts);
+    if (!t.lastAttemptAt || String(r.last_attempt_at) > String(t.lastAttemptAt)) t.lastAttemptAt = r.last_attempt_at;
+  }
+  const time = [...byLevel.values()].sort((a, b) => lvlNum(a.reviewLevel) - lvlNum(b.reviewLevel));
 
   const totals = time.reduce(
     (acc, t) => ({
       attempts: acc.attempts + t.attempts,
+      billableHours: +(acc.billableHours + t.billableHours).toFixed(2),
       hours: +(acc.hours + t.hours).toFixed(2),
       activeHours: +(acc.activeHours + t.activeHours).toFixed(2),
     }),
-    { attempts: 0, hours: 0, activeHours: 0 },
+    { attempts: 0, billableHours: 0, hours: 0, activeHours: 0 },
   );
 
   // Distinct people who touched the task, newest contribution first.

@@ -1025,7 +1025,12 @@ function buildPipeline(d) {
   const cur = d.current;
   out.push(el('div', { class: 'pl-cards' },
     plCard(cur ? lvlLabel(cur.reviewLevel) : '—', 'Current level', cur ? `status: ${cur.status}` : ''),
-    plCard(`${d.totals.hours} h`, 'Billable time', `${d.totals.activeHours} h active · ${d.totals.attempts} attempts`),
+    plCard(`${d.totals.billableHours ?? d.totals.hours} h`, 'Billable time',
+      // Tracked/active come from a different clock (TASKATTEMPTS) that whole
+      // task generations don't have — say so instead of rendering a bare 0.
+      d.totals.hours || d.totals.activeHours
+        ? `${d.totals.activeHours} h active · ${d.totals.attempts} attempts`
+        : `${d.totals.attempts} attempts · no tracked-time rows for this task id`),
     plCard(String(d.workers.length), 'People involved', d.workers.some((w) => w.suspectTeam) ? 'flagged team present' : ''),
     plCard(String(d.history.length), 'Pipeline nodes', cur ? `updated ${fmtDate(cur.endedAt)}` : ''),
   ));
@@ -1045,16 +1050,17 @@ function buildPipeline(d) {
   // Time per level.
   if (d.time.length) {
     out.push(el('h2', {}, 'Time per level'));
-    const maxH = Math.max(...d.time.map((t) => t.hours), 0.01);
+    const barH = (t) => t.billableHours ?? t.hours;
+    const maxH = Math.max(...d.time.map((t) => Math.max(barH(t), t.hours)), 0.01);
     out.push(el('div', { class: 'pl-time' },
       ...d.time.map((t) => el('div', { class: 'pl-time-row' },
         el('div', { class: 'pl-time-name' }, lvlLabel(t.reviewLevel)),
         el('div', { class: 'pl-time-bar' },
-          el('div', { class: 'pl-time-fill', style: `width:${(t.hours / maxH) * 100}%` }),
+          el('div', { class: 'pl-time-fill', style: `width:${(barH(t) / maxH) * 100}%` }),
           el('div', { class: 'pl-time-fill active', style: `width:${(t.activeHours / maxH) * 100}%` })),
-        el('div', { class: 'pl-time-val' }, `${t.hours} h`,
-          el('span', { class: 'pl-dim' }, ` · ${t.activeHours} active`)),
-        el('div', { class: 'pl-dim' }, `${t.attempts} attempt${t.attempts === 1 ? '' : 's'}`),
+        el('div', { class: 'pl-time-val' }, `${barH(t)} h billed`,
+          el('span', { class: 'pl-dim' }, t.hours || t.activeHours ? ` · ${t.hours} tracked / ${t.activeHours} active` : '')),
+        el('div', { class: 'pl-dim' }, `${t.attempts} attempt${t.attempts === 1 ? '' : 's'}${t.uselessAttempts ? ` (${t.uselessAttempts} useless)` : ''}`),
       ))));
   }
 
@@ -2211,6 +2217,7 @@ function renderGuideBubble(guide, question = '') {
 // Empty-state greeting + clickable starter prompts (shown only when the log has
 // no messages; removed as soon as one arrives).
 const CHAT_SUGGESTIONS = [
+  'Give me a rundown of every finding in this task and where each one stands.',
   'Summarize the A ↔ B decision and whether the ranking is defensible.',
   'Verify the annotator\'s rank.json grading against the trajectories.',
   'Were all milestones entered, in order, in both trajectories?',
