@@ -217,6 +217,9 @@ npm start              # http://localhost:4100
 
 First boot seeds `data/users.json` with four accounts:
 `admin/admin-cwt26` (admin), `qm1/qm1-cwt26`, `qm2/qm2-cwt26`, `qm3/qm3-cwt26` (reviewers).
+The `-cwt26` suffix is only the default: set `CWT_SEED_SUFFIX` before first boot and the
+accounts seed as `<name>-<suffix>` instead (`deploy/sandbox.mjs` generates a random one
+per deploy and prints the logins in its final banner).
 Passwords are scrypt-hashed; to reset one, replace its entry's hash fields with
 `"password": "newpass"` — it re-hashes on next login. Sessions are in-memory (a server restart
 logs everyone out).
@@ -243,9 +246,11 @@ Or without Docker: `npm ci && npm start` (needs Node 22+ and `unzip` on PATH).
 | `/app/data` (`DATA_DIR`) | `users.json` (seeded on first boot) |
 | `/app/spec` (`SPEC_DIR`, read-only) | customer spec docs incl. `V11_RUBRIC.csv` |
 
-`GET /healthz` is the unauthenticated liveness probe. Change the seeded passwords in
-`data/users.json` before sharing the URL (set `"password": "newpass"` on an entry — it re-hashes
-on next login). Sessions are in-memory: a restart logs everyone out, nothing else is lost.
+`GET /healthz` is the unauthenticated liveness probe. Never share the URL with the default
+seeds live: set `CWT_SEED_SUFFIX=<random>` before first boot so the accounts seed as
+`<name>-<suffix>`, or change the passwords in `data/users.json` (set `"password": "newpass"`
+on an entry — it re-hashes on next login). Sessions are in-memory: a restart logs everyone
+out, nothing else is lost.
 Put TLS in front (sandbox ingress / reverse proxy) — the login cookie is HttpOnly but the app
 itself serves plain HTTP.
 

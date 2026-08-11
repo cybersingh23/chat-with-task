@@ -17,6 +17,11 @@
  * real environment variables at start, so no secret lands on the sandbox disk (which
  * also hosts a web terminal).
  *
+ * Each deploy also generates its own credentials — basic auth on the web terminal
+ * and a random suffix for the app's seeded logins — printed once, in the final
+ * banner on this console. Nothing that answers on the public tunnel domain ships
+ * with a committed default.
+ *
  * Environment variables:
  *   LITELLM_API_KEY     LiteLLM proxy key  (REQUIRED — from ../.env or the environment)
  *   LITELLM_BASE_URL    LiteLLM proxy URL  (default: https://litellm-proxy.ml.scale.com/v1)
@@ -35,6 +40,7 @@
  */
 
 import { execSync } from 'child_process';
+import { randomBytes } from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 import { resolve, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
@@ -86,6 +92,13 @@ function readDotEnv() {
 const dotEnv = readDotEnv();
 const fromEnv = (k, fallback) => process.env[k] || dotEnv[k] || fallback;
 
+// Per-deploy credentials. The tunnel URLs are public, so nothing listening on them
+// can use a committed default: the web terminal gets basic auth, and the app's
+// seeded logins get a random suffix (src/auth.js reads CWT_SEED_SUFFIX). Both are
+// printed once, in the local banner at the end — they exist nowhere else.
+const TTYD_PASS = randomBytes(12).toString('base64url');
+const SEED_SUFFIX = randomBytes(6).toString('hex');
+
 // Keys with no value are dropped before the env string is built, so an unset
 // optional var stays unset in the sandbox rather than arriving as "undefined".
 const APP_ENV = {
@@ -99,6 +112,9 @@ const APP_ENV = {
   REDASH_API_KEY:                  fromEnv('REDASH_API_KEY'),
   REDASH_ANALYTICS_DATA_SOURCE_ID: fromEnv('REDASH_ANALYTICS_DATA_SOURCE_ID', '22'),
   ACC_PROJECT_ID:                  fromEnv('ACC_PROJECT_ID', '69979ab5a4b6d80af7b7d1c8'),
+  // Random per deploy — see the credentials block above. Harmless when the board
+  // ships: data/users.json already exists, so nothing re-seeds.
+  CWT_SEED_SUFFIX: SEED_SUFFIX,
   PORT: String(APP_PORT),
 };
 
@@ -122,7 +138,8 @@ if (INCLUDE_BOARD) {
   console.warn('  That is real customer task data on a shared host, and a much slower upload.');
 } else {
   console.log('  Board excluded (workspace/, data/). The sandbox starts empty; logins re-seed');
-  console.log('  to the defaults in src/auth.js. Set SANDBOX_INCLUDE_BOARD=true to ship yours.');
+  console.log('  with a random per-deploy suffix — printed in the banner at the end. Set');
+  console.log('  SANDBOX_INCLUDE_BOARD=true to ship yours.');
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -200,12 +217,15 @@ async function waitForCloudInit(sandboxId) {
 
 async function setupTtyd(sandboxId) {
   console.log('[4/6] Starting ttyd...');
+  // Basic auth (-c): the tunnel URL is public, and an open -W ttyd is a writable
+  // shell for anyone who has it — on a box whose environment holds the API keys.
+  // TTYD_PASS is base64url, so it needs no escaping inside the single quotes.
   await exec(sandboxId,
     `pkill -9 ttyd 2>/dev/null || true; sleep 1; ` +
-    `nohup ttyd -p ${TTYD_PORT} -W -t enableZmodem=true bash > /tmp/ttyd.log 2>&1 & sleep 2`);
+    `nohup ttyd -p ${TTYD_PORT} -W -t enableZmodem=true -c 'cwt:${TTYD_PASS}' bash > /tmp/ttyd.log 2>&1 & sleep 2`);
   const check = await exec(sandboxId, `ss -tlnp | grep :${TTYD_PORT} || echo NOT_LISTENING`);
   if (check.includes('NOT_LISTENING')) throw new Error('ttyd failed to start');
-  console.log('    ttyd running (zmodem enabled)');
+  console.log('    ttyd running (zmodem enabled, basic auth)');
 }
 
 async function installAndDeploy(sandboxId) {
@@ -305,6 +325,12 @@ async function main() {
   const ttydUrl = rewriteUrl(tunnelUrls[TTYD_PORT] ?? tunnelUrls[String(TTYD_PORT)]);
   const days = Math.round(TIMEOUT / 86400);
 
+  // With the board shipped, data/users.json arrives as-is and the seed suffix
+  // never applies — say so rather than print a login that won't work.
+  const appLogin = INCLUDE_BOARD
+    ? 'as in your shipped data/users.json'
+    : `admin / admin-${SEED_SUFFIX}   (reviewers: <name>-${SEED_SUFFIX})`;
+
   console.log(`
 ╔══════════════════════════════════════════════════════════════╗
 ║                    DEPLOYMENT COMPLETE                      ║
@@ -314,7 +340,9 @@ async function main() {
   Terminal   : ${ttydUrl}
   Expires    : ${days} days from now
 ╠══════════════════════════════════════════════════════════════╣
-  Login      : admin / admin-cwt26
+  App login  : ${appLogin}
+  Shell auth : cwt / ${TTYD_PASS}
+  Credentials are random per deploy and printed only here — save them.
   Upload files via terminal: open Terminal URL → run rz
 ╚══════════════════════════════════════════════════════════════╝`);
 }

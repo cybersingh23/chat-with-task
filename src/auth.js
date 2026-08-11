@@ -10,13 +10,17 @@ const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Seeded on first boot; passwords are scrypt-hashed, change them in data/users.json
 // by replacing the hash with {"password": "newpass"} — it re-hashes on next login check.
+// The suffix is env-driven so a deploy can randomize it (deploy/sandbox.mjs does) —
+// a committed default on a public URL is an open door. Unset, local dev seeds the
+// same <name>-cwt26 logins as always.
+const SEED_SUFFIX = process.env.CWT_SEED_SUFFIX || 'cwt26';
 const DEFAULT_USERS = [
-  { username: 'admin', password: 'admin-cwt26', role: 'admin' },
-  { username: 'pavit', password: 'pavit-cwt26', role: 'reviewer' },
-  { username: 'ernesto', password: 'ernesto-cwt26', role: 'reviewer' },
-  { username: 'christian', password: 'christian-cwt26', role: 'reviewer' },
-  { username: 'gilberto', password: 'gilberto-cwt26', role: 'reviewer' },
-  { username: 'nishchay', password: 'nishchay-cwt26', role: 'reviewer' },
+  { username: 'admin', password: `admin-${SEED_SUFFIX}`, role: 'admin' },
+  { username: 'pavit', password: `pavit-${SEED_SUFFIX}`, role: 'reviewer' },
+  { username: 'ernesto', password: `ernesto-${SEED_SUFFIX}`, role: 'reviewer' },
+  { username: 'christian', password: `christian-${SEED_SUFFIX}`, role: 'reviewer' },
+  { username: 'gilberto', password: `gilberto-${SEED_SUFFIX}`, role: 'reviewer' },
+  { username: 'nishchay', password: `nishchay-${SEED_SUFFIX}`, role: 'reviewer' },
 ];
 
 function hash(password, salt) {
