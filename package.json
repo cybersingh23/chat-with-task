@@ -6,7 +6,8 @@
   "description": "Chat-with-Task — QM audit studio for ACC deliveries: bucketed task workspace, review/remediation docs, deep-linked trajectory viewer, and a LiteLLM-backed audit copilot.",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node tools/test_fixes.mjs"
   },
   "dependencies": {
     "busboy": "^1.6.0",
