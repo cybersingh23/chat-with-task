@@ -30,6 +30,7 @@ import { teamApi } from './team.js';
 import { aceyApi } from './acey.js';
 import { stagingApi } from './staging.js';
 import { fixesApi } from './fixes.js';
+import { writeJsonAtomic } from '../fixes.js';
 import { ACTION_TOOL_DEFS, makeActionExecutor, confirmPlan, cancelPlan } from '../copilot_actions.js';
 
 export const api = express.Router();
@@ -352,7 +353,15 @@ api.get('/task/:bucket/:id', wrap(async (req, res) => res.json(taskMeta(req.para
 api.get('/task/:bucket/:id/files', wrap(async (req, res) => res.json(listFiles(req.params.bucket, req.params.id))));
 
 api.get('/task/:bucket/:id/file', wrap(async (req, res) => {
-  const f = readTaskFile(req.params.bucket, req.params.id, String(req.query.path || ''));
+  const rel = String(req.query.path || '');
+  // ?download=1 streams the FULL file as an attachment — readTaskFile clips
+  // text at 200k chars, which would hand over a truncated (invalid) rank.json.
+  if (req.query.download) {
+    const abs = resolveSafe(taskDir(req.params.bucket, req.params.id), rel);
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw httpError(404, `file not found: ${rel}`);
+    return res.download(abs, String(req.query.name || '') || path.basename(abs));
+  }
+  const f = readTaskFile(req.params.bucket, req.params.id, rel);
   if (f.kind === 'image') return res.sendFile(f.abs);
   res.json(f);
 }));
@@ -478,6 +487,16 @@ api.post('/admin/gendocs', requireAdmin, wrap(async (req, res) => {
 api.get('/admin/gendocs/status', requireAdmin, wrap(async (req, res) => res.json(jobSummary())));
 
 api.get('/task/:bucket/:id/docstatus', wrap(async (req, res) => res.json(statusFor(req.params.bucket, req.params.id))));
+
+// A generated doc plus its finding count — the Review tab badge and the task
+// strip read this. Findings are the `### [HARD|SOFT|INFO] Fn` heading blocks.
+api.get('/task/:bucket/:id/doc/:which', wrap(async (req, res) => {
+  const { bucket, id, which } = req.params;
+  if (!['review', 'remediation'].includes(which)) return res.status(400).json({ error: 'which must be review|remediation' });
+  const f = readTaskFile(bucket, id, `${which}.md`); // 404s when not generated yet
+  const findingCount = (String(f.text || '').match(/^###\s*\[(?:HARD|SOFT|INFO)\]\s*F\d+/gm) || []).length;
+  res.json({ ...f, findingCount });
+}));
 
 // --- chat with task (SSE agent loop, history persisted in _chat.json) ---
 const CHAT_PROMPT = `
@@ -833,7 +852,7 @@ function loadChat(dir) {
   }
 }
 function saveChat(dir, messages) {
-  fs.writeFileSync(path.join(dir, '_chat.json'), JSON.stringify(messages, null, 2));
+  writeJsonAtomic(path.join(dir, '_chat.json'), messages);
 }
 
 function startSSE(res) {

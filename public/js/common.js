@@ -177,7 +177,7 @@ export function renderMarkdown(md, opts = {}) {
             + '</div><div class="fixdoc__editor" hidden></div>'
           : '';
         const attrs = `data-fix-id="${escapeHtml(fix.id || '')}" data-fix-status="${escapeHtml(fix.status || '')}"`
-          + ` data-fix-path="${escapeHtml(fix.path || '')}"`;
+          + ` data-fix-path="${escapeHtml(fix.path || '')}" data-fix-occurrence="${Number(fix.occurrence) || 1}"`;
         if (!fix.path) {
           return `<div class="fixdoc" ${attrs}><div class="fixdoc__head">${head}</div>`
             + `<div class="fixdoc__instruction">${escapeHtml(fix.instruction || '(instruction-only fix)')}</div></div>`;

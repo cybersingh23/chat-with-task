@@ -315,7 +315,10 @@ function setActive() {}
 function findDocNav() { return null; }
 
 function loadTrajectory(model) {
-  trajCache[model] ||= api(`/task/${bucket}/${taskId}/trajectory/${model}`);
+  // A rejected promise must not stay cached — it would make the trajectory
+  // unloadable for the rest of the page's life after one transient failure.
+  trajCache[model] ||= api(`/task/${bucket}/${taskId}/trajectory/${model}`)
+    .catch((e) => { delete trajCache[model]; throw e; });
   return trajCache[model];
 }
 
@@ -327,6 +330,9 @@ function hideTrajToolbar() {
 // ---------- documents ----------
 async function openDoc(doc, navNode, { refresh = false } = {}) {
   setActive(navNode);
+  // Every entry path — tab click, gotoFinding, the Second Opinion jump, a
+  // watchDoc completion — must sync the tab highlight, not just render.
+  setActiveTab(doc.key);
   hideTrajToolbar();
   viewerTitle.textContent = doc.file;
   viewReopeners.set(`doc:${doc.key}`, { label: doc.label, reopen: () => openDoc(doc, findDocNav(doc.label)) });
@@ -386,22 +392,45 @@ function addRegenButton(doc) {
 let docWatch = null;
 async function watchDoc(doc) {
   clearInterval(docWatch);
-  const banner = el('div', { class: 'gen-banner' }, 'Generating… this runs in the background — you can switch tasks or close this and come back.');
+  docWatch = null;
+  document.querySelectorAll('.gen-banner').forEach((b) => b.remove()); // one banner at a time
+  let banner = el('div', { class: 'gen-banner' }, 'Generating… this runs in the background — you can switch tasks or close this and come back.');
   viewerBody.prepend(banner);
+  // A view switch detaches the banner; terminal messages re-attach to the live
+  // pane rather than being written into a node nobody can see.
+  const say = (text, cls = '') => {
+    if (!banner.isConnected) {
+      banner = el('div', { class: 'gen-banner' });
+      viewerBody.prepend(banner);
+    }
+    banner.className = `gen-banner${cls ? ` ${cls}` : ''}`;
+    banner.textContent = text;
+  };
+  let finished = false;
   const tick = async () => {
     let s;
     try { s = await api(`/task/${bucket}/${taskId}/docstatus`); } catch { return; }
     if (s.state === 'running' || s.state === 'pending') {
-      banner.textContent = s.current ? `Generating ${s.current}.md… (background — feel free to navigate away)` : 'Queued… (background)';
+      // progress only updates in place — it must not chase the user across tabs
+      if (banner.isConnected) banner.textContent = s.current ? `Generating ${s.current}.md… (background — feel free to navigate away)` : 'Queued… (background)';
       return;
     }
     clearInterval(docWatch); docWatch = null;
-    if (s.state === 'error') { banner.textContent = `Generation failed: ${s.error}`; banner.classList.add('error-line'); return; }
-    openDoc(doc, findDocNav(doc.label === 'Review' ? 'Review' : 'Remediation'), { refresh: true });
+    finished = true;
+    if (s.state === 'error') { say(`Generation failed: ${s.error}`, 'error-line'); return; }
+    if (activeTab === doc.key) {
+      // still on this doc's tab (or its placeholder) — load the fresh doc
+      banner.remove();
+      openDoc(doc, findDocNav(doc.label === 'Review' ? 'Review' : 'Remediation'), { refresh: true });
+    } else {
+      // don't yank them off whatever they're reading — announce instead
+      viewCache.delete(`doc:${doc.key}`); // next tab open fetches the fresh doc
+      say(`${doc.key}.md is ready — open the ${doc.label} tab to read it.`);
+    }
     buildSidebar();
   };
   await tick();
-  docWatch = setInterval(tick, 3000);
+  if (!finished) docWatch = setInterval(tick, 3000);
 }
 
 // ---------- task definition / milestones ----------
@@ -737,6 +766,14 @@ function groupDesc(desc) {
 // ---------- CB responses (rank.json behind a UI) ----------
 let rankPromise = null;
 
+// Every successful fixes action can rewrite rank.json — drop the cached rank
+// promise AND the mounted CB view so the next open refetches instead of
+// showing pre-fix text for the rest of the page's life.
+function invalidateRankViews() {
+  rankPromise = null;
+  viewCache.delete('cb');
+}
+
 async function showCbResponses() {
   setActiveTab('cb');
   hideTrajToolbar();
@@ -932,7 +969,7 @@ function buildRankingProof(files) {
     if (!img && !just) continue;
     const section = el('section', { class: 'rp-side' }, el('h2', { class: cls }, label));
     if (img) {
-      const src = `/api/task/${bucket}/${taskId}/file?path=${encodeURIComponent(img)}`;
+      const src = `${window.__base__ || ''}/api/task/${bucket}/${taskId}/file?path=${encodeURIComponent(img)}`;
       section.append(el('a', { href: src, target: '_blank', title: 'open full size' }, el('img', { class: 'rp-img', src })));
     }
     if (just) {
@@ -1095,21 +1132,41 @@ async function showFixes() { return showChecklist(); }
 // model proposed next to what actually landed (edited_from).
 async function decorateFixDocs(root) {
   let states;
-  try { states = await api(`/task/${bucket}/${taskId}/fixes`); } catch { return; }
+  try { states = await api(`/task/${bucket}/${taskId}/fixes`); }
+  catch {
+    // the markdown pass already rendered live-looking buttons — kill them
+    for (const box of root.querySelectorAll('.fixdoc[data-fix-path]')) disarmFixDoc(box, 'fix state unavailable');
+    return;
+  }
   const byId = new Map(states.items.map((i) => [i.id, i]));
   // APPLIED blocks in the doc carry their own ids; the seeded grammar entries
-  // use G-ids. Path + old-text is the stable join.
+  // use G-ids. Path + old-text + occurrence is the stable join — the same
+  // doubled word can appear twice in one field, and without occurrence both
+  // blocks would bind to whichever entry the Map kept last.
+  const fixJoinKey = (p, old, occ) => `${p}\u0000${old}\u0000${Number(occ) || 1}`;
   const byPathOld = new Map(states.items.filter((i) => i.path)
-    .map((i) => [`${i.path}\u0000${String(i.old)}`, i]));
+    .map((i) => [fixJoinKey(i.path, String(i.old), i.occurrence), i]));
 
   for (const box of root.querySelectorAll('.fixdoc[data-fix-path]')) {
     const path = box.dataset.fixPath;
     if (!path) continue;
     const oldText = box.querySelector('.fixdoc__old')?.textContent ?? '';
-    const item = byId.get(box.dataset.fixId) || byPathOld.get(`${path}\u0000${oldText}`);
-    if (!item) continue;
+    const item = byId.get(box.dataset.fixId) || byPathOld.get(fixJoinKey(path, oldText, box.dataset.fixOccurrence));
+    if (!item) {
+      disarmFixDoc(box, 'couldn\'t match this block to the fix ledger — decide it under ‘Fixes without a block above’');
+      continue;
+    }
     wireFixDoc(box, item);
   }
+}
+
+// A fix block whose buttons can't act must not look live.
+function disarmFixDoc(box, note) {
+  const act = box.querySelector('.fixdoc__act');
+  if (!act) return; // no controls rendered (instruction-only block)
+  for (const b of act.querySelectorAll('.fixdoc-btn')) b.disabled = true;
+  const decision = box.querySelector('.fixdoc__decision');
+  if (decision) decision.textContent = note;
 }
 
 function wireFixDoc(box, item) {
@@ -1136,6 +1193,10 @@ function wireFixDoc(box, item) {
     // decided approval hides the buttons — Undo lives in the checklist.
     if (i.decision === 'denied' || i.reverted) act.hidden = false;
     if ((i.decision === 'approved' && !i.reverted) || i.signed_off_by) act.hidden = true;
+    // The green text shows what actually LANDED — an edited approval ships the
+    // reviewer's version (applied_new), not the model's proposal.
+    const landed = i.applied_new ?? i.new;
+    if (landed !== undefined) box.querySelector('.fixdoc__new').textContent = landed === '' ? '(delete)' : String(landed);
   };
   const latestEdit = (i) => (i.edited_from !== undefined && i.edited_from !== null ? ' · edited' : '');
 
@@ -1145,11 +1206,7 @@ function wireFixDoc(box, item) {
       || states.items.find((x) => x.path === item.path && String(x.old) === String(item.old));
     if (next) {
       item = next;
-      paint(item);
-      // An edit changes what ships — the block's green text shows the LANDED
-      // text, which for an edited approval is the reviewer's version.
-      const landed = next.applied_new !== undefined ? next.applied_new : next.new;
-      if (landed !== undefined) box.querySelector('.fixdoc__new').textContent = landed === '' ? '(delete)' : String(landed);
+      paint(item); // paint() also rewrites the green text with the landed version
     }
   };
 
@@ -1158,8 +1215,10 @@ function wireFixDoc(box, item) {
       const r = await api(`/task/${bucket}/${taskId}/fixes/${item.id}/${action}`, { method: 'POST', body: body || {} });
       if (r.result === 'DRIFTED') alert(`${item.id}: the text is not what this fix was authored against — nothing written.`);
       if (r.result === 'AMBIGUOUS') alert(`${item.id}: old matches more than once — route back to the eval.`);
+      invalidateRankViews();
       await refresh();
-    } catch (e) { alert(e.message); }
+      return true;
+    } catch (e) { alert(e.message); return false; }
   };
 
   act.addEventListener('click', (e) => {
@@ -1188,8 +1247,9 @@ function wireFixDoc(box, item) {
           onclick: async (ev) => {
             if (!ta.value.trim()) return ta.focus();
             ev.target.disabled = true;
-            await call('approve', { new: ta.value });
-            editor.hidden = true;
+            const ok = await call('approve', { new: ta.value });
+            ev.target.disabled = false; // a failed call must leave the button usable
+            if (ok) editor.hidden = true;
           },
         }, 'Apply my version')));
     editor.hidden = false;
@@ -1198,19 +1258,22 @@ function wireFixDoc(box, item) {
 
   function openDeny() {
     const input = el('input', { class: 'fixdoc__ta fixdoc__reason', placeholder: 'Why this fix is wrong — recorded for the vendor dispute trail' });
+    const denyBtn = el('button', {
+      class: 'btn btn--primary', type: 'button',
+      onclick: async () => {
+        if (!input.value.trim()) return input.focus();
+        denyBtn.disabled = true;
+        const ok = await call('deny', { reason: input.value.trim() });
+        denyBtn.disabled = false; // a failed call must leave the button usable
+        if (ok) editor.hidden = true;
+      },
+    }, item.kind === 'grammar' ? 'Deny & revert' : 'Deny');
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); denyBtn.click(); } });
     editor.replaceChildren(
       input,
       el('div', { class: 'fixdoc__editor-row' },
         el('button', { class: 'btn btn--ghost', type: 'button', onclick: () => { editor.hidden = true; } }, 'Cancel'),
-        el('button', {
-          class: 'btn btn--primary', type: 'button',
-          onclick: async (ev) => {
-            if (!input.value.trim()) return input.focus();
-            ev.target.disabled = true;
-            await call('deny', { reason: input.value.trim() });
-            editor.hidden = true;
-          },
-        }, item.kind === 'grammar' ? 'Deny & revert' : 'Deny')));
+        denyBtn));
     editor.hidden = false;
     input.focus();
   }
@@ -1243,12 +1306,15 @@ function buildFixesView(data) {
       const r = await api(`/task/${bucket}/${taskId}/fixes/${id}/${action}`, { method: 'POST', body: body || {} });
       if (r.result === 'DRIFTED') return alert(`${id}: the text is not what this fix was authored against (drifted) — nothing written.`);
       if (r.result === 'AMBIGUOUS') return alert(`${id}: old matches more than once — route back to the eval to widen it.`);
+      invalidateRankViews();
       showFixes();
     } catch (err) { alert(err.message); }
   };
 
   const item = (f) => {
     const decided = f.decision !== 'pending' || f.kind === 'grammar';
+    // green text = what actually shipped; an edited approval lands applied_new
+    const landed = f.applied_new ?? f.new;
     const state = f.kind === 'grammar'
       ? (f.reverted ? 'denied · reverted' : (f.signed_off_by ? `signed off by ${f.signed_off_by}` : 'applied by the eval'))
       : f.decision === 'pending'
@@ -1265,7 +1331,7 @@ function buildFixesView(data) {
         ? el('div', { class: 'fix-swap' },
           el('div', { class: 'fix-path mono' }, f.path),
           el('div', { class: 'fix-old' }, typeof f.old === 'string' ? f.old : String(f.old)),
-          el('div', { class: 'fix-new' }, f.new === '' ? '(delete)' : (typeof f.new === 'string' ? f.new : String(f.new))))
+          el('div', { class: 'fix-new' }, landed === '' ? '(delete)' : (typeof landed === 'string' ? landed : String(landed))))
         : el('div', { class: 'fix-instruction' }, f.instruction || '(instruction)'),
     );
     const buttons = el('div', { class: 'fix-actions' });
@@ -1294,14 +1360,18 @@ function buildFixesView(data) {
     instructions.forEach((f) => container.append(item(f)));
   }
   if (grammar.length) {
-    const mech = grammar.filter((g) => !g.meaning_changing && !g.signed_off_by && !g.reverted).length
-      + proposed.filter((f) => !f.meaning_changing && f.decision === 'pending' && f.applicability === 'OK').length;
+    // POST /fixes/approve-mechanical acts TASK-WIDE, so the count comes from
+    // the full merged state (allItems), not just the rows in this list.
+    const scope = data.allItems || data.items;
+    const mech = scope.filter((i) => !i.meaning_changing
+      && ((i.kind === 'grammar' && !i.signed_off_by && !i.reverted)
+        || (i.kind === 'proposed' && i.decision === 'pending' && i.applicability === 'OK'))).length;
     container.append(el('h2', { class: 'fix-h2' }, 'Grammar (applied by the eval)',
       mech ? el('button', {
         class: 'btn btn--ghost fix-bulk',
         title: 'Meaning-changing edits are excluded — they get an individual look',
         onclick: async () => {
-          try { await api(`/task/${bucket}/${taskId}/fixes/approve-mechanical`, { method: 'POST' }); showFixes(); }
+          try { await api(`/task/${bucket}/${taskId}/fixes/approve-mechanical`, { method: 'POST' }); invalidateRankViews(); showFixes(); }
           catch (e) { alert(e.message); }
         },
       }, `Approve all mechanical · ${mech}`) : null));
@@ -1316,7 +1386,11 @@ function buildFixesView(data) {
 // showChecklist survives as the alias for verdict flows and old deep links.
 async function showChecklist() {
   const doc = DOCS.find((d) => d.key === 'remediation');
+  // A fix decision rebuilds this whole view — mid-page it must not dump the
+  // reviewer back at the top.
+  const keepScroll = currentViewKey === 'doc:remediation' ? viewerEl.scrollTop : null;
   await openDoc(doc, findDocNav(doc.label), { refresh: true });
+  if (keepScroll != null) viewerEl.scrollTop = keepScroll;
 }
 
 // The merged lower half of the Remediation tab:
@@ -1344,12 +1418,12 @@ async function appendChecklistSections(content) {
     for (const box of content.querySelectorAll('.fixdoc[data-fix-id]')) {
       covered.add(box.dataset.fixId);
       const oldText = box.querySelector('.fixdoc__old')?.textContent ?? '';
-      covered.add(`${box.dataset.fixPath}\u0000${oldText}`);
+      covered.add(`${box.dataset.fixPath}\u0000${oldText}\u0000${Number(box.dataset.fixOccurrence) || 1}`);
     }
     const residual = fixData.items.filter((i) =>
-      !covered.has(i.id) && !(i.path && covered.has(`${i.path}\u0000${String(i.old)}`)));
+      !covered.has(i.id) && !(i.path && covered.has(`${i.path}\u0000${String(i.old)}\u0000${Number(i.occurrence) || 1}`)));
     if (residual.length) {
-      const sub = buildFixesView({ ...fixData, items: residual,
+      const sub = buildFixesView({ ...fixData, items: residual, allItems: fixData.items,
         pending: residual.filter((i) => i.kind === 'proposed' && i.decision === 'pending').length });
       sub.querySelector('h1')?.remove();
       content.append(
@@ -1429,8 +1503,9 @@ function buildChecklistView(findings, checks, verdict, note) {
       clearTimeout(noteTimer); noteTimer = setTimeout(() => { noteSaved.textContent = ''; }, 1500);
     } catch (e) { noteSaved.textContent = e.message; }
   };
+  // 'change' alone — it already fires on blur when the value changed, and
+  // binding blur too posted every save twice.
   noteInput.addEventListener('change', saveNote);
-  noteInput.addEventListener('blur', saveNote);
   const noteWrap = el('div', { class: 'check-note' },
     el('div', { class: 'check-note-label' }, el('span', {}, '⚠ Second opinion — key issue'), noteSaved),
     noteInput,
@@ -1446,7 +1521,9 @@ function buildChecklistView(findings, checks, verdict, note) {
     el('button', {
       class: `vbtn v-${k}${verdict === k ? ' active' : ''}`, 'data-v': k,
       onclick: async () => {
-        await api(`/task/${bucket}/${taskId}/verdict`, { method: 'POST', body: { verdict: k } });
+        // a failed POST must not paint the button active or move the select
+        try { await api(`/task/${bucket}/${taskId}/verdict`, { method: 'POST', body: { verdict: k } }); }
+        catch (e) { alert(e.message); return; }
         verdictSelect.value = k;
         verdictSelect.className = `verdict-select set v-${k}`;
         refreshState();
@@ -1529,7 +1606,20 @@ async function showTrajectory(model, focusIndex = null, phrase = null) {
     label: model === 'model_a' ? 'Model A' : 'Model B',
     reopen: () => showTrajectory(model),
   });
-  const traj = await loadTrajectory(model);
+  let traj;
+  try { traj = await loadTrajectory(model); }
+  catch {
+    // missing/stub trajectory: the tab is already selected, so the old view
+    // must not silently stay — say what's wrong, in the pane
+    setTrajLauncherActive(model);
+    renderTrajTabs(model);
+    mountView(`traj:${model}`, () =>
+      el('div', { class: 'callout info' },
+        `${model === 'model_a' ? 'Model A' : 'Model B'}'s trajectory is missing or unreadable for this task.`),
+      { refresh: true });
+    viewCache.delete(`traj:${model}`); // don't cache the error — a retry rebuilds
+    return;
+  }
   setTrajLauncherActive(model);
   renderTrajTabs(model);
 
@@ -1851,7 +1941,7 @@ async function showFile(relPath) {
   }
   let content;
   if (/\.(png|jpg|jpeg|gif|webp)$/i.test(relPath)) {
-    content = el('img', { class: 'proof', src: `/api/task/${bucket}/${taskId}/file?path=${encodeURIComponent(relPath)}` });
+    content = el('img', { class: 'proof', src: `${window.__base__ || ''}/api/task/${bucket}/${taskId}/file?path=${encodeURIComponent(relPath)}` });
   } else {
     const f = await api(`/task/${bucket}/${taskId}/file?path=${encodeURIComponent(relPath)}`);
     if (relPath.endsWith('.md')) {
@@ -1890,20 +1980,18 @@ wireCopy('copy-task-id', () => taskId);
 wireCopy('copy-board-link', () => location.href);
 wireCopy('copy-outlier-link', () => OUTLIER_CLAIM_URL);
 
-// Downloads pull the CURRENT file through the API (no-store, always live) and
-// hand it over as a stamped filename, so a saved copy is identifiable later.
+// Downloads stream the CURRENT file through the API (no-store, always live)
+// under a stamped filename, so a saved copy is identifiable later. Navigation,
+// not api(): the JSON file route clips text at 200k chars, which would save a
+// truncated (invalid) rank.json labelled as the current state.
 function wireDownload(id, file, suffix) {
-  document.getElementById(id).addEventListener('click', async () => {
-    try {
-      const f = await api(`/task/${bucket}/${taskId}/file?path=${encodeURIComponent(file)}`);
-      const blob = new Blob([f.text], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `${taskId}_${suffix}`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      closeMenus();
-    } catch { alert(`No ${file} on this task.`); }
+  document.getElementById(id).addEventListener('click', () => {
+    const name = `${taskId}_${suffix}`;
+    const a = document.createElement('a');
+    a.href = `${window.__base__ || ''}/api/task/${bucket}/${taskId}/file?path=${encodeURIComponent(file)}&download=1&name=${encodeURIComponent(name)}`;
+    a.download = name;
+    a.click();
+    closeMenus();
   });
 }
 wireDownload('dl-rank', 'rank.json', 'rank.json');
@@ -2145,7 +2233,7 @@ function renderChatIntro() {
        'happened, citing exact turns, rubric rows and rank.json fields as clickable links. Flip to ',
        el('b', {}, 'Dynamic'), ' and I’ll walk you through a failure step by step.'];
   return el('div', { class: 'chat-intro' },
-    el('img', { class: 'chat-intro-avatar', src: '/copilot.png', alt: '' }),
+    el('img', { class: 'chat-intro-avatar', src: `${window.__base__ || ''}/copilot.png`, alt: '' }),
     el('p', { class: 'acey__intro' }, ...intro),
     el('h3', { class: 'eyebrow', style: 'margin: 20px 0 10px' }, 'Start with'),
     el('div', { class: 'acey__suggest' }, ...chips),
@@ -2168,7 +2256,7 @@ function refreshChatIntro() {
 // bobbing mascot — the personality is in the voice and the presence.
 function aceyStamp() {
   return el('div', { class: 'msg-who' },
-    el('img', { class: 'msg-avatar', src: '/copilot.png', alt: '' }),
+    el('img', { class: 'msg-avatar', src: `${window.__base__ || ''}/copilot.png`, alt: '' }),
     el('span', {}, 'Acey'));
 }
 
@@ -2481,7 +2569,13 @@ claimBtn.addEventListener('click', async () => {
 // '' clears the decision; any value sets it
 verdictSelect.addEventListener('change', async () => {
   const v = verdictSelect.value || null;
-  await api(`/task/${bucket}/${taskId}/verdict`, { method: 'POST', body: { verdict: v } });
+  try {
+    await api(`/task/${bucket}/${taskId}/verdict`, { method: 'POST', body: { verdict: v } });
+  } catch (e) {
+    alert(e.message);
+    refreshState(); // put the select back to what the server actually holds
+    return;
+  }
   refreshState();
   // Second Opinion needs a "why" — jump to the checklist and focus the note box.
   if (v === 'SECOND_OPINION') { focusNoteNext = true; showChecklist(); }
@@ -2513,8 +2607,10 @@ const verifyDecision = () => !!document.getElementById('verdict-select').value;
 
 const TASK_TOUR = [
   { title: 'Inside a task — your sandbox 🧪', body: 'This is a private sandbox task: claim it, chat, decide, whatever you like — it\'s deleted when the tour ends, so nothing here is real. Everything you audit lives on this one screen.' },
-  { selector: '#nav-docs', title: 'Documents', body: 'Task definition & milestones, the V11 QC spec, and CB responses — the annotator\'s rank.json in a clean UI (summary, per-dimension grading, failure modes, and the A↔B decision). The generated Review, Remediation, and your Checklist live here too.' },
-  { selector: '#nav-trajs', title: 'Trajectory viewer', body: 'Read Model A or Model B on their own, or Compare A ↔ B side by side to see exactly where the two runs diverge — matching prompts line up, and one-sided turns are clearly called out.' },
+  // The sidebar these steps used to point at (#nav-docs / #nav-trajs) is gone;
+  // the tab bar and its Trajectories tab are the current homes.
+  { selector: '#tabs', title: 'Documents', body: 'Task definition & milestones, the V11 QC spec, and CB responses — the annotator\'s rank.json in a clean UI (summary, per-dimension grading, failure modes, and the A↔B decision). The generated Review, Remediation, and your Checklist live here too.' },
+  { selector: '#tabs button[data-tab="trajectories"]', title: 'Trajectory viewer', body: 'Read Model A or Model B on their own, or Compare A ↔ B side by side to see exactly where the two runs diverge — matching prompts line up, and one-sided turns are clearly called out.' },
   { selector: '#viewer', title: 'Clickable citation "chips"', body: 'Everywhere you read — docs, CB responses, copilot answers — you\'ll see little chips. A traj:// chip jumps to an exact trajectory turn; a spec:// chip opens the QC rubric row that applies; a /rank.json field chip lands you in CB responses. Each one scrolls to the precise spot and highlights it — even a specific quoted phrase inside a response. See one? Click it.' },
   { selector: '#chat-panel', title: 'Meet Acey — try it 🚀', body: 'Ask Acey anything about this task. It reads and searches both trajectories and cross-checks the rank.json, then answers with those same clickable chips so you can verify in one click. I\'ve dropped a starter question in the box — click a suggestion or hit Send, and I\'ll wait for the reply.',
     onShow: primeCopilot, try: { action: 'copilot', hint: 'Waiting for Acey to answer…', verify: verifyCopilot } },
@@ -2540,7 +2636,7 @@ async function launchTaskTour() {
 document.getElementById('tour-btn')?.addEventListener('click', launchTaskTour);
 // best-effort cleanup if they close the tab mid-tour (not while navigating to resume)
 window.addEventListener('beforeunload', () => {
-  if (sessionStorage.getItem('cwt_tour_task') && !sessionStorage.getItem('cwt_tour_resume')) navigator.sendBeacon?.('/api/tour/end');
+  if (sessionStorage.getItem('cwt_tour_task') && !sessionStorage.getItem('cwt_tour_resume')) navigator.sendBeacon?.(`${window.__base__ || ''}/api/tour/end`);
 });
 
 // Acey is a fixed 348px column, but it still collapses — reviewers wanted the
