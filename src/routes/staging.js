@@ -6,7 +6,7 @@ import { laneOf, moveTaskToLane } from '../lanes.js';
 import { recordAction } from '../actions.js';
 import { runRegistryQuery } from '../redash_registry.js';
 import { redashEnabled } from '../redash.js';
-import { ptrGet, ptrSet } from '../fixes.js';
+import { ptrGet, ptrSet, validateTask, writeJsonAtomic } from '../fixes.js';
 
 // /api/staging/* and /api/backfill — the Staging lane's working surface
 // (HANDOFF_STAGING_FIXES_BACKFILL.md §6-§8, flow per Pavit 2026-08-10):
@@ -16,6 +16,12 @@ import { ptrGet, ptrSet } from '../fixes.js';
 export const stagingApi = express.Router();
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+const HEX24 = /^[0-9a-f]{24}$/;
+
+function readStudio(dir) {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, '_studio.json'), 'utf8')); } catch { return {}; }
+}
 
 // How long after a backfill Redash may legitimately not reflect it yet.
 // 30 minutes, per Pavit (§10.1) — inside the window a gap is PENDING, not
@@ -53,7 +59,7 @@ stagingApi.get('/verify', wrap(async (req, res) => {
   let redashError = null;
   if (redashEnabled()) {
     try {
-      const ids = tasks.map((t) => t.id);
+      const ids = tasks.map((t) => t.id).filter((id) => HEX24.test(id));
       const [sbqRes, lvlRes, labelRes] = await Promise.all([
         runRegistryQuery('task_sbq', { task_ids: ids }, { fresh: req.query.fresh === '1' }),
         runRegistryQuery('task_current_level', { task_ids: ids }, { fresh: req.query.fresh === '1' }),
@@ -68,17 +74,19 @@ stagingApi.get('/verify', wrap(async (req, res) => {
   }
 
   const items = tasks.map((m) => {
+    const dir = taskDir(m.bucket, m.id);
     const s = sbq.get(m.id);
     const l = level.get(m.id);
     const upstreamSbq = Number(s?.sbq_attempts || 0) > 0;
-    const warnings = m.audit?.warnings?.length || 0;
+    // Recomputed live, not read from the ingest-time snapshot — fixes decided
+    // since ingest change what validateTask finds, and a frozen warning would
+    // block a task from ever becoming ready.
+    const auditRow = m.audit?.verdict !== undefined ? m.audit : null;
+    const warnings = validateTask(dir, auditRow).length;
     const blockers = [];
     if (m.pendingFixes > 0) blockers.push(`${m.pendingFixes} fix${m.pendingFixes === 1 ? '' : 'es'} pending`);
     if (warnings) blockers.push(`${warnings} validation warning${warnings === 1 ? '' : 's'}`);
-    // Board SBQ verdict without Redash confirmation shows as awaiting, never as
-    // truth in either direction (§7.4).
     if (upstreamSbq) blockers.push('SBQ upstream — pull, do not backfill');
-    else if (m.verdict === 'SBQ') blockers.push('board-marked SBQ, awaiting Redash confirmation');
     return {
       id: m.id,
       bucket: m.bucket,
@@ -90,13 +98,13 @@ stagingApi.get('/verify', wrap(async (req, res) => {
       upstream: l ? { level: String(l.review_level), status: l.status } : null,
       sbq: upstreamSbq,
       lastSbqAt: s?.last_sbq_at || null,
-      hasSourceRow: fs.existsSync(path.join(taskDir(m.bucket, m.id), '_source_row.json')),
+      hasSourceRow: fs.existsSync(path.join(dir, '_source_row.json')),
       // Did the board's label land on platform? Covers the two 1:1-mappable
       // fields (preference rating, winning side); prose fields have no platform
       // field map yet — the eval-side reconciler owns that (§7.5). Informational,
       // not a gate: a grammar-only task matches trivially, a re-ranked one shows
       // ✗ until the backfill lands.
-      labelMatch: labelMatch(taskDir(m.bucket, m.id), labels.get(m.id)),
+      labelMatch: withPropagationWindow(labelMatch(dir, labels.get(m.id)), readStudio(dir)),
       ready: blockers.length === 0,
       blockers,
     };
@@ -137,7 +145,7 @@ stagingApi.post('/resolve', wrap(async (req, res) => {
         const state = JSON.parse(fs.readFileSync(p, 'utf8'));
         state.backfilled_at = new Date().toISOString();
         state.backfilled_by = req.user.username;
-        fs.writeFileSync(p, JSON.stringify(state, null, 2));
+        writeJsonAtomic(p, state);
       } catch { /* stamp is advisory */ }
       moved.push(item);
     } else skipped.push({ id, reason: 'no change' });
@@ -153,8 +161,26 @@ stagingApi.post('/resolve', wrap(async (req, res) => {
   res.json({ moved: moved.map((m) => m.id), skipped });
 }));
 
+// A MISMATCH right after a backfill is usually propagation lag, not a failure —
+// inside the window it reports PENDING so the popup doesn't cry wolf (§7.3).
+// The stamps come from _studio.json: backfill_retrieved_at (export pulled) and
+// backfilled_at (moved to Resolved).
+function withPropagationWindow(match, studio) {
+  if (match?.status !== 'MISMATCH') return match;
+  const stamp = Date.parse(studio.backfill_retrieved_at || studio.backfilled_at || '');
+  if (!Number.isFinite(stamp)) return match;
+  const until = stamp + PROPAGATION_WINDOW_MS;
+  if (Date.now() >= until) return match;
+  return { ...match, status: 'PENDING', pending_until: new Date(until).toISOString() };
+}
+
 // Normalize-then-compare for the two mappable label fields (§8: normalize both
 // sides; a naive === cries wolf on formatting).
+// Both sides can carry the wire-shaped string ("+2: moderately prefer model b")
+// or a bare number — Number() on the string form is NaN, which used to drop
+// the field from comparison entirely and report MATCH on winner alone.
+const parsePref = (v) => (typeof v === 'number' ? v : parseInt(String(v ?? '').trim(), 10));
+
 function labelMatch(dir, platform) {
   if (!platform) return { status: 'NOT_FOUND' };
   let live;
@@ -162,8 +188,8 @@ function labelMatch(dir, platform) {
 
   const fields = [];
   // preference: "+2: moderately prefer model b" -> +2, matched numerically.
-  const platPref = parseInt(String(platform.preference_rating || '').trim(), 10);
-  const boardPref = Number(live.preference_rating);
+  const platPref = parsePref(platform.preference_rating);
+  const boardPref = parsePref(live.preference_rating);
   if (!Number.isNaN(platPref) && !Number.isNaN(boardPref)) {
     fields.push({ field: 'preference_rating', match: platPref === boardPref, board: boardPref, platform: platPref });
   }
@@ -190,7 +216,9 @@ function labelMatch(dir, platform) {
 // the manual refresh.
 stagingApi.get('/layers', wrap(async (req, res) => {
   const ws = listWorkspace();
-  const ids = Object.values(ws).flat().filter((t) => !t.tour).map((t) => t.id);
+  // Stray non-task directories would fail the registry's id validation and
+  // take the whole batched query down with them — skip, don't 500 the board.
+  const ids = Object.values(ws).flat().filter((t) => !t.tour).map((t) => t.id).filter((id) => HEX24.test(id));
   if (!ids.length || !redashEnabled()) return res.json({ layers: {}, enabled: redashEnabled() });
   try {
     const out = await runRegistryQuery('task_current_level', { task_ids: ids }, { fresh: req.query.fresh === '1' });
@@ -265,11 +293,29 @@ function assertOutsideUntouched(emitted, source) {
 
 stagingApi.get('/backfill', wrap(async (req, res) => {
   const tasks = stagingTasks();
+
+  // Upstream SBQ exclusion (§6.1) has to come from Redash — a board SBQ
+  // verdict puts the task in RESOLVED, so it can never even reach this loop.
+  // Redash being down degrades to exporting with a loud manifest note rather
+  // than blocking the whole retrieval.
+  const sbqIds = new Set();
+  let sbqCheck = 'skipped';
+  if (redashEnabled() && tasks.length) {
+    try {
+      const ids = tasks.map((t) => t.id).filter((id) => HEX24.test(id));
+      const out = await runRegistryQuery('task_sbq', { task_ids: ids }, { fresh: req.query.fresh === '1' });
+      for (const r of out.rows) if (Number(r.sbq_attempts || 0) > 0) sbqIds.add(r.task_id);
+      sbqCheck = 'ok';
+    } catch (e) {
+      sbqCheck = `unavailable: ${e.message}`;
+    }
+  }
+
   const rows = [];
   const excluded = [];
   for (const m of tasks) {
     const dir = taskDir(m.bucket, m.id);
-    if (m.verdict === 'SBQ') { excluded.push({ id: m.id, reason: 'sbq' }); continue; }
+    if (sbqIds.has(m.id)) { excluded.push({ id: m.id, reason: 'sbq_upstream' }); continue; }
     if (m.pendingFixes > 0) { excluded.push({ id: m.id, reason: 'pending_fixes' }); continue; }
     if (!fs.existsSync(path.join(dir, '_source_row.json'))) { excluded.push({ id: m.id, reason: 'no_source_row' }); continue; }
     try {
@@ -280,6 +326,14 @@ stagingApi.get('/backfill', wrap(async (req, res) => {
         continue;
       }
       rows.push(out);
+      // Start the propagation clock: label mismatches inside the window read
+      // as PENDING, not failures.
+      try {
+        const state = readStudio(dir);
+        state.backfill_retrieved_at = new Date().toISOString();
+        state.backfill_retrieved_by = req.user.username;
+        writeJsonAtomic(path.join(dir, '_studio.json'), state);
+      } catch { /* stamp is advisory */ }
     } catch (e) {
       excluded.push({ id: m.id, reason: `build_failed: ${e.message}` });
     }
@@ -290,6 +344,7 @@ stagingApi.get('/backfill', wrap(async (req, res) => {
       generated_by: req.user.username,
       lane: 'STAGING',
       tasks: rows.length,
+      sbq_check: sbqCheck,
       excluded,
     },
     rows,
@@ -305,6 +360,7 @@ stagingApi.get('/status', wrap(async (req, res) => {
     for (const t of list) {
       if (t.tour) continue;
       const m = taskMeta(bucket, t.id);
+      const studio = readStudio(taskDir(bucket, t.id));
       items.push({
         id: m.id,
         severity: bucket,
@@ -312,7 +368,8 @@ stagingApi.get('/status', wrap(async (req, res) => {
         verdict: m.verdict || null,
         pendingFixes: m.pendingFixes,
         tags: m.audit?.tags || [],
-        backfilledAt: null,
+        backfilledAt: studio.backfilled_at || null,
+        backfillRetrievedAt: studio.backfill_retrieved_at || null,
         delivered: m.delivered,
       });
     }
