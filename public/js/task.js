@@ -275,7 +275,9 @@ async function renderTaskStrip() {
   } catch { /* strip degrades to findings only */ }
 
   mount(strip,
-    queue?.n ? el('span', {}, `Task ${queue.n} of ${queue.total} you claimed`) : el('span', {}, 'Not claimed by you'),
+    // Queue position only when there IS a queue — "Not claimed by you" was
+    // the header's job said a second time.
+    queue?.n ? el('span', {}, `Task ${queue.n} of ${queue.total} you claimed`) : null,
     meta.findingCount
       ? el('span', { class: 'progress', style: 'width:150px' }, el('i', { style: `width:${pct}%` }))
       : null,
@@ -2533,24 +2535,33 @@ async function refreshState() {
   const s = await api(`/task/${bucket}/${taskId}/state`);
   claimedBy = s.claimed_by || null;
   const mine = s.claimed_by === me.username;
+  // ONE claim control: unclaimed = just the Claim button; claimed = one chip
+  // (avatar · name · ×-to-release). The old ghost "Unclaimed" label next to a
+  // Claim button next to "Claim on Outlier" was three claim-words in a row.
   if (!s.claimed_by) {
-    claimWho.className = 'claim-who unclaimed';
-    claimWho.replaceChildren(el('span', { class: 'avatar ghost' }), 'Unclaimed');
+    claimWho.hidden = true;
     claimBtn.hidden = false;
     claimBtn.disabled = false;
     claimBtn.textContent = 'Claim';
     claimBtn.className = 'primary';
   } else {
+    const canRelease = mine || me.role === 'admin';
+    claimWho.hidden = false;
     claimWho.className = 'claim-who claimed';
     claimWho.replaceChildren(
       avatar(s.claimed_by),
-      mine ? 'Claimed by you' : `Claimed by ${personName(s.claimed_by)}`,
+      mine ? 'Yours' : personName(s.claimed_by),
+      ...(canRelease ? [el('button', {
+        class: 'claim-x',
+        title: mine ? 'Release this task' : `Release ${personName(s.claimed_by)}'s claim (admin)`,
+        onclick: async () => {
+          await api(`/task/${bucket}/${taskId}/release`, { method: 'POST' }).catch((e) => alert(e.message));
+          refreshState();
+          renderTaskStrip();
+        },
+      }, '×')] : []),
     );
-    const canRelease = mine || me.role === 'admin';
-    claimBtn.hidden = !canRelease;
-    claimBtn.disabled = false;
-    claimBtn.textContent = 'Release';
-    claimBtn.className = '';
+    claimBtn.hidden = true;
   }
   verdictSelect.value = s.verdict || '';
   verdictSelect.className = 'verdict-select' + (s.verdict ? ` set v-${s.verdict}` : '');
@@ -2564,6 +2575,7 @@ claimBtn.addEventListener('click', async () => {
     alert(e.message);
   }
   refreshState();
+  renderTaskStrip(); // queue position updates the moment the claim lands
 });
 
 // '' clears the decision; any value sets it

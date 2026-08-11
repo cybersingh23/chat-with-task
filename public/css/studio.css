@@ -3355,3 +3355,22 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
   transition: background 130ms ease, border-color 130ms ease;
 }
 .btn-platform:hover { background: var(--accent-bg-hover); border-color: var(--accent); text-decoration: none; }
+
+/* ---- My queue pill + claim chip (claim UX redo, 2026-08-10) ---- */
+.pill-queue {
+  display: inline-flex; align-items: center; gap: 7px;
+  font: 600 12px var(--font); color: var(--text-muted);
+  padding: 6px 13px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  background: transparent; border: 1px solid var(--line);
+}
+.pill-queue::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex: none; }
+.pill-queue:hover { color: var(--text); }
+.pill-queue[aria-pressed='true'] { color: var(--accent); border-color: rgba(108, 165, 255, 0.45); background: rgba(108, 165, 255, 0.12); }
+.pill-queue[aria-pressed='true']::before { background: var(--accent); }
+#claim-next { white-space: nowrap; }
+#claim-next[disabled] { opacity: 0.45; cursor: default; }
+.claim-who .claim-x {
+  border: 0; background: transparent; color: var(--text-3); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 2px 4px; border-radius: 6px; margin-left: 2px;
+}
+.claim-who .claim-x:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }

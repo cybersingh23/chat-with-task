@@ -323,9 +323,10 @@ function toast(msg, action = null) {
 let me = null;
 let currentWs = {};
 let sevFilter = 'ALL';
-// "Claimed by me" is orthogonal to severity — a toggle that composes with the
-// severity pick and the search, not a fifth severity.
-let mineOnly = false;
+// "My queue" is orthogonal to severity — a toggle that composes with the
+// severity pick and the search. Persisted: a reviewer working their queue
+// should not have to re-arm the filter on every reload.
+let mineOnly = localStorage.getItem('cwt_mine_only') === '1';
 let showDelivered = false; // delivered tasks are soft-archived: hidden from the board for everyone
 const searchInput = document.getElementById('task-search');
 
@@ -502,6 +503,19 @@ function render() {
   );
   updateDeliveredToggle();
   updateArchiveBtn();
+
+  // Queue controls live off the UNFILTERED view: the pill count must not
+  // change when a severity chip is picked, and Claim next needs to know if
+  // there is anything left to grab at all.
+  const myCount = all.filter((t) => t.claimedBy === me?.username).length;
+  mineFilterBtn.textContent = `My queue · ${myCount}`;
+  const unclaimedOpen = all.some((t) => laneOf(t) === 'OPEN' && !t.claimedBy);
+  const claimNextBtn = document.getElementById('claim-next');
+  claimNextBtn.disabled = !unclaimedOpen;
+  claimNextBtn.title = unclaimedOpen
+    ? 'Claim the oldest unclaimed Open task and go straight to it'
+    : 'Nothing unclaimed in Open right now';
+
   const byLane = new Map(LANES.map((l) => [l.key, []]));
   for (const t of tickets) byLane.get(laneOf(t)).push(t);
 
@@ -547,7 +561,11 @@ function render() {
           : null,
         items.length
           ? el('div', { class: 'lane__list' }, items.map(ticketCard))
-          : el('div', { class: 'lane__empty' }, q || sevFilter !== 'ALL' || mineOnly ? 'No match.' : lane.hint),
+          : el('div', { class: 'lane__empty' },
+            // An empty queue is a starting point, not a failed search.
+            mineOnly && myCount === 0
+              ? 'Nothing claimed yet — Claim on any card, or hit ⚡ Claim next.'
+              : q || sevFilter !== 'ALL' || mineOnly ? 'No match.' : lane.hint),
         // Lane-level action sits BELOW the cards it acts on, not in the header
         // where it competed with the lane title as a second link.
         lane.key === 'STAGING' && items.length
@@ -692,10 +710,32 @@ function renderExportIds() {
   );
 }
 
-document.getElementById('mine-filter').addEventListener('click', (e) => {
+const mineFilterBtn = document.getElementById('mine-filter');
+mineFilterBtn.setAttribute('aria-pressed', String(mineOnly));
+mineFilterBtn.addEventListener('click', () => {
   mineOnly = !mineOnly;
-  e.currentTarget.setAttribute('aria-pressed', String(mineOnly));
+  localStorage.setItem('cwt_mine_only', mineOnly ? '1' : '0');
+  mineFilterBtn.setAttribute('aria-pressed', String(mineOnly));
   render();
+});
+
+// One click to build the queue: claim the first unclaimed Open task and land
+// on it. A 409 means someone else got there first — reload and let them retry.
+document.getElementById('claim-next').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const open = allTickets().filter((t) =>
+    !t.tour && !t.delivered && laneOf(t) === 'OPEN' && !t.claimedBy);
+  if (!open.length) { toast('No unclaimed open tasks.'); return; }
+  btn.disabled = true;
+  const t = open[0];
+  try {
+    await api(`/task/${t.bucket}/${t.id}/claim`, { method: 'POST' });
+    location.href = `${window.__base__ || ''}/task/${t.bucket}/${t.id}`;
+  } catch (err) {
+    btn.disabled = false;
+    toast(`Claim failed: ${err.message}`);
+    load();
+  }
 });
 
 document.getElementById('sev-filter').addEventListener('click', (e) => {
