@@ -241,6 +241,9 @@ function toast(msg, action = null) {
 let me = null;
 let currentWs = {};
 let sevFilter = 'ALL';
+// "Claimed by me" is orthogonal to severity — a toggle that composes with the
+// severity pick and the search, not a fifth severity.
+let mineOnly = false;
 let showDelivered = false; // delivered tasks are soft-archived: hidden from the board for everyone
 const searchInput = document.getElementById('task-search');
 
@@ -372,6 +375,7 @@ function render() {
     (showDelivered || !t.delivered));
   const tickets = all.filter((t) =>
     (sevFilter === 'ALL' || t.bucket === sevFilter) &&
+    (!mineOnly || t.claimedBy === me?.username) &&
     (!q || t.id.toLowerCase().includes(q) || (t.problem || '').toLowerCase().includes(q))
   );
   updateDeliveredToggle();
@@ -421,7 +425,7 @@ function render() {
           : null,
         items.length
           ? el('div', { class: 'lane__list' }, items.map(ticketCard))
-          : el('div', { class: 'lane__empty' }, q || sevFilter !== 'ALL' ? 'No match.' : lane.hint),
+          : el('div', { class: 'lane__empty' }, q || sevFilter !== 'ALL' || mineOnly ? 'No match.' : lane.hint),
         // Lane-level action sits BELOW the cards it acts on, not in the header
         // where it competed with the lane title as a second link.
         lane.key === 'STAGING' && items.length
@@ -443,7 +447,7 @@ function render() {
   renderStrip(all, byLane);
   // Reserved width + tabular numerals, so the toolbar never shifts between states.
   document.getElementById('search-count').textContent =
-    q || sevFilter !== 'ALL' ? `${tickets.length} of ${all.length}` : `${all.length} tasks`;
+    q || sevFilter !== 'ALL' || mineOnly ? `${tickets.length} of ${all.length}` : `${all.length} tasks`;
   refreshBulkCount();
   refreshIdmoveSummary();
 }
@@ -558,6 +562,12 @@ function renderExportIds() {
       el('a', { class: 'btn', href: `${base}/api/export/ids/${b}` }, `${SEV_LABEL[b]} ids`)),
   );
 }
+
+document.getElementById('mine-filter').addEventListener('click', (e) => {
+  mineOnly = !mineOnly;
+  e.currentTarget.setAttribute('aria-pressed', String(mineOnly));
+  render();
+});
 
 document.getElementById('sev-filter').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-sev]');

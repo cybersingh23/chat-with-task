@@ -1870,6 +1870,10 @@ async function showFile(relPath) {
 }
 
 // ---------- chat ----------
+// Force Claim: the platform-side takeover link for THIS task.
+document.getElementById('force-claim').href =
+  `https://app.outlier.ai/en/expert/tasks?forceClaim=1&taskId=${encodeURIComponent(taskId)}`;
+
 const chatLog = document.getElementById('chat-log');
 const chatText = document.getElementById('chat-text');
 const chatStatus = document.getElementById('chat-status');

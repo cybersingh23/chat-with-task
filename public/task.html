@@ -27,6 +27,11 @@
 
     <span class="claim-who" id="claim-who"></span>
     <button class="btn btn--ghost claim-btn" id="claim-btn"></button>
+    <!-- Board claim is OUR bookkeeping; Force Claim is the PLATFORM's — it
+         opens the task on Outlier with forceClaim so the reviewer can take it
+         over there without hand-building the URL. -->
+    <a class="btn btn--ghost" id="force-claim" target="_blank" rel="noopener"
+       title="Open this task on the Outlier platform with forceClaim=1">Force Claim ↗</a>
 
     <select class="select" id="verdict-select" title="set your decision">
       <option value="">Set decision…</option>
