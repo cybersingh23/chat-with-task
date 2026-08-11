@@ -3322,3 +3322,15 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
 
 /* Divider between the remediation prose and the merged decision sections. */
 .merged-rule { border: none; border-top: 1px solid var(--border); margin: 26px 0 20px; }
+
+/* The platform claim is visibly EXTERNAL: tinted pill with the leave-the-app
+   glyph, nothing like the quiet board-claim ghost beside it. */
+.btn-platform {
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
+  height: 28px; padding: 0 12px; border-radius: 999px; cursor: pointer;
+  font-size: 12px; font-weight: 550; text-decoration: none;
+  color: var(--accent); background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  transition: background 130ms ease, border-color 130ms ease;
+}
+.btn-platform:hover { background: var(--accent-bg-hover); border-color: var(--accent); text-decoration: none; }

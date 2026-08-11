@@ -1870,9 +1870,44 @@ async function showFile(relPath) {
 }
 
 // ---------- chat ----------
-// Force Claim: the platform-side takeover link for THIS task.
-document.getElementById('force-claim').href =
-  `https://app.outlier.ai/en/expert/tasks?forceClaim=1&taskId=${encodeURIComponent(taskId)}`;
+// The platform-side takeover link for THIS task.
+const OUTLIER_CLAIM_URL = `https://app.outlier.ai/en/expert/tasks?forceClaim=1&taskId=${encodeURIComponent(taskId)}`;
+document.getElementById('force-claim').href = OUTLIER_CLAIM_URL;
+
+// ⋯ menu utilities. Copy actions confirm inline on the button itself — the
+// menu stays open long enough to read "Copied ✓", then closes.
+function wireCopy(id, getText) {
+  const btn = document.getElementById(id);
+  const label = btn.textContent;
+  btn.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(getText()); }
+    catch { prompt('Copy:', getText()); return; }
+    btn.textContent = 'Copied ✓';
+    setTimeout(() => { btn.textContent = label; closeMenus(); }, 650);
+  });
+}
+wireCopy('copy-task-id', () => taskId);
+wireCopy('copy-board-link', () => location.href);
+wireCopy('copy-outlier-link', () => OUTLIER_CLAIM_URL);
+
+// Downloads pull the CURRENT file through the API (no-store, always live) and
+// hand it over as a stamped filename, so a saved copy is identifiable later.
+function wireDownload(id, file, suffix) {
+  document.getElementById(id).addEventListener('click', async () => {
+    try {
+      const f = await api(`/task/${bucket}/${taskId}/file?path=${encodeURIComponent(file)}`);
+      const blob = new Blob([f.text], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${taskId}_${suffix}`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      closeMenus();
+    } catch { alert(`No ${file} on this task.`); }
+  });
+}
+wireDownload('dl-rank', 'rank.json', 'rank.json');
+wireDownload('dl-ledger', 'fix_ledger.json', 'fix_ledger.json');
 
 const chatLog = document.getElementById('chat-log');
 const chatText = document.getElementById('chat-text');

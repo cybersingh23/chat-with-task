@@ -26,12 +26,16 @@
     <div class="spacer"></div>
 
     <span class="claim-who" id="claim-who"></span>
-    <button class="btn btn--ghost claim-btn" id="claim-btn"></button>
-    <!-- Board claim is OUR bookkeeping; Force Claim is the PLATFORM's — it
-         opens the task on Outlier with forceClaim so the reviewer can take it
-         over there without hand-building the URL. -->
-    <a class="btn btn--ghost" id="force-claim" target="_blank" rel="noopener"
-       title="Open this task on the Outlier platform with forceClaim=1">Force Claim ↗</a>
+    <button class="btn btn--ghost claim-btn" id="claim-btn"
+            title="Claim on THIS board — team bookkeeping only, never touches the platform"></button>
+    <span class="divider" aria-hidden="true"></span>
+    <!-- The two claims act on different systems, so they must not look like
+         siblings: the board claim is quiet local chrome, the platform claim is
+         a tinted pill that says where it goes and leaves the app. -->
+    <a class="btn-platform" id="force-claim" target="_blank" rel="noopener"
+       title="Opens this task on the Outlier platform with forceClaim=1 — claims it THERE, not on this board">
+      <svg viewBox="0 0 24 24" width="11" height="11" aria-hidden="true"><path fill="currentColor" d="M14 3h7v7h-2V6.4l-9.3 9.3-1.4-1.4L17.6 5H14V3zM5 5h6v2H7v10h10v-4h2v6H5V5z"/></svg>
+      Claim on Outlier</a>
 
     <select class="select" id="verdict-select" title="set your decision">
       <option value="">Set decision…</option>
@@ -45,7 +49,14 @@
     <!-- Destructive / rare actions live behind the overflow, not top-level. -->
     <div class="menu" id="more-menu">
       <button class="btn btn--icon" type="button" id="more-btn" title="More actions">⋯</button>
-      <div class="menu__list" id="more-list" hidden>
+      <div class="menu__list menu__list--wide" id="more-list" hidden>
+        <button type="button" id="copy-task-id">Copy task ID</button>
+        <button type="button" id="copy-board-link">Copy board link</button>
+        <button type="button" id="copy-outlier-link">Copy Outlier claim link</button>
+        <div class="menu__sep"></div>
+        <button type="button" id="dl-rank">Download rank.json <span class="menu__hint">current state</span></button>
+        <button type="button" id="dl-ledger">Download fix ledger <span class="menu__hint">audit trail</span></button>
+        <div class="menu__sep"></div>
         <button type="button" id="tour-btn">Take a tour</button>
         <button type="button" class="menu__danger" id="delete-task" hidden>Delete task</button>
       </div>
