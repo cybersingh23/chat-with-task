@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { runAgentLoop, chatCompletion } from '../llm.js';
 import { recordUsage } from '../usage.js';
 import { ANALYST_TOOL_DEFS, makeAnalystExecutor, SCHEMA_BRIEF, queryCatalogue } from '../analyst_tools.js';
+import { ACTION_TOOL_DEFS, makeActionExecutor } from '../copilot_actions.js';
 import { TEAM, teamBrief, personByUsername } from '../team.js';
 import { projectHealth } from '../health.js';
 import { todoSummary, addTodo } from '../todos.js';
@@ -35,6 +36,8 @@ const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).cat
 const HISTORY = new Map();          // username -> messages[]
 const MAX_TURNS = 40;               // keep the tail; the system prompt carries the state
 
+const ACTION_NAMES = new Set(ACTION_TOOL_DEFS.map((t) => t.function.name));
+
 const SYSTEM = `
 You are Acey, the ACC program's analyst. You are talking to a QM or program owner from anywhere
 in the Audit Studio — not inside a single task — so the questions are about the PROGRAM: pipeline
@@ -62,6 +65,20 @@ ANSWER DISCIPLINE
 - Small samples are not findings. If an average rests on a handful of ratings, say the count.
 - When someone asks who should handle something, route it by the domain map below, and say why.
   Anything cross-domain or above a single owner's line goes to Pavit.
+
+THE AUDIT BOARD (this app's local board — you can act on it)
+list_board, move_task, claim_tasks and propose_bulk_move work the board the operator is looking at.
+- list_board FIRST, every time. Never answer or act from what the chat history says about the
+  board — it lies the moment anyone drags a card.
+- Move or claim only when the operator explicitly asked THIS turn. Your own analysis is never a
+  reason to write anything.
+- claim_tasks claims for the operator you are talking to and nobody else. Read their existing
+  claims from list_board first — those are the context for the smartest match.
+- Resolving needs a verdict: NO_ISSUES, FIXES_MADE, GRAMMAR_ONLY or SBQ. If the operator did not
+  say which, ask them which one they mean before moving anything. Never assume one.
+- One write per turn: a single move_task or claim_tasks applies immediately (undoable); anything
+  wider goes through propose_bulk_move, which the operator confirms with a click.
+- There is no open task on this surface, so move_task always needs the 24-hex task_id.
 
 WHAT YOU MUST NOT DO
 - Do not invent a metric name, a table, or a threshold. If you are unsure a column exists, query
@@ -145,12 +162,19 @@ aceyApi.post('/chat', wrap(async (req, res) => {
   // Every query Acey runs is pushed to the client as it happens. The point is
   // not progress indication — it is that the operator can read the SQL behind
   // the answer instead of taking the number on trust.
-  const executor = makeAnalystExecutor({ onQuery: (q) => send({ type: 'sql', ...q }) });
+  const analystExec = makeAnalystExecutor({ onQuery: (q) => send({ type: 'sql', ...q }) });
+  // Board-writing tools compose in HERE, same as the task chat: Acey acts as the
+  // signed-in operator with exactly their permissions. No task is open on this
+  // surface, so the executor gets no current task and move_task needs an id.
+  const actionExec = makeActionExecutor({
+    bucket: null, id: null, username: user, onAction: (e) => send(e),
+  });
+  const executor = (name, args) => (ACTION_NAMES.has(name) ? actionExec : analystExec)(name, args);
 
   try {
     const { messages } = await runAgentLoop({
       messages: [{ role: 'system', content: system }, ...history, userMsg],
-      tools: ANALYST_TOOL_DEFS,
+      tools: [...ANALYST_TOOL_DEFS, ...ACTION_TOOL_DEFS],
       executor,
       onEvent: (e) => send(e),
       maxSteps: 30,

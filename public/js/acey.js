@@ -176,6 +176,9 @@ export function mountAcey({ page } = {}) {
         } else if (e.type === 'sql') {
           body.append(sqlBlock(e));
           setStatus('running the query');
+        } else if (e.type === 'action') {
+          setStatus('');
+          handleAction(e);
         } else if (e.type === 'assistant' && e.final) {
           answer = e.content;
         } else if (e.type === 'assistant') {
@@ -206,7 +209,119 @@ export function mountAcey({ page } = {}) {
     list_queries: 'checking the query library',
     read_query: 'reading an existing query',
     redash_query: 'running a saved query',
+    list_board: 'reading the board',
+    move_task: 'moving a task',
+    claim_tasks: 'claiming tasks',
+    propose_bulk_move: 'drafting a proposal',
   };
+
+  // ---------- board actions ----------
+  // The SSE events the board-action tools emit, rendered the way the task-page
+  // chat renders them and with the same markup and classes (.act-chip /
+  // .act-card, task.js), so the two surfaces cannot drift: an applied write is
+  // a ✓ chip with Undo; a bulk move is a proposal card the operator must Apply.
+  // No board-refresh event is dispatched after a write — the board already
+  // polls /workspace every 8s and refreshes on focus, which covers it.
+
+  function undoButton(action) {
+    if (!action?.id) return null;
+    return el('button', {
+      class: 'act-undo',
+      onclick: async (ev) => {
+        const btn = ev.currentTarget;
+        btn.disabled = true;
+        btn.textContent = 'undoing…';
+        try {
+          const r = await api(`/actions/${action.id}/undo`, { method: 'POST' });
+          btn.replaceWith(el('span', { class: 'act-undone' },
+            `undone${r.skipped?.length ? ` · ${r.skipped.length} skipped (changed since)` : ''}`));
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = 'Undo';
+          btn.title = e.message;
+          alert(e.message);
+        }
+      },
+    }, 'Undo');
+  }
+
+  function actionChip(summary, action) {
+    body.append(el('div', { class: 'act-chip' },
+      el('span', { class: 'act-ico' }, '✓'),
+      el('span', { class: 'act-text' }, summary),
+      undoButton(action)));
+    scroll();
+  }
+
+  function actionProposal({ token, plan }) {
+    const card = el('div', { class: 'act-card' });
+    const actions = el('div', { class: 'act-card-actions' });
+
+    const apply = el('button', {
+      class: 'primary',
+      onclick: async () => {
+        apply.disabled = true;
+        cancel.disabled = true;
+        apply.textContent = 'applying…';
+        try {
+          const r = await api('/copilot/action/confirm', { method: 'POST', body: { token } });
+          card.classList.add('done');
+          mount(card,
+            el('div', { class: 'act-chip inline' },
+              el('span', { class: 'act-ico' }, '✓'),
+              el('span', { class: 'act-text' }, `Moved ${r.moved} task${r.moved === 1 ? '' : 's'} → ${plan.target}`),
+              undoButton(r.action)),
+            // The plan is re-resolved at confirm time, so the board may have moved
+            // between the proposal and the click. Say so rather than hiding it.
+            r.drifted
+              ? el('div', { class: 'act-card-note warn' }, 'The board changed after the proposal — the count applied differs from what was shown.')
+              : null,
+          );
+        } catch (e) {
+          apply.disabled = false;
+          cancel.disabled = false;
+          apply.textContent = `Apply ${plan.counts.change} change${plan.counts.change === 1 ? '' : 's'}`;
+          card.append(el('div', { class: 'act-card-note warn' }, e.message));
+        }
+      },
+    }, `Apply ${plan.counts.change} change${plan.counts.change === 1 ? '' : 's'}`);
+
+    const cancel = el('button', {
+      class: 'quiet',
+      onclick: async () => {
+        await api('/copilot/action/cancel', { method: 'POST', body: { token } }).catch(() => {});
+        card.classList.add('cancelled');
+        card.replaceChildren(el('div', { class: 'act-card-note' }, 'Cancelled — nothing was changed.'));
+      },
+    }, 'Cancel');
+
+    actions.append(apply, cancel);
+    const notes = [];
+    if (plan.counts.unchanged) notes.push(`${plan.counts.unchanged} already there`);
+    if (plan.counts.missing) notes.push(`${plan.counts.missing} not on the board`);
+
+    mount(card,
+      el('div', { class: 'act-card-head' }, 'Confirm bulk move'),
+      el('div', { class: 'act-card-sum' }, plan.summary),
+      // FULL task ids, not 8-char prefixes — same rule as the task page: this is
+      // the card the operator approves a write from, so it has to be unambiguous.
+      el('div', { class: 'act-sample' },
+        ...plan.sample.map((t) => el('span', { class: 'act-sample-id mono', title: `${t.id} · ${t.severity}` },
+          `${t.id} · ${t.from}`)),
+        plan.counts.change > plan.sample.length
+          ? el('span', { class: 'act-sample-more' }, `+${plan.counts.change - plan.sample.length} more`)
+          : null),
+      notes.length ? el('div', { class: 'act-card-note' }, notes.join(' · ')) : null,
+      actions,
+    );
+    body.append(card);
+    scroll();
+  }
+
+  function handleAction(m) {
+    if (m.kind === 'applied') actionChip(m.summary, m.action);
+    else if (m.kind === 'proposal') actionProposal(m);
+  }
 
   // The answer named an owner, so offer to put it on their queue.
   //

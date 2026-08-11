@@ -5,7 +5,7 @@ import {
 } from './lanes.js';
 import { recordAction } from './actions.js';
 import { taskMeta, listWorkspace, findTaskBucket, httpError } from './workspace.js';
-import { VERDICTS } from './state.js';
+import { VERDICTS, claimTask, laneSnapshot } from './state.js';
 
 // Write actions the audit copilot can take on the operator's behalf.
 //
@@ -17,8 +17,9 @@ import { VERDICTS } from './state.js';
 // Friction model (operator's choice):
 //   * ONE task  -> applied immediately, reported with an Undo affordance.
 //   * MANY tasks-> staged as a plan the operator confirms in the UI first.
-// Both paths go through moveTaskToLane + recordAction, so every copilot action
-// lands in the same journal as a drag or a bulk move and is undoable the same way.
+//   * claim_tasks is the exception: N tasks, applied — self-scoped, see its section.
+// All paths go through recordAction, so every copilot action lands in the same
+// journal as a drag or a bulk move and is undoable the same way.
 //
 // Acey acts AS the operator: it is handed their username and gets exactly their
 // permissions — never more. There is no copilot service account.
@@ -26,10 +27,14 @@ import { VERDICTS } from './state.js';
 const TASK_ID_RE = /^[0-9a-f]{24}$/;
 
 // A task the copilot names has to be found on the board; it only ever receives
-// the bucket of the task the chat is open on.
+// the bucket of the task the chat is open on. The global (program-level) chat
+// has no open task to default to, so there it must always name one.
 function resolveTask(taskId, current) {
   const id = String(taskId || '').trim().toLowerCase();
-  if (!id || id === current.id) return { bucket: current.bucket, id: current.id };
+  if (!id || id === current.id) {
+    if (!current.id) throw httpError(400, 'no task is open in this chat — pass the 24-hex task_id');
+    return { bucket: current.bucket, id: current.id };
+  }
   if (!TASK_ID_RE.test(id)) throw httpError(400, `not a 24-hex task id: ${id.slice(0, 40)}`);
   const bucket = findTaskBucket(id);
   if (!bucket) throw httpError(404, `task ${id} is not on the board`);
@@ -180,6 +185,90 @@ export function cancelPlan(token, username) {
 }
 
 // ---------------------------------------------------------------------------
+// Batch claim — self-scoped, so it applies without a confirmation card
+// ---------------------------------------------------------------------------
+
+// "Claim N for me" writes N tasks, but every one of them lands on the REQUESTING
+// operator's own plate and one undo releases them all — the blast radius of a
+// mistake is their own workload, not the board. That is why this is allowed to
+// apply immediately where a bulk MOVE of the same size must be confirmed.
+
+const CLAIM_CAP = 10;
+
+// Instance family, from what taskMeta already exposes: the problem statement.
+// Re-cuts of the same underlying task ship the same problem text, so a
+// normalized prefix groups them the way the board's search box finds them —
+// no new metadata field needed.
+function familyOf(meta) {
+  return String(meta.problem || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+
+export function claimTasksFor({ count, severity = null, like = null, username }) {
+  const n = Math.max(1, Math.min(CLAIM_CAP, Number(count) || 1));
+  if (severity && !SEV_LABELS[severity]) {
+    throw httpError(400, `unknown severity ${severity} — one of ${Object.keys(SEV_LABELS).join(', ')}`);
+  }
+
+  // The operator's existing claims are the context for the "smartest match":
+  // which instance families they are already deep in, and which severities
+  // their current plate leans toward.
+  const mine = [];
+  for (const metas of Object.values(listWorkspace())) {
+    for (const meta of metas) {
+      if (!meta.tour && !meta.delivered && meta.claimedBy === username) mine.push(meta);
+    }
+  }
+  const myFamilies = new Set(mine.map(familyOf).filter(Boolean));
+  const mySevCount = {};
+  for (const m of mine) mySevCount[m.bucket] = (mySevCount[m.bucket] || 0) + 1;
+
+  // Candidates: unclaimed, live, OPEN-lane tasks — claiming one IS the move to
+  // In review (laneOf: claimed + no verdict = REVIEW). selectTasks already skips
+  // tour sandboxes and archived tasks and returns board order (bucket, then id).
+  let candidates = selectTasks({ severity: severity || 'ALL', fromLane: 'OPEN', ids: null });
+  if (like) {
+    const q = String(like).toLowerCase();
+    candidates = candidates.filter((m) => (m.problem || '').toLowerCase().includes(q));
+  }
+
+  // Stable sort: family match to their existing claims first, then the severity
+  // they already hold most of, then the board order the selection came in.
+  candidates = candidates
+    .map((meta, i) => ({ meta, i }))
+    .sort((a, b) => (myFamilies.has(familyOf(b.meta)) - myFamilies.has(familyOf(a.meta)))
+      || ((mySevCount[b.meta.bucket] || 0) - (mySevCount[a.meta.bucket] || 0))
+      || (a.i - b.i))
+    .map((x) => x.meta);
+
+  const items = [];
+  const claimed = [];
+  for (const meta of candidates) {
+    if (claimed.length >= n) break;
+    const before = laneSnapshot(meta.bucket, meta.id);
+    try {
+      claimTask(meta.bucket, meta.id, username); // the same path as the board's Claim button
+    } catch (e) {
+      if (e.status === 409) continue; // raced — someone claimed it since the listing; next candidate
+      throw e;
+    }
+    items.push({ bucket: meta.bucket, id: meta.id, before, after: laneSnapshot(meta.bucket, meta.id) });
+    claimed.push({ id: meta.id, severity: meta.bucket, problem: (meta.problem || '').slice(0, 100) });
+  }
+
+  // ONE journal record for the whole batch: Recent actions shows a single
+  // "claimed N" line, and one undo releases them all.
+  const act = recordAction({
+    by: username, kind: 'copilot_claim',
+    label: `claimed ${claimed.length} → In review (Acey)`,
+    items,
+  });
+  return {
+    claimed, requested: n, matched: candidates.length,
+    action: act && { id: act.id, label: act.label },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Board awareness (read-only) — the copilot otherwise only sees one task folder
 // ---------------------------------------------------------------------------
 
@@ -273,10 +362,11 @@ export const ACTION_TOOL_DEFS = [
       description:
         'Move ONE task to a lane and/or set its verdict. Applies immediately — the operator sees what changed and can undo it. '
         + 'Defaults to the task currently open in this chat; pass task_id only to act on a different task on the board. '
-        + 'LIMIT: at most ONE move_task per turn — a second call is refused. If the operator names two or more tasks, '
+        + 'LIMIT: ONE write per turn, shared with claim_tasks — a second call is refused. If the operator names two or more tasks, '
         + 'use propose_bulk_move with task_ids instead so they approve the set with one click. '
         + 'Only do this when the operator has actually asked for it; never move a task just because your analysis suggests a verdict. '
-        + `RESOLVED requires a verdict (${RESOLVED_VERDICTS.join(', ')}). REOPEN clears the verdict and leaves everything else alone.`,
+        + `RESOLVED requires a verdict (${RESOLVED_VERDICTS.join(', ')}) — if the operator did not say which, ASK them; never pick one for them. `
+        + 'REOPEN clears the verdict and leaves everything else alone. No other lane takes a verdict.',
       parameters: {
         type: 'object',
         properties: {
@@ -285,6 +375,34 @@ export const ACTION_TOOL_DEFS = [
           task_id: { type: 'string', description: '24-hex id; omit for the current task' },
         },
         required: ['lane'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'claim_tasks',
+      description:
+        'Claim up to `count` (max 10) unclaimed Open-lane tasks FOR THE OPERATOR IN THIS CHAT and put them In review — '
+        + 'claiming IS that move. The pick is smart: tasks from the same instance family as their existing claims first, '
+        + 'then the severity mix they already hold (or the explicit severity), then board order. '
+        + 'Applies immediately and is journaled as ONE undoable action. Strictly self-scoped: never claim on someone '
+        + 'else\'s behalf — if asked to, refuse and say that person has to ask Acey themselves. '
+        + 'LIMIT: ONE write per turn, shared with move_task — a second call is refused. '
+        + 'Check list_board first so the pick is grounded in their current claims, and only claim when the operator '
+        + 'explicitly asked this turn.',
+      parameters: {
+        type: 'object',
+        properties: {
+          count: { type: 'integer', description: 'how many to claim, 1–10' },
+          severity: {
+            type: 'string',
+            enum: ['HARD_FAIL', 'SOFT_FAIL', 'PASS', 'UNSORTED'],
+            description: 'restrict to one severity bucket; omit to match their current claim mix',
+          },
+          like: { type: 'string', description: 'free-text filter on the problem statement (e.g. "swim meet optimizer")' },
+        },
+        required: ['count'],
       },
     },
   },
@@ -348,10 +466,10 @@ export function makeActionExecutor({ bucket, id, username, onAction }) {
 
       case 'move_task': {
         if (applied >= 1) {
-          return 'REFUSED — nothing was changed. move_task writes immediately, so it is limited to ONE '
-            + 'task per turn and you have already moved one. To change several tasks in a turn, call '
-            + 'propose_bulk_move with task_ids: the operator approves the whole set with one click. '
-            + 'Tell them the first move is done and that the rest needs a confirmation.';
+          return 'REFUSED — nothing was changed. Write actions apply immediately, so they are limited to '
+            + 'ONE per turn (move_task and claim_tasks share that budget) and this turn already used its '
+            + 'one. To change several tasks in a turn, call propose_bulk_move with task_ids: the operator '
+            + 'approves the whole set with one click. Tell them what landed and that the rest needs a confirmation.';
         }
         const target = resolveTask(args.task_id, current);
         // resolveTask only checks the directory exists, which archived tasks
@@ -359,10 +477,24 @@ export function makeActionExecutor({ bucket, id, username, onAction }) {
         if (taskMeta(target.bucket, target.id).delivered) {
           return `REFUSED — nothing was changed. ${target.id} is archived — restore it from the archive first.`;
         }
+        // The "nudge back": resolving without a verdict is not an error to paper
+        // over with a default — it is a question only the operator can answer.
+        if (args.lane === 'RESOLVED' && !RESOLVED_VERDICTS.includes(args.verdict)) {
+          return 'REFUSED — nothing was changed. Resolving a task needs a verdict and the operator has not '
+            + `given one. ASK THE OPERATOR which they mean — ${RESOLVED_VERDICTS.join(', ')} — and call `
+            + 'move_task again once they answer. Never pick a verdict for them.';
+        }
+        let verdict = args.verdict ?? null;
+        let note = '';
+        if (verdict && args.lane !== 'RESOLVED') {
+          // Never accept a verdict silently on a lane that doesn't take one.
+          note = ` NOTE: the ${verdict} verdict was IGNORED — only a move to RESOLVED takes one. Say so if the operator asked for it.`;
+          verdict = null;
+        }
         const res = applySingleMove({
-          ...target, lane: args.lane, verdict: args.verdict ?? null, username,
+          ...target, lane: args.lane, verdict, username,
         });
-        if (res.noop) return `No change: ${res.id.slice(0, 8)}… is already ${res.to}.`;
+        if (res.noop) return `No change: ${res.id.slice(0, 8)}… is already ${res.to}.${note}`;
         applied += 1;
         onAction?.({
           type: 'action', kind: 'applied',
@@ -372,8 +504,40 @@ export function makeActionExecutor({ bucket, id, username, onAction }) {
           taskId: res.id, isCurrentTask: res.id === current.id,
           action: res.action,
         });
-        return `Applied: ${res.id} moved ${res.from} → ${res.to}. `
+        return `Applied: ${res.id} moved ${res.from} → ${res.to}.${note} `
           + 'The operator sees this with an Undo button. Confirm it in one short sentence.';
+      }
+
+      case 'claim_tasks': {
+        if (applied >= 1) {
+          return 'REFUSED — nothing was changed. Write actions apply immediately, so they are limited to '
+            + 'ONE per turn (claim_tasks and move_task share that budget) and this turn already used its '
+            + 'one. Tell the operator what landed and ask them to send the next request as its own message.';
+        }
+        const res = claimTasksFor({
+          count: args.count, severity: args.severity ?? null, like: args.like ?? null, username,
+        });
+        if (!res.claimed.length) {
+          return `No tasks were claimed — ${res.matched} unclaimed Open task(s) matched`
+            + `${args.severity ? ` severity ${args.severity}` : ''}${args.like ? ` "${args.like}"` : ''}`
+            + (res.matched ? ', but every one was claimed by someone else while this ran.' : '.')
+            + ' Nothing was written. Tell the operator and ask whether to widen the filter.';
+        }
+        applied += 1;
+        onAction?.({
+          type: 'action', kind: 'applied',
+          // Full ids, same rule as move_task: this chip is the operator's only
+          // record of the write, and 8-char prefixes collide in this dataset.
+          summary: `claimed ${res.claimed.length} → In review · ${res.claimed.map((c) => c.id).join(', ')}`,
+          isCurrentTask: res.claimed.some((c) => c.id === current.id),
+          action: res.action,
+        });
+        return `Applied: claimed ${res.claimed.length} task(s) for ${username} — claiming puts them In review.\n`
+          + `${res.claimed.map((c) => `${c.id}  ${c.severity}  ${c.problem}`).join('\n')}\n`
+          + (res.claimed.length < res.requested
+            ? `Only ${res.claimed.length} of the ${res.requested} asked for were claimable — say so. `
+            : '')
+          + 'The operator sees this with an Undo button. Report each id with what it is in one short list.';
       }
 
       case 'propose_bulk_move': {
