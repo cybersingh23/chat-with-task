@@ -203,6 +203,82 @@ async function runBackfillCheck() {
       }, `Move ${ready.length} confirmed to Resolved`)));
 }
 
+// The Resolved lane's check: the §7.2 quadrant reconciliation — board SBQ vs
+// Redash SBQ vs L12 membership — as a 2×2 of counts plus the exception rows
+// (must_pull red, backfill_missing amber, pending neutral). Same overlay
+// pattern as the backfill check; the count for delivered (archived) tasks is
+// included even while they're hidden from the board.
+async function runReconciliation() {
+  const overlay = el('div', { class: 'bf-overlay' });
+  const body = el('div', { class: 'bf__body' });
+  const box = el('div', { class: 'bf glass' },
+    el('div', { class: 'bf__head' }, el('b', {}, 'Reconciliation — Resolved vs Redash'),
+      el('button', { class: 'btn btn--ghost', onclick: () => overlay.remove() }, 'Close')),
+    body);
+  overlay.append(box);
+  document.body.append(overlay);
+
+  const fill = async (fresh) => {
+    body.replaceChildren(el('p', { class: 'bf__note' }, 'Comparing Resolved against Redash SBQ + L12…'));
+    let r;
+    try { r = await api(`/staging/quadrants${fresh ? '?fresh=1' : ''}`); }
+    catch (e) { body.replaceChildren(el('p', { class: 'bf__note bf__note--warn' }, `Check failed — ${e.message}`)); return; }
+    if (!r.redash) {
+      body.replaceChildren(el('p', { class: 'bf__note bf__note--warn' },
+        `Redash unavailable — ${r.error || 'not configured'}. The quadrant check needs the warehouse.`));
+      return;
+    }
+
+    const c = r.counts;
+    const cell = (n, label, cls) => el('div', { class: `rq__cell${n ? ` ${cls}` : ''}` }, el('b', {}, String(n)), label);
+    const grid = el('div', { class: 'rq' },
+      el('span', { class: 'rq__hdr' }, ''),
+      el('span', { class: 'rq__hdr' }, 'Redash: SBQ'),
+      el('span', { class: 'rq__hdr' }, 'Redash: non-SBQ'),
+      el('span', { class: 'rq__hdr' }, 'In L12'),
+      cell(c.must_pull, 'must be pulled', 'is-bad'),
+      cell(c.ok_in_l12, 'correct', 'is-ok'),
+      el('span', { class: 'rq__hdr' }, 'Not in L12'),
+      cell(c.ok_out, 'correct', 'is-ok'),
+      cell(c.backfill_missing, 'backfill missing', 'is-warn'),
+    );
+
+    // Exceptions only — the two ✓ quadrants are counts, not homework.
+    const ORDER_Q = { must_pull: 0, backfill_missing: 1, pending: 2 };
+    const exceptions = r.items
+      .filter((i) => i.quadrant in ORDER_Q)
+      .sort((a, b) => ORDER_Q[a.quadrant] - ORDER_Q[b.quadrant] || a.id.localeCompare(b.id));
+    const DOT = { must_pull: ' is-bad', backfill_missing: '', pending: ' dim' };
+    const WHY = {
+      must_pull: (i) => `SBQ${i.sbqAwaitingConfirmation ? ' (board-marked, awaiting Redash)' : ''} — pull out of L12`,
+      backfill_missing: (i) => `non-SBQ, not in L12 — backfill missing${i.backfilledAt ? ` (stamped ${i.backfilledAt.slice(0, 16).replace('T', ' ')})` : ''}`,
+      pending: (i) => `backfilled ${i.backfilledAt.slice(11, 16)}Z — propagation pending`,
+    };
+    const row = (i) => el('div', { class: 'bf__row' },
+      el('span', { class: `bf__dot${DOT[i.quadrant]}` }),
+      el('a', { class: 'mono bf__id', href: `${window.__base__ || ''}/task/${i.severity}/${i.id}` }, i.id),
+      i.upstream ? el('span', { class: 'bf__lvl' }, `L${i.upstream.level} · ${i.upstream.status}`) : el('span', { class: 'bf__lvl dim' }, 'no pipeline row'),
+      i.delivered ? el('span', { class: 'bf__lvl dim' }, 'archived') : null,
+      el('span', { class: 'bf__why' }, WHY[i.quadrant](i)));
+
+    body.replaceChildren(
+      el('p', { class: 'bf__note' },
+        `${r.items.length} in Resolved — ${c.ok_in_l12 + c.ok_out} reconciled, ${c.must_pull} to pull, ${c.backfill_missing} missing, ${c.pending} pending.`),
+      grid,
+      exceptions.length
+        ? null
+        : el('p', { class: 'bf__note' }, 'No exceptions — every Resolved task reconciles.'),
+      ...exceptions.map(row),
+      el('div', { class: 'bf__actions' },
+        el('button', {
+          class: 'btn',
+          title: 'Bypass the 5-minute Redash cache and re-run the queries',
+          onclick: (e) => { e.target.disabled = true; fill(true); },
+        }, 'Refresh from Redash')));
+  };
+  fill(false);
+}
+
 // Resolved is a 3-way decision — ask which one at the drop point.
 function pickResolution(x, y) {
   return new Promise((resolve) => {
@@ -312,17 +388,40 @@ document.addEventListener('visibilitychange', refreshIfStale);
 // SBQ and pipeline position are facts on the board, not guesses. Batched and
 // served from a 5-minute cache; re-render happens when the answer arrives.
 let upstreamLayers = {};
+let upstreamBackfill = {};
 let layersLoaded = false;
 async function loadLayers() {
   if (layersLoaded) return;
   layersLoaded = true;
   try {
     const r = await api('/staging/layers');
-    if (r.layers && Object.keys(r.layers).length) {
-      upstreamLayers = r.layers;
-      render();
-    }
+    upstreamLayers = r.layers || {};
+    upstreamBackfill = r.backfill || {};
+    if (Object.keys(upstreamLayers).length || Object.keys(upstreamBackfill).length) render();
   } catch { /* the tag is an extra, never a blocker */ }
+}
+
+// The backfilled tag: which cards were backfilled, and whether the board's
+// "fixed" label matches what Redash returns for them. Unknown match (Redash
+// down, no label row yet) keeps the plain muted tag — never a false ✗.
+function backfillTag(id) {
+  const b = upstreamBackfill[id];
+  if (!b) return null;
+  const when = (b.retrievedAt || b.backfilledAt || '').slice(0, 16).replace('T', ' ');
+  const m = b.match;
+  if (m?.status === 'MATCH') {
+    return el('span', { class: 'tag tag--backfill is-ok', title: `Backfilled ${when} — preference + winner match platform` }, 'backfilled ✓');
+  }
+  if (m?.status === 'MISMATCH') {
+    const detail = (m.fields || []).filter((f) => !f.match)
+      .map((f) => `${f.field}: board ${f.board} vs platform ${f.platform}`).join('; ');
+    return el('span', { class: 'tag tag--backfill is-bad', title: `Backfilled ${when} — ${detail}` }, 'backfilled ✗');
+  }
+  if (m?.status === 'PENDING') {
+    const until = m.pending_until ? ` until ${m.pending_until.slice(11, 16)}Z` : '';
+    return el('span', { class: 'tag tag--backfill is-warn', title: `Backfilled ${when} — platform propagation pending${until}` }, 'backfilled ⏳');
+  }
+  return el('span', { class: 'tag tag--backfill', title: `Backfilled ${when} — platform match unknown (no label row yet)` }, 'backfilled');
 }
 
 // Flatten the workspace into tickets carrying their bucket (= severity).
@@ -355,6 +454,7 @@ function ticketCard(t) {
           title: `Redash: L${upstreamLayers[t.id].level} · ${upstreamLayers[t.id].status}`,
         }, `L${upstreamLayers[t.id].level}`)
         : null,
+      backfillTag(t.id),
       t.tour ? el('span', { class: 'tag', title: 'temporary tour sandbox — deleted when the tour ends' }, 'sandbox') : null,
       t.delivered ? el('span', { class: 'tag', title: `delivered${t.deliveredAt ? ' ' + t.deliveredAt.slice(0, 10) : ''}` }, 'archived') : null,
       el('span', { class: 'spacer' }),
@@ -456,6 +556,13 @@ function render() {
             title: 'Check readiness and upstream SBQ for every task in Staging, then move the confirmed ones',
             onclick: (e) => { e.preventDefault(); runBackfillCheck(); },
           }, `Backfill check · ${items.length} task${items.length === 1 ? '' : 's'}`)
+          : null,
+        lane.key === 'RESOLVED' && items.length
+          ? el('button', {
+            class: 'lane__complete',
+            title: 'Compare every Resolved task against Redash — SBQ status vs L12 membership, propagation-aware',
+            onclick: (e) => { e.preventDefault(); runReconciliation(); },
+          }, 'Reconciliation · SBQ × L12')
           : null,
       );
     })

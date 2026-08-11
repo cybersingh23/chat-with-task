@@ -213,24 +213,116 @@ function labelMatch(dir, platform) {
 
 // Upstream layer for EVERY task on the board — the per-card tag (§7.1). One
 // batched query, served from the registry's cache (5-minute TTL); fresh=1 is
-// the manual refresh.
+// the manual refresh. Tasks carrying a backfill stamp also get a backfill
+// entry — when they were stamped plus the platform label match, from one extra
+// task_labels query over just the stamped ids.
 stagingApi.get('/layers', wrap(async (req, res) => {
   const ws = listWorkspace();
+  const all = Object.values(ws).flat().filter((t) => !t.tour);
   // Stray non-task directories would fail the registry's id validation and
   // take the whole batched query down with them — skip, don't 500 the board.
-  const ids = Object.values(ws).flat().filter((t) => !t.tour).map((t) => t.id).filter((id) => HEX24.test(id));
-  if (!ids.length || !redashEnabled()) return res.json({ layers: {}, enabled: redashEnabled() });
+  const ids = all.map((t) => t.id).filter((id) => HEX24.test(id));
+
+  // Backfill stamps are board-local facts, collected before any Redash call so
+  // the tag survives the warehouse being down: match degrades to null
+  // (backfilled, match unknown), never a false mismatch.
+  const backfill = {};
+  const stamped = [];
+  for (const t of all) {
+    const dir = taskDir(t.bucket, t.id);
+    const studio = readStudio(dir);
+    if (!studio.backfilled_at && !studio.backfill_retrieved_at) continue;
+    backfill[t.id] = {
+      backfilledAt: studio.backfilled_at || null,
+      retrievedAt: studio.backfill_retrieved_at || null,
+      match: null,
+    };
+    if (HEX24.test(t.id)) stamped.push({ id: t.id, dir, studio });
+  }
+
+  if (!ids.length || !redashEnabled()) return res.json({ layers: {}, backfill, enabled: redashEnabled() });
+
+  if (stamped.length) {
+    try {
+      const out = await runRegistryQuery('task_labels', { task_ids: stamped.map((t) => t.id) }, { fresh: req.query.fresh === '1' });
+      const rows = new Map(out.rows.map((r) => [r.task_id, r]));
+      for (const t of stamped) backfill[t.id].match = withPropagationWindow(labelMatch(t.dir, rows.get(t.id)), t.studio);
+    } catch { /* match stays null */ }
+  }
+
   try {
     const out = await runRegistryQuery('task_current_level', { task_ids: ids }, { fresh: req.query.fresh === '1' });
     res.json({
       layers: Object.fromEntries(out.rows.map((r) => [r.task_id, { level: String(r.review_level), status: r.status }])),
+      backfill,
       cached: out.cached,
       retrievedAt: out.retrievedAt,
       enabled: true,
     });
   } catch (e) {
-    res.json({ layers: {}, enabled: true, error: e.message });
+    res.json({ layers: {}, backfill, enabled: true, error: e.message });
   }
+}));
+
+// §7.2 quadrant reconciliation over the Resolved lane: SBQ status × L12
+// membership, three outcomes not two (§7.3). Also the read surface for the
+// eval-side reconciler (§7.5), which runs with a reviewer session — so this
+// stays behind requireAuth only, no admin gate.
+stagingApi.get('/quadrants', wrap(async (req, res) => {
+  const ws = listWorkspace();
+  const tasks = Object.values(ws).flat().filter((t) => !t.tour && laneOf(t) === 'RESOLVED');
+  const generatedAt = new Date().toISOString();
+  if (!redashEnabled()) return res.json({ redash: false, error: 'redash not configured', generatedAt });
+
+  let sbq, level;
+  try {
+    const ids = tasks.map((t) => t.id).filter((id) => HEX24.test(id));
+    const fresh = req.query.fresh === '1';
+    const [sbqRes, lvlRes] = ids.length
+      ? await Promise.all([
+        runRegistryQuery('task_sbq', { task_ids: ids }, { fresh }),
+        runRegistryQuery('task_current_level', { task_ids: ids }, { fresh }),
+      ])
+      : [{ rows: [] }, { rows: [] }];
+    sbq = new Map(sbqRes.rows.map((r) => [r.task_id, r]));
+    level = new Map(lvlRes.rows.map((r) => [r.task_id, r]));
+  } catch (e) {
+    return res.json({ redash: false, error: e.message, generatedAt });
+  }
+
+  const counts = { ok_in_l12: 0, ok_out: 0, must_pull: 0, backfill_missing: 0, pending: 0 };
+  const items = tasks.map((m) => {
+    const studio = readStudio(taskDir(m.bucket, m.id));
+    const l = level.get(m.id);
+    const inL12 = !!l && String(l.review_level) === '12';
+    const upstreamSbq = Number(sbq.get(m.id)?.sbq_attempts || 0) > 0;
+    // §7.4: Redash wins on SBQ but a board SBQ verdict is never silently
+    // overridden — either source keeps the task out of the backfill quadrants,
+    // and the board-only case is surfaced as awaiting confirmation.
+    const boardSbq = m.verdict === 'SBQ';
+    const isSbq = upstreamSbq || boardSbq;
+    let quadrant = isSbq ? (inL12 ? 'must_pull' : 'ok_out') : (inL12 ? 'ok_in_l12' : 'backfill_missing');
+    if (quadrant === 'backfill_missing') {
+      // §7.3 third outcome: a backfill inside the propagation window
+      // legitimately isn't in L12 yet — too early to judge, not missing.
+      const stamp = Date.parse(studio.backfill_retrieved_at || studio.backfilled_at || '');
+      if (Number.isFinite(stamp) && Date.now() < stamp + PROPAGATION_WINDOW_MS) quadrant = 'pending';
+    }
+    counts[quadrant] += 1;
+    return {
+      id: m.id,
+      severity: m.bucket,
+      verdict: m.verdict || null,
+      quadrant,
+      upstream: l ? { level: String(l.review_level), status: l.status } : null,
+      sbq: isSbq,
+      sbqAwaitingConfirmation: boardSbq && !upstreamSbq,
+      backfilledAt: studio.backfilled_at || studio.backfill_retrieved_at || null,
+      delivered: m.delivered,
+    };
+  });
+
+  res.json({ counts, items, redash: true, propagationWindowMs: PROPAGATION_WINDOW_MS, generatedAt });
 }));
 
 // ---------------------------------------------------------------------------
