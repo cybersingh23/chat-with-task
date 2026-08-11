@@ -138,6 +138,12 @@ async function runBackfillCheck() {
         .map((f) => `${f.field}: board ${f.board} vs platform ${f.platform}`).join('; ');
       return el('span', { class: 'bf__match is-bad', title: detail }, '✗ platform');
     }
+    // Not a failure: the backfill was retrieved <30 min ago and platform hasn't
+    // caught up yet.
+    if (m.status === 'PENDING') {
+      const until = m.pending_until ? ` — check again after ${m.pending_until.slice(11, 16)}Z` : '';
+      return el('span', { class: 'bf__match is-warn', title: `Backfill retrieved less than 30 min ago; platform propagation pending${until}` }, '⏳ pending propagation');
+    }
     return el('span', { class: 'bf__match dim', title: m.status }, '—');
   };
   const row = (i) => el('div', { class: `bf__row${i.ready ? '' : ' bf__row--blocked'}` },
@@ -265,11 +271,27 @@ async function boot() {
   setInterval(load, 8000); // live claim/verdict status from other reviewers
 }
 
-async function load() {
-  currentWs = await api('/workspace');
+let loadInflight = null; // back-to-back callers (focus + visibilitychange, the poll) share one fetch
+let loadSeq = 0;
+
+function load() {
+  if (loadInflight) return loadInflight;
+  // Stamp at request start, not response, so a second focus event that fires
+  // while the fetch is in flight already sees a fresh timestamp.
   lastLoadedAt = Date.now();
-  render();
-  loadLayers();
+  const seq = ++loadSeq;
+  loadInflight = (async () => {
+    try {
+      const ws = await api('/workspace');
+      if (seq !== loadSeq) return; // a newer load finished first — don't overwrite its render
+      currentWs = ws;
+      render();
+      loadLayers();
+    } finally {
+      loadInflight = null;
+    }
+  })();
+  return loadInflight;
 }
 
 // A board tab left open holds the workspace from whenever it last acted. The
@@ -839,7 +861,7 @@ function endTourCleanup() {
 // Best-effort cleanup if they close the tab mid-tour.
 window.addEventListener('beforeunload', () => {
   if (sessionStorage.getItem('cwt_tour_task') && !sessionStorage.getItem('cwt_tour_resume')) {
-    navigator.sendBeacon?.('/api/tour/end');
+    navigator.sendBeacon?.((window.__base__ || '') + '/api/tour/end');
   }
 });
 

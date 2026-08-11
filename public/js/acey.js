@@ -23,7 +23,7 @@ import { renderMarkdown } from './md.js';
 // its query is an assertion.
 
 const LS_OPEN = 'acey.open';
-const MASCOT = '/copilot.png';
+const MASCOT = (window.__base__ || '') + '/copilot.png';
 
 export function mountAcey({ page } = {}) {
   if (document.getElementById('acey-pop')) return;

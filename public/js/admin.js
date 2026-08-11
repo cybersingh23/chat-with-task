@@ -104,7 +104,7 @@ function renderDeliver(r, kind, quiet) {
     return;
   }
   dl.hidden = !r.zipName;
-  if (r.zipName) dl.href = '/api/admin/deliver/download';
+  if (r.zipName) dl.href = (window.__base__ || '') + '/api/admin/deliver/download';
   status.textContent = quiet
     ? `last backup ready${r.finishedAt ? ' · ' + fmtTime(r.finishedAt) + 'Z' : ''}`
     : `delivered ${r.delivered} task(s)${r.zipBytes ? ' · backup ' + fmtBytes(r.zipBytes) : ''}`;
@@ -148,7 +148,7 @@ function renderL10(s) {
   const r = s.lastRun;
   const dl = document.getElementById('pull-l10-download');
   dl.hidden = !(r && r.zipName);
-  if (r && r.zipName) dl.href = '/api/admin/pull-l10/download';
+  if (r && r.zipName) dl.href = (window.__base__ || '') + '/api/admin/pull-l10/download';
 
   if (s.running) setL10Text('Pulling tasks from Redash…');
   else if (!r) setL10Text('Paste task ids to pull.');
@@ -241,7 +241,7 @@ function renderEvents() {
 // overkill, so just deep-link by scanning buckets client-side isn't available
 // here; link to the board filtered by the id instead.
 function taskHref(taskId) {
-  return `/?q=${encodeURIComponent(taskId)}`;
+  return `${window.__base__ || ''}/?q=${encodeURIComponent(taskId)}`;
 }
 
 function row(cell, cells) {

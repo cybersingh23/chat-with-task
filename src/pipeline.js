@@ -116,7 +116,12 @@ export async function boardPipeline(opts = {}) {
 
   // Chunked so a board larger than the registry's per-call id cap still works —
   // one IN (…) list of every task id would otherwise be rejected outright.
-  const ids = tasks.map((t) => t.id);
+  // Non-task folder names are dropped up front: one stray directory would make
+  // the registry reject the whole chunk and 500 the panel.
+  const TASK_ID_RE = /^[0-9a-f]{24}$/;
+  const skipped = tasks.filter((t) => !TASK_ID_RE.test(t.id)).map((t) => t.id);
+  if (skipped.length) console.warn(`boardPipeline: skipping ${skipped.length} non-task-id folder(s): ${skipped.join(', ')}`);
+  const ids = tasks.map((t) => t.id).filter((id) => TASK_ID_RE.test(id));
   const CHUNK = 500;
   const chunks = [];
   for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));

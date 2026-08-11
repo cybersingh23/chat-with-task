@@ -188,11 +188,13 @@ async function cached(key, ttlMs, fresh, fn) {
     cacheSet(key, value);
     return value;
   })();
-  inflight.set(key, p);
+  // A fresh call must not clobber a live entry other callers already await;
+  // it runs unregistered and only its own registration is cleaned up.
+  if (!inflight.has(key)) inflight.set(key, p);
   try {
     return { ...(await p), cached: false };
   } finally {
-    inflight.delete(key);
+    if (inflight.get(key) === p) inflight.delete(key);
   }
 }
 

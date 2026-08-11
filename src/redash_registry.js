@@ -34,7 +34,8 @@ const TYPES = {
     if (ids.length > max) throw new RedashError(`too many task ids (${ids.length} > ${max})`, 400);
     const bad = ids.filter((id) => !TASK_ID_RE.test(id));
     if (bad.length) throw new RedashError(`not a 24-hex task id: ${bad.slice(0, 3).join(', ')}`, 400);
-    return [...new Set(ids)].map((id) => `'${id}'`).join(',');
+    // Sorted so equivalent id sets render identical SQL and hit the same cache key.
+    return [...new Set(ids)].sort().map((id) => `'${id}'`).join(',');
   },
 
   // A single 24-hex object id, emitted bare (the SQL quotes it).
