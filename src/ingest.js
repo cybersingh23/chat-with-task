@@ -111,7 +111,10 @@ export function ingestTask(taskId, bucket = 'UNSORTED', sourceDir = null) {
 // source delivery, so the copilot and docgen start from the audit's findings.
 export function writeAuditSeed(deliveryDir, taskId, destTaskDir) {
   // The copilot must know what the eval already corrected, or it will re-flag
-  // fixed grammar as new findings (§4.5). The seed carries the edit list.
+  // fixed grammar as new findings (§4.5). Built first, WRITTEN LAST: when the
+  // _audit sections below rewrite the seed file, this must go into that write —
+  // appending it up front just gets clobbered by the rewrite.
+  let grammarSection = null;
   try {
     const gf = path.join(destTaskDir, 'grammar_fixes.json');
     if (fs.existsSync(gf)) {
@@ -119,12 +122,15 @@ export function writeAuditSeed(deliveryDir, taskId, destTaskDir) {
       const list = Array.isArray(edits) ? edits : edits?.fixes || [];
       const lines = list.map((e, i) =>
         `- G${i + 1} [${e.rule}/${e.error_type}${e.meaning_changing ? ', meaning-changing' : ''}] ${e.path}: ${JSON.stringify(e.old)} -> ${JSON.stringify(e.new)}`);
-      fs.appendFileSync(path.join(destTaskDir, '_audit_seed.md'),
-        `\n\n## Grammar fixes already applied by the eval (do not re-flag)\n${lines.join('\n')}\n`);
+      if (lines.length) grammarSection = `## Grammar fixes already applied by the eval (do not re-flag)\n${lines.join('\n')}`;
     }
   } catch { /* seed stays as-is */ }
+  const appendGrammar = () => {
+    if (!grammarSection) return;
+    try { fs.appendFileSync(path.join(destTaskDir, '_audit_seed.md'), `\n\n${grammarSection}\n`); } catch { /* seed stays as-is */ }
+  };
   const auditDir = path.join(deliveryDir, '_audit');
-  if (!fs.existsSync(auditDir)) return false;
+  if (!fs.existsSync(auditDir)) { appendGrammar(); return false; }
   const sections = [`# Audit seed for ${taskId}`, `Source: ${auditDir}`];
 
   const finalVerdicts = readJson(path.join(auditDir, 'final_verdicts.json'));
@@ -156,7 +162,8 @@ export function writeAuditSeed(deliveryDir, taskId, destTaskDir) {
     if (text.includes(taskId)) sections.push('## ACC_AUDIT.md excerpt\n' + extractAround(text, taskId));
   }
 
-  if (sections.length <= 2) return false;
+  if (sections.length <= 2) { appendGrammar(); return false; }
+  if (grammarSection) sections.push(grammarSection);
   fs.writeFileSync(path.join(destTaskDir, '_audit_seed.md'), sections.join('\n\n') + '\n');
   return true;
 }

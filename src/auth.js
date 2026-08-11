@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
+import { writeJsonAtomic } from './fixes.js';
 import { httpError } from './workspace.js';
 
 const USERS_PATH = path.join(config.dataDir, 'users.json');
@@ -29,7 +30,7 @@ function loadUsers() {
       const salt = crypto.randomBytes(8).toString('hex');
       return { username: u.username, role: u.role, salt, hash: hash(u.password, salt) };
     });
-    fs.writeFileSync(USERS_PATH, JSON.stringify(seeded, null, 2));
+    writeJsonAtomic(USERS_PATH, seeded);
   }
   return JSON.parse(fs.readFileSync(USERS_PATH, 'utf8'));
 }
@@ -44,7 +45,8 @@ export function verifyLogin(username, password) {
     u.salt = crypto.randomBytes(8).toString('hex');
     u.hash = hash(password, u.salt);
     delete u.password;
-    fs.writeFileSync(USERS_PATH, JSON.stringify(users, null, 2));
+    // A torn write here would brick every login — temp-then-rename only.
+    writeJsonAtomic(USERS_PATH, users);
     return { username: u.username, role: u.role };
   }
   const computed = hash(password, u.salt);

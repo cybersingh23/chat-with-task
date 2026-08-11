@@ -27,10 +27,29 @@ export function taskDir(bucket, id, { mustExist = true } = {}) {
 }
 
 // Resolve a user-supplied relative path inside a task dir, refusing traversal.
+// The lexical check alone can be defeated by a symlink inside the task dir, so
+// the existing portion of the path is also realpath'd and must stay inside the
+// (realpath'd) task dir; a not-yet-created tail falls back to the lexical check,
+// since it can only ever be created under that existing portion.
 export function resolveSafe(dir, rel) {
   const abs = path.resolve(dir, rel || '.');
   if (abs !== dir && !abs.startsWith(dir + path.sep)) throw httpError(400, `path escapes task dir: ${rel}`);
+  let realDir;
+  try { realDir = fs.realpathSync(dir); } catch { return abs; } // dir absent — callers' existence checks handle it
+  let existing = abs;
+  while (existing !== dir && !lexists(existing)) existing = path.dirname(existing);
+  let real;
+  try { real = fs.realpathSync(existing); } catch {
+    throw httpError(400, `path escapes task dir: ${rel}`); // dangling symlink in the path
+  }
+  if (real !== realDir && !real.startsWith(realDir + path.sep)) {
+    throw httpError(400, `path escapes task dir: ${rel}`);
+  }
   return abs;
+}
+
+function lexists(p) {
+  try { fs.lstatSync(p); return true; } catch { return false; }
 }
 
 export function listWorkspace() {

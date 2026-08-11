@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { writeJsonAtomic } from './fixes.js';
 import { taskDir, httpError } from './workspace.js';
 
 // Per-task review state, shared across users: _studio.json in the task folder.
@@ -14,7 +15,15 @@ export function getState(bucket, id) {
 }
 
 function saveState(bucket, id, state) {
-  fs.writeFileSync(path.join(taskDir(bucket, id), '_studio.json'), JSON.stringify(state, null, 2));
+  writeJsonAtomic(path.join(taskDir(bucket, id), '_studio.json'), state);
+}
+
+// writeJsonAtomic for content that is already a serialized string (carried-over
+// _studio.json / ledgers on re-upload): temp file + rename in the same dir.
+export function writeTextAtomic(p, text) {
+  const tmp = `${p}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, text);
+  fs.renameSync(tmp, p);
 }
 
 export function claimTask(bucket, id, username) {
@@ -83,6 +92,7 @@ export function laneSnapshot(bucket, id) {
     verdict: s.verdict ?? null,
     claimed_by: s.claimed_by ?? null,
     grammar_lane: s.grammar_lane ?? null,
+    verdict_note: s.verdict_note ?? null,
   };
 }
 
@@ -97,8 +107,13 @@ export function applySnapshot(bucket, id, snap, username) {
   } else {
     delete state.verdict; delete state.verdict_by; delete state.verdict_at;
   }
-  // The Second Opinion "why" note only makes sense on that verdict.
-  if (snap.verdict !== 'SECOND_OPINION') {
+  // The Second Opinion "why" note only makes sense on that verdict. Restore it
+  // verbatim with the verdict so an undo doesn't lose it.
+  if (snap.verdict === 'SECOND_OPINION' && snap.verdict_note) {
+    state.verdict_note = snap.verdict_note;
+    state.verdict_note_by = username;
+    state.verdict_note_at = stamp;
+  } else {
     delete state.verdict_note; delete state.verdict_note_by; delete state.verdict_note_at;
   }
 

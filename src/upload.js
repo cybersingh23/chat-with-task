@@ -1,5 +1,6 @@
 import Busboy from 'busboy';
-import { seedLedgerFromGrammar, supersedeLedger, readLedger, loadFixBlocks, validateTask } from './fixes.js';
+import { seedLedgerFromGrammar, supersedeLedger, readLedger, loadFixBlocks, validateTask, writeJsonAtomic } from './fixes.js';
+import { writeTextAtomic } from './state.js';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -123,15 +124,16 @@ function bulkIngest(taskRoots, fields, forcedId = null) {
     // override any prior copy (in whatever bucket), carrying over reviewer state
     const priorBucket = findTaskBucket(taskId);
     let studio = null;
+    let chat = null;
     let reopened = false;
     let priorLedger = null;
     if (priorBucket) {
       const priorDir = path.join(config.workspaceRoot, priorBucket, taskId);
       try { studio = fs.readFileSync(path.join(priorDir, '_studio.json'), 'utf8'); } catch { /* none */ }
+      try { chat = fs.readFileSync(path.join(priorDir, '_chat.json'), 'utf8'); } catch { /* none */ }
       // The ledger survives re-upload the way _studio.json does — it is the
       // board's change history and the whole point of append-only.
       priorLedger = readLedger(priorDir);
-      fs.rmSync(priorDir, { recursive: true, force: true });
     }
     // A re-audited task left at SBQ or "Fixes made" must not silently stay
     // resolved — reopen it (clear verdict + release claim) so it returns to the
@@ -143,9 +145,26 @@ function bulkIngest(taskRoots, fields, forcedId = null) {
       reopened = reset.reopened;
     }
     const dest = path.join(config.workspaceRoot, bucket, taskId);
-    fs.cpSync(taskRoot, dest, { recursive: true });
+    // Copy to a temp sibling first, swap only once the copy succeeded — a
+    // failed copy (disk full, truncated zip) must not lose the prior copy.
+    // Symlinks are pruned: unzip materializes them, and the file readers would
+    // follow one to any host file.
+    const tmpDest = path.join(config.workspaceRoot, bucket, `.tmp-${taskId}-${process.pid}`);
+    fs.rmSync(tmpDest, { recursive: true, force: true });
+    try {
+      fs.cpSync(taskRoot, tmpDest, {
+        recursive: true,
+        filter: (src) => !fs.lstatSync(src).isSymbolicLink(),
+      });
+    } catch (e) {
+      fs.rmSync(tmpDest, { recursive: true, force: true });
+      throw e;
+    }
+    if (priorBucket) fs.rmSync(path.join(config.workspaceRoot, priorBucket, taskId), { recursive: true, force: true });
+    fs.renameSync(tmpDest, dest);
     ensureRankingProof(dest); // re-fetch any proof image that didn't materialize (expired CDS URL) while it's still uploadable
-    if (studio) fs.writeFileSync(path.join(dest, '_studio.json'), studio); // keeps checklist/delivered; verdict+claim reset if reopened
+    if (studio) writeTextAtomic(path.join(dest, '_studio.json'), studio); // keeps checklist/delivered; verdict+claim reset if reopened
+    if (chat) writeTextAtomic(path.join(dest, '_chat.json'), chat); // copilot history survives re-upload the same way
     let seeded = false;
     if (fs.existsSync(path.join(deliveryDir, '_audit'))) {
       seeded = writeAuditSeed(deliveryDir, taskId, dest);
@@ -156,7 +175,7 @@ function bulkIngest(taskRoots, fields, forcedId = null) {
     // upstream) they are superseded, never replayed onto new text.
     if (priorLedger?.length) {
       const entries = reopened ? supersedeLedger(priorLedger) : priorLedger;
-      fs.writeFileSync(path.join(dest, 'fix_ledger.json'), JSON.stringify(entries, null, 2));
+      writeJsonAtomic(path.join(dest, 'fix_ledger.json'), entries);
     }
     seedLedgerFromGrammar(dest);
     loadFixBlocks(dest); // parse remediation fences once, cache to fixes.json
@@ -202,7 +221,7 @@ function writeAuditState(dest, auditRow, warnings) {
     warnings,
     ingested_at: new Date().toISOString(),
   };
-  fs.writeFileSync(p, JSON.stringify(state, null, 2));
+  writeTextAtomic(p, JSON.stringify(state, null, 2));
 }
 
 // Verdicts that mean "still needs work" — re-uploading such a task is a re-audit,
