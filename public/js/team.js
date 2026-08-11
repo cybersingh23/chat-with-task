@@ -54,11 +54,19 @@ async function init() {
   await load({});
 }
 
+// Loads overlap (quick-add, Acey events, refresh); a slow early response must
+// not paint over a newer one, so each load is stamped and stale ones drop.
+let loadSeq = 0;
+
 async function load({ fresh }) {
+  const seq = ++loadSeq;
   if (!data) showSkeleton();
   try {
-    data = await api(`/team/board?${view === 'closed' ? 'closed=1&' : ''}${fresh ? 'fresh=1' : ''}`);
+    const next = await api(`/team/board?${view === 'closed' ? 'closed=1&' : ''}${fresh ? 'fresh=1' : ''}`);
+    if (seq !== loadSeq) return;
+    data = next;
   } catch (e) {
+    if (seq !== loadSeq) return;
     $('tm-sub').textContent = `Could not load the board — ${e.message}`;
     mount($('tm-filters'));
     mount($('tm-owners'), el('div', { class: 'tm-blank' },
@@ -255,12 +263,13 @@ function quickAdd(p) {
     if (e.key !== 'Enter' || !input.value.trim()) return;
     input.disabled = true;
     try {
-      await api('/team/todos', {
+      const res = await api('/team/todos', {
         method: 'POST',
         body: { owner: p.username, title: input.value.trim(), severity: SEVS[idx] },
       });
       refocusOwner = p.username;
       await load({});
+      if (res.demoted?.length) toast(demotionMsg(res.demoted));
     } catch (err) {
       input.disabled = false;
       alert(err.message);
@@ -293,7 +302,12 @@ function card(t) {
       check.classList.add('is-done');
       check.closest('.tm-card')?.classList.add('is-closing');
       try { await api(`/team/todos/${t.id}`, { method: 'PATCH', body: { status: 'done' } }); await load({}); }
-      catch (e) { check.disabled = false; check.classList.remove('is-done'); alert(e.message); }
+      catch (e) {
+        check.disabled = false;
+        check.classList.remove('is-done');
+        check.closest('.tm-card')?.classList.remove('is-closing');
+        alert(e.message);
+      }
     });
   }
 
@@ -348,10 +362,9 @@ function card(t) {
             toast(`Deleted "${t.title.slice(0, 44)}${t.title.length > 44 ? '…' : ''}"`, {
               label: 'Undo',
               fn: async () => {
-                await api('/team/todos', {
-                  method: 'POST',
-                  body: { owner: t.owner, title: t.title, detail: t.detail, severity: t.severity },
-                });
+                // Send the whole item back: re-POSTing the visible fields would
+                // mint a new id and drop notes/claim/history.
+                await api('/team/todos/restore', { method: 'POST', body: t });
                 await load({});
               },
             });
@@ -401,16 +414,22 @@ function sevControl(t) {
   }, ...Object.keys(SEV_META).map((k) =>
     el('option', { value: k, ...(k === t.severity ? { selected: true } : {}) }, k.toUpperCase())));
   sel.addEventListener('change', async () => {
-    const crowning = sel.value === 'p00';
-    const previous = crowning && allItems().find((x) =>
-      x.severity === 'p00' && x.id !== t.id && x.status !== 'done' && x.status !== 'resolved');
     try {
-      await api(`/team/todos/${t.id}`, { method: 'PATCH', body: { severity: sel.value } });
+      // The server owns the demotion list — reconstructing it from pre-PATCH
+      // data is wrong the moment someone else crowned in between.
+      const res = await api(`/team/todos/${t.id}`, { method: 'PATCH', body: { severity: sel.value } });
       await load({});
-      if (previous) toast(`P00 is exclusive — "${previous.title.slice(0, 40)}…" moved down to P0.`);
+      if (res.demoted?.length) toast(demotionMsg(res.demoted));
     } catch (e) { alert(e.message); }
   });
   return sel;
+}
+
+function demotionMsg(demoted) {
+  const name = demoted[0].title || String(demoted[0].id);
+  const clipped = name.length > 40 ? `${name.slice(0, 40)}…` : name;
+  const more = demoted.length > 1 ? ` (and ${demoted.length - 1} more)` : '';
+  return `P00 is exclusive — "${clipped}"${more} moved down to P0.`;
 }
 
 const firstName = (username) => (data.people.find((p) => p.username === username)?.name || username).split(' ')[0];

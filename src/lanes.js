@@ -116,7 +116,7 @@ export function selectTasks({ severity, fromLane, ids }) {
   const ws = listWorkspace();
   for (const bucket of buckets) {
     for (const meta of ws[bucket] || []) {
-      if (meta.tour) continue;                       // tour sandboxes aren't real tasks
+      if (meta.tour || meta.delivered) continue;     // tour sandboxes aren't real tasks; delivered = archived
       if (idSet && !idSet.has(meta.id)) continue;
       if (fromLane && fromLane !== 'ANY' && laneOf(meta) !== fromLane) continue;
       out.push(meta);

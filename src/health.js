@@ -157,16 +157,17 @@ function checkBlocked(blocked) {
 //     so even a handful is worth the pass. Severity rises to critical because
 //     it is the same event as the delivery being at risk.
 //
-// "On the board" counts board tasks whose upstream node is at L10 regardless of
-// lane or status: an eval already happened to put them there, which is the
-// thing being measured. Board tasks that have moved past L10 upstream stopped
+// Both sides count PENDING L10 nodes: atL10 (the brief's feeder) is a
+// pending-only count, so a board task whose latest L10 node is completed or
+// canceled has already left the pool being measured — subtracting it anyway
+// understates the gap. Board tasks that have moved past L10 upstream stopped
 // being part of either side of this comparison.
 function checkEvalGap(brief, board) {
   const p = brief.pipeline;
   if (!p || !Array.isArray(board?.rows)) return [];
 
   const atL10 = Number(p.feeder) || 0;
-  const onBoard = board.rows.filter((r) => String(r.reviewLevel) === '10').length;
+  const onBoard = board.rows.filter((r) => String(r.reviewLevel) === '10' && r.status === 'pending').length;
   const gap = Math.max(0, atL10 - onBoard);
 
   const short = (p.gapToTarget || 0) > 0;

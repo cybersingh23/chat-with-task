@@ -34,7 +34,13 @@ const STATUSES = new Set(['open', 'claimed', 'snoozed', 'done', 'resolved']);
 // write: critical was asap, high was same-day, medium was this-week-ish.
 export const SEVERITIES = ['p00', 'p0', 'p1', 'p2'];
 const LEGACY_SEV = { critical: 'p0', high: 'p1', medium: 'p2', low: 'p2' };
-export const normSev = (x) => (SEVERITIES.includes(x) ? x : (LEGACY_SEV[x] || 'p2'));
+// Case-insensitive on purpose: 'P0' from a caller is a casing difference, not a
+// different priority, and silently flooring it to p2 was a demotion nobody
+// asked for. Genuinely unknown values still floor to p2.
+export const normSev = (x) => {
+  const s = String(x ?? '').trim().toLowerCase();
+  return SEVERITIES.includes(s) ? s : (LEGACY_SEV[s] || 'p2');
+};
 
 // P00 is exclusive by definition. Crowning a new one demotes every other open
 // P00 to P0 — latest crown wins — rather than erroring into a two-step dance.
@@ -45,7 +51,7 @@ function enforceSingleP00(items, keepId) {
     if (t.status === 'done' || t.status === 'resolved') continue;
     t.severity = 'p0';
     t.updatedAt = new Date().toISOString();
-    demoted.push(t.id);
+    demoted.push({ id: t.id, title: t.title });
   }
   return demoted;
 }
@@ -57,10 +63,19 @@ function load() {
   try {
     const raw = JSON.parse(fs.readFileSync(TODOS_PATH, 'utf8'));
     const state = Array.isArray(raw?.items) ? raw : { items: [] };
-    for (const t of state.items) t.severity = normSev(t.severity);
+    for (const t of state.items) {
+      t.severity = normSev(t.severity);
+      // demoted rides on write responses only; older builds persisted it.
+      delete t.demoted;
+    }
+    // Monotonic id counter. max+1 seeds files that predate it; it never goes
+    // down, so a deleted id is never reused and a stale #t<id> deep link stays
+    // dead instead of flashing whatever card inherited the number.
+    const maxSeen = Math.max(0, ...state.items.map((t) => Number(String(t.id).slice(1)) || 0));
+    state.next_id = Math.max(Number(state.next_id) || 0, maxSeen + 1);
     return state;
   } catch {
-    return { items: [] };
+    return { items: [], next_id: 1 };
   }
 }
 
@@ -70,7 +85,7 @@ function save(state) {
   return state;
 }
 
-const nextId = (items) => `t${Math.max(0, ...items.map((t) => Number(String(t.id).slice(1)) || 0)) + 1}`;
+const nextId = (state) => `t${state.next_id++}`;
 
 // ---------------------------------------------------------------------------
 // Sync: reconcile the auto todos against the current signals
@@ -101,7 +116,7 @@ export async function syncFromHealth({ fresh = false } = {}) {
 
     if (!existing) {
       state.items.push({
-        id: nextId(state.items), source: 'auto', signalId: s.id,
+        id: nextId(state), source: 'auto', signalId: s.id,
         status: 'open', createdAt: now, ...fields,
       });
       created += 1;
@@ -196,7 +211,7 @@ export function addTodo({ owner, title, detail = '', severity = 'p2', domain = n
   const state = load();
   const now = new Date().toISOString();
   const item = {
-    id: nextId(state.items),
+    id: nextId(state),
     source: 'manual',
     owner,
     title: title.trim(),
@@ -211,9 +226,11 @@ export function addTodo({ owner, title, detail = '', severity = 'p2', domain = n
     escalated: false,
   };
   state.items.push(item);
-  if (item.severity === 'p00') item.demoted = enforceSingleP00(state.items, item.id);
+  // Who lost the crown rides on the response only — assigning it onto the item
+  // would freeze a stale list into todos.json.
+  const demoted = item.severity === 'p00' ? enforceSingleP00(state.items, item.id) : [];
   save(state);
-  return item;
+  return { ...item, demoted };
 }
 
 export function updateTodo(id, { status, owner, severity, note, snoozeDays, by }) {
@@ -221,6 +238,7 @@ export function updateTodo(id, { status, owner, severity, note, snoozeDays, by }
   const t = state.items.find((x) => String(x.id) === String(id));
   if (!t) throw new Error(`unknown todo: ${id}`);
   const now = new Date().toISOString();
+  let demoted = [];
 
   if (status) {
     if (!STATUSES.has(status)) throw new Error(`unknown status: ${status}`);
@@ -246,14 +264,15 @@ export function updateTodo(id, { status, owner, severity, note, snoozeDays, by }
   if (severity) {
     t.severity = normSev(severity);
     // The response says who lost the crown, so the UI can explain the demotion
-    // instead of the board just looking different.
-    if (t.severity === 'p00') t.demoted = enforceSingleP00(state.items, t.id);
+    // instead of the board just looking different. Response-only: assigning it
+    // onto the item would persist a stale list into todos.json.
+    if (t.severity === 'p00') demoted = enforceSingleP00(state.items, t.id);
   }
   if (note) t.notes = [...(t.notes || []), { by, at: now, text: String(note).slice(0, 2000) }];
 
   t.updatedAt = now;
   save(state);
-  return t;
+  return { ...t, demoted };
 }
 
 export function deleteTodo(id) {
@@ -267,6 +286,25 @@ export function deleteTodo(id) {
   state.items = state.items.filter((x) => String(x.id) !== String(id));
   save(state);
   return { deleted: before - state.items.length };
+}
+
+// Undo for a delete: reinsert the exact item the client was holding when it
+// deleted. A re-POST of the visible fields would mint a new id (breaking #t<id>
+// deep links) and drop notes/claim/history. The monotonic counter means the old
+// id is still free; a fresh one is minted only on an actual collision.
+export function restoreTodo(item) {
+  if (!item?.title?.trim()) throw new Error('title is required');
+  if (!personByUsername(item.owner)) throw new Error(`unknown owner: ${item.owner}`);
+  const state = load();
+  const t = { ...item, severity: normSev(item.severity) };
+  delete t.demoted;
+  if (!t.id || state.items.some((x) => String(x.id) === String(t.id))) t.id = nextId(state);
+  // Keep the counter ahead of a restored id that outruns it (hand-edited file).
+  const n = Number(String(t.id).slice(1)) || 0;
+  if (n >= state.next_id) state.next_id = n + 1;
+  state.items.push(t);
+  save(state);
+  return t;
 }
 
 // Compact form for the model's system prompt and the Overview strip.

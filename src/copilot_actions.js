@@ -354,6 +354,11 @@ export function makeActionExecutor({ bucket, id, username, onAction }) {
             + 'Tell them the first move is done and that the rest needs a confirmation.';
         }
         const target = resolveTask(args.task_id, current);
+        // resolveTask only checks the directory exists, which archived tasks
+        // still do — bulk selection skips them in selectTasks, so guard here too.
+        if (taskMeta(target.bucket, target.id).delivered) {
+          return `REFUSED — nothing was changed. ${target.id} is archived — restore it from the archive first.`;
+        }
         const res = applySingleMove({
           ...target, lane: args.lane, verdict: args.verdict ?? null, username,
         });

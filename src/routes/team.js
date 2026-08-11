@@ -1,7 +1,7 @@
 import express from 'express';
 import { TEAM, teamBrief } from '../team.js';
 import { projectHealth } from '../health.js';
-import { board, addTodo, updateTodo, deleteTodo, syncFromHealth, todoSummary } from '../todos.js';
+import { board, addTodo, updateTodo, deleteTodo, restoreTodo, syncFromHealth, todoSummary } from '../todos.js';
 
 // /api/team/* — the team board: project health, and everybody's todos.
 //
@@ -56,6 +56,12 @@ teamApi.get('/mine', wrap(async (req, res) => {
 teamApi.post('/todos', wrap(async (req, res) => {
   const { owner, title, detail, severity, domain, link } = req.body || {};
   res.json(addTodo({ owner, title, detail, severity, domain, link, by: req.user.username }));
+}));
+
+// Undo for a delete: the client sends back the whole item it was holding and it
+// is reinserted verbatim — same id, notes and history intact.
+teamApi.post('/todos/restore', wrap(async (req, res) => {
+  res.json(restoreTodo(req.body || {}));
 }));
 
 teamApi.patch('/todos/:id', wrap(async (req, res) => {
