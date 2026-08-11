@@ -25,6 +25,11 @@ const TODOS_PATH = path.join(config.dataDir, 'todos.json');
 
 const STATUSES = new Set(['open', 'claimed', 'snoozed', 'done', 'resolved']);
 
+// How long a human 'done' suppresses a still-firing signal before the sync
+// pass reopens the todo. A week covers known-laggy metrics without letting a
+// live p0 stay invisible forever.
+const DONE_GRACE_MS = 7 * 86400e3;
+
 // Priorities are deadlines, not adjectives:
 //   p00  THE most pressing item — at most one open at a time
 //   p0   asap
@@ -125,12 +130,17 @@ export async function syncFromHealth({ fresh = false } = {}) {
 
     // A signal that fires again after being auto-resolved is a RECURRENCE, and
     // saying so matters — "this came back" is a different conversation from
-    // "this is new". A todo someone marked done by hand is left alone: they
-    // acted, and the metric may simply lag.
-    if (existing.status === 'resolved') {
+    // "this is new". A todo someone marked done by hand gets a grace window:
+    // they acted, and the metric may simply lag — but a signal still firing a
+    // week later means the board is hiding a live problem, so it reopens
+    // (Pavit's call, 2026-08-10). Only the sync pass may cross this line.
+    const doneExpired = existing.status === 'done'
+      && String(existing.doneAt || existing.updatedAt || '') < new Date(Date.now() - DONE_GRACE_MS).toISOString();
+    if (existing.status === 'resolved' || doneExpired) {
       existing.status = 'open';
       existing.recurrences = (existing.recurrences || 0) + 1;
       existing.reopenedAt = now;
+      if (doneExpired) existing.reopenedReason = 'signal still firing a week after being marked done';
       reopened += 1;
     }
     // Refresh the numbers in place so a claimed todo shows today's figure, not
