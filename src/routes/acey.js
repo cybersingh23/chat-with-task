@@ -156,7 +156,13 @@ aceyApi.post('/chat', wrap(async (req, res) => {
       maxSteps: 30,
       onUsage,
     });
-    HISTORY.set(user, [...history, userMsg, ...messages].slice(-MAX_TURNS));
+    // Trim to a user-message boundary: a turn is assistant(tool_calls) + its
+    // tool results, and a slice that beheads the pair leaves an orphan
+    // role:'tool' head that the proxy rejects — every later turn then 400s
+    // until the user clears the chat.
+    const trimmed = [...history, userMsg, ...messages].slice(-MAX_TURNS);
+    const firstUser = trimmed.findIndex((m) => m.role === 'user');
+    HISTORY.set(user, firstUser === -1 ? [] : trimmed.slice(firstUser));
     // If the answer names an owner, offer to turn it into an action item on
     // the Team board — the model routes, the human authorizes with a click.
     const final = [...messages].reverse()

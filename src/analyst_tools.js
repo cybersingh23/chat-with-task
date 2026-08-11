@@ -99,6 +99,32 @@ export const ANALYST_TOOL_DEFS = [
   {
     type: 'function',
     function: {
+      name: 'redash_query',
+      description:
+        'Run a curated registry query by name — its {{params}} are validated and filled server-side, '
+        + 'so this is the safe way to run anything list_queries shows. Prefer it over run_sql when a '
+        + 'curated query already answers the question; the .sql files carry templates run_sql cannot '
+        + 'execute as-is.',
+      parameters: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', enum: Object.keys(REGISTRY), description: 'Registry query name (from list_queries).' },
+          params: {
+            type: 'object',
+            description: 'Parameters by name, e.g. {"task_ids": ["<24-hex id>", …]}. list_queries shows what each query takes; optional ones can be omitted.',
+          },
+          purpose: {
+            type: 'string',
+            description: 'One short line on what this run is meant to establish. Shown to the operator.',
+          },
+        },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'run_sql',
       description:
         'Run read-only SQL (SELECT / WITH only) against the upstream warehouse and get rows back. '
@@ -154,6 +180,27 @@ export function makeAnalystExecutor({ onQuery } = {}) {
           return `[sql/redash/${entry.sql}]\n` + fs.readFileSync(path.join(SQL_DIR, entry.sql), 'utf8');
         } catch (e) {
           return `ERROR reading ${entry.sql}: ${e.message}`;
+        }
+      }
+
+      case 'redash_query': {
+        if (!redashEnabled()) return 'ERROR: Redash is not configured on this server (REDASH_API_KEY unset).';
+        const entry = REGISTRY[args.name];
+        if (!entry) return `ERROR: unknown query ${JSON.stringify(args.name)} — call list_queries for the catalogue.`;
+        // Stream the rendered SQL when it exists locally, so the number stays
+        // traceable to the query that produced it — same contract as run_sql.
+        let shown = `-- registry query: ${args.name}`;
+        if (entry.sql) {
+          try { shown = renderSql(args.name, args.params || {}); } catch { /* validation error surfaces below */ }
+        }
+        onQuery?.({ sql: shown, purpose: String(args.purpose || `curated query ${args.name}`) });
+        try {
+          const out = await runRegistryQuery(args.name, args.params || {}, {});
+          if (!out.rowCount) return '[0 rows] The query ran and returned nothing. Say so — do not fill the gap with an estimate.';
+          return `[${out.rowCount} row(s)${out.cached ? ', cached' : ''}]\n${asTable(out)}`;
+        } catch (e) {
+          const msg = e instanceof RedashError ? e.message : String(e.message || e);
+          return `ERROR: ${msg}\nCheck the parameter names and types against list_queries, or read_query + run_sql instead.`;
         }
       }
 
