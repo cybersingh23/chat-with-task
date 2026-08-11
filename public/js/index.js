@@ -146,12 +146,28 @@ async function runBackfillCheck() {
     }
     return el('span', { class: 'bf__match dim', title: m.status }, '—');
   };
-  const row = (i) => el('div', { class: `bf__row${i.ready ? '' : ' bf__row--blocked'}` },
-    el('span', { class: `bf__dot${i.ready ? ' is-ok' : ''}` }),
-    el('a', { class: 'mono bf__id', href: `${window.__base__ || ''}/task/${i.bucket}/${i.id}` }, i.id),
-    i.upstream ? el('span', { class: 'bf__lvl' }, `L${i.upstream.level} · ${i.upstream.status}`) : el('span', { class: 'bf__lvl dim' }, 'no pipeline row'),
-    matchChip(i.labelMatch),
-    el('span', { class: 'bf__why' }, i.ready ? (i.grammarOnly ? 'ready · grammar-only' : 'ready') : i.blockers.join(' · ')));
+  const row = (i) => {
+    const warns = i.warningDetails || [];
+    const main = el('div', { class: `bf__row${i.ready ? '' : ' bf__row--blocked'}${warns.length ? ' bf__row--x' : ''}` },
+      el('span', { class: `bf__dot${i.ready ? ' is-ok' : ''}` }),
+      el('a', { class: 'mono bf__id', href: `${window.__base__ || ''}/task/${i.bucket}/${i.id}` }, i.id),
+      i.upstream ? el('span', { class: 'bf__lvl' }, `L${i.upstream.level} · ${i.upstream.status}`) : el('span', { class: 'bf__lvl dim' }, 'no pipeline row'),
+      matchChip(i.labelMatch),
+      el('span', { class: 'bf__why' }, i.ready ? (i.grammarOnly ? 'ready · grammar-only' : 'ready') : i.blockers.join(' · '),
+        warns.length ? el('span', { class: 'bf__expand', 'aria-hidden': 'true' }, ' ▾') : null));
+    if (!warns.length) return main;
+    // The warning COUNT was a dead end — click the row to see what the
+    // validator actually objects to, without leaving the popup.
+    const details = el('div', { class: 'bf__warns', hidden: 'hidden' },
+      ...warns.map((w) => el('div', { class: 'bf__warn' }, el('code', {}, w.check), ` — ${w.detail}`)));
+    main.title = 'Click to show the validation warnings';
+    main.addEventListener('click', (e) => {
+      if (e.target.closest('a')) return; // the task link still navigates
+      details.hidden = !details.hidden;
+      main.querySelector('.bf__expand').textContent = details.hidden ? ' ▾' : ' ▴';
+    });
+    return el('div', { class: 'bf__rowwrap' }, main, details);
+  };
 
   const body = box.querySelector('.bf__body');
   body.replaceChildren(
@@ -235,7 +251,7 @@ async function runReconciliation() {
       el('span', { class: 'rq__hdr' }, ''),
       el('span', { class: 'rq__hdr' }, 'Redash: SBQ'),
       el('span', { class: 'rq__hdr' }, 'Redash: non-SBQ'),
-      el('span', { class: 'rq__hdr' }, 'In L12'),
+      el('span', { class: 'rq__hdr', title: 'A live L12 node (pending or completed) — a canceled L12 node counts as pulled, not present' }, 'In L12 (live)'),
       cell(c.must_pull, 'must be pulled', 'is-bad'),
       cell(c.ok_in_l12, 'correct', 'is-ok'),
       el('span', { class: 'rq__hdr' }, 'Not in L12'),
@@ -250,8 +266,11 @@ async function runReconciliation() {
       .sort((a, b) => ORDER_Q[a.quadrant] - ORDER_Q[b.quadrant] || a.id.localeCompare(b.id));
     const DOT = { must_pull: ' is-bad', backfill_missing: '', pending: ' dim' };
     const WHY = {
-      must_pull: (i) => `SBQ${i.sbqAwaitingConfirmation ? ' (board-marked, awaiting Redash)' : ''} — pull out of L12`,
-      backfill_missing: (i) => `non-SBQ, not in L12 — backfill missing${i.backfilledAt ? ` (stamped ${i.backfilledAt.slice(0, 16).replace('T', ' ')})` : ''}`,
+      must_pull: (i) => `open SBQ${i.sbqAwaitingConfirmation ? ' (board-marked, awaiting Redash)' : ''} — pull out of L12`,
+      // A canceled L12 node is the usual reason a task is "not in L12" — say
+      // so, instead of implying the backfill vanished.
+      backfill_missing: (i) => (i.note ? `non-SBQ — ${i.note}; lands back in L12 with the next backfill` : 'non-SBQ, not in L12 — backfill missing')
+        + (i.backfilledAt ? ` (stamped ${i.backfilledAt.slice(0, 16).replace('T', ' ')})` : ''),
       pending: (i) => `backfilled ${i.backfilledAt.slice(11, 16)}Z — propagation pending`,
     };
     const row = (i) => el('div', { class: 'bf__row' },

@@ -23,6 +23,16 @@ function readStudio(dir) {
   try { return JSON.parse(fs.readFileSync(path.join(dir, '_studio.json'), 'utf8')); } catch { return {}; }
 }
 
+// task_sbq's OPEN flag — a send-back the task has not re-entered L10/L12
+// since. Lifetime sbq_attempts alone flagged 13 already-fixed authoring-stage
+// send-backs as "must be pulled" on the first live quadrant report.
+const sbqOpen = (r) => r?.sbq_open === true || r?.sbq_open === 'true' || r?.sbq_open === 1;
+
+// A task is IN L12 only while its latest node is a live one. A canceled L12
+// node means the opposite of membership: the task was pulled (this whole
+// batch's L12 nodes were mass-canceled upstream on 2026-08-05).
+const inL12Active = (l) => !!l && String(l.review_level) === '12' && l.status !== 'canceled';
+
 // How long after a backfill Redash may legitimately not reflect it yet.
 // 30 minutes, per Pavit (§10.1) — inside the window a gap is PENDING, not
 // MISMATCH.
@@ -77,12 +87,13 @@ stagingApi.get('/verify', wrap(async (req, res) => {
     const dir = taskDir(m.bucket, m.id);
     const s = sbq.get(m.id);
     const l = level.get(m.id);
-    const upstreamSbq = Number(s?.sbq_attempts || 0) > 0;
+    const upstreamSbq = sbqOpen(s); // OPEN send-backs only — historical ones were fixed upstream
     // Recomputed live, not read from the ingest-time snapshot — fixes decided
     // since ingest change what validateTask finds, and a frozen warning would
     // block a task from ever becoming ready.
     const auditRow = m.audit?.verdict !== undefined ? m.audit : null;
-    const warnings = validateTask(dir, auditRow).length;
+    const warningDetails = validateTask(dir, auditRow);
+    const warnings = warningDetails.length;
     const blockers = [];
     if (m.pendingFixes > 0) blockers.push(`${m.pendingFixes} fix${m.pendingFixes === 1 ? '' : 'es'} pending`);
     if (warnings) blockers.push(`${warnings} validation warning${warnings === 1 ? '' : 's'}`);
@@ -95,6 +106,8 @@ stagingApi.get('/verify', wrap(async (req, res) => {
       grammarOnly: !!m.audit?.grammar_only_fail || m.grammarOnly,
       pendingFixes: m.pendingFixes,
       warnings,
+      warningDetails,
+      sbqAttempts: Number(s?.sbq_attempts || 0),
       upstream: l ? { level: String(l.review_level), status: l.status } : null,
       sbq: upstreamSbq,
       lastSbqAt: s?.last_sbq_at || null,
@@ -294,8 +307,13 @@ stagingApi.get('/quadrants', wrap(async (req, res) => {
   const items = tasks.map((m) => {
     const studio = readStudio(taskDir(m.bucket, m.id));
     const l = level.get(m.id);
-    const inL12 = !!l && String(l.review_level) === '12';
-    const upstreamSbq = Number(sbq.get(m.id)?.sbq_attempts || 0) > 0;
+    const s = sbq.get(m.id);
+    // Membership means a LIVE L12 node; SBQ means an OPEN send-back. Testing
+    // level alone and lifetime counts alone produced 13 phantom must-pulls on
+    // tasks whose L0 send-backs were fixed weeks before delivery and whose
+    // L12 nodes had been mass-canceled.
+    const inL12 = inL12Active(l);
+    const upstreamSbq = sbqOpen(s);
     // §7.4: Redash wins on SBQ but a board SBQ verdict is never silently
     // overridden — either source keeps the task out of the backfill quadrants,
     // and the board-only case is surfaced as awaiting confirmation.
@@ -315,7 +333,11 @@ stagingApi.get('/quadrants', wrap(async (req, res) => {
       verdict: m.verdict || null,
       quadrant,
       upstream: l ? { level: String(l.review_level), status: l.status } : null,
+      note: !inL12 && l && String(l.review_level) === '12' && l.status === 'canceled'
+        ? `pulled from L12 — node canceled ${String(l.updated_at || '').slice(0, 10)}`
+        : null,
       sbq: isSbq,
+      sbqAttempts: Number(s?.sbq_attempts || 0),
       sbqAwaitingConfirmation: boardSbq && !upstreamSbq,
       backfilledAt: studio.backfilled_at || studio.backfill_retrieved_at || null,
       delivered: m.delivered,
@@ -396,7 +418,7 @@ stagingApi.get('/backfill', wrap(async (req, res) => {
     try {
       const ids = tasks.map((t) => t.id).filter((id) => HEX24.test(id));
       const out = await runRegistryQuery('task_sbq', { task_ids: ids }, { fresh: req.query.fresh === '1' });
-      for (const r of out.rows) if (Number(r.sbq_attempts || 0) > 0) sbqIds.add(r.task_id);
+      for (const r of out.rows) if (sbqOpen(r)) sbqIds.add(r.task_id);
       sbqCheck = 'ok';
     } catch (e) {
       sbqCheck = `unavailable: ${e.message}`;

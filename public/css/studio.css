@@ -3374,3 +3374,10 @@ mark.cb-hl.flash { outline: none; animation: cwt-flash 2.4s ease-out; border-rad
   font-size: 15px; line-height: 1; padding: 2px 4px; border-radius: 6px; margin-left: 2px;
 }
 .claim-who .claim-x:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+
+/* Expandable validation warnings in the backfill-check popup */
+.bf__row--x { cursor: pointer; }
+.bf__expand { color: var(--text-3); font-size: 10px; }
+.bf__warns { margin: -2px 0 6px 26px; padding: 6px 10px; border-left: 2px solid var(--line); }
+.bf__warn { font-size: 11.5px; color: var(--text-muted); padding: 2px 0; }
+.bf__warn code { color: var(--warn); font-size: 10.5px; margin-right: 2px; }
