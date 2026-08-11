@@ -1,9 +1,8 @@
 import express from 'express';
 import fs from 'node:fs';
-import path from 'node:path';
 import { taskDir } from '../workspace.js';
 import {
-  fixStates, loadFixBlocks, applyFix, approveWithText, denyFix, revertFix, readLedger,
+  fixStates, loadFixBlocks, applyFix, approveWithText, approveGrammar, denyFix, revertFix, readLedger,
   ptrGet, sourcePath, rankPath,
 } from '../fixes.js';
 
@@ -23,6 +22,7 @@ fixesApi.get('/', wrap(async (req, res) => {
 // fixes and ledger touch — the §5.6 diff view's data.
 fixesApi.get('/diff', wrap(async (req, res) => {
   const dir = dirOf(req);
+  if (!fs.existsSync(sourcePath(dir))) return res.json({ fields: [], noSource: true });
   const source = JSON.parse(fs.readFileSync(sourcePath(dir), 'utf8'));
   const live = JSON.parse(fs.readFileSync(rankPath(dir), 'utf8'));
   const paths = new Set();
@@ -54,13 +54,8 @@ fixesApi.post('/:fixId/approve', wrap(async (req, res) => {
     return res.json(approveWithText(dir, item, req.user.username, String(req.body.new).slice(0, 4000)));
   }
   if (item.kind === 'grammar') {
-    // Grammar arrives applied; approval is sign-off, recorded without touching text.
-    const ledger = readLedger(dir);
-    const e = ledger.find((x) => x.fix_id === item.id && !x.superseded_at);
-    e.signed_off_by = req.user.username;
-    e.signed_off_at = new Date().toISOString();
-    fs.writeFileSync(path.join(dir, 'fix_ledger.json'), JSON.stringify(ledger, null, 2));
-    return res.json({ result: 'SIGNED_OFF' });
+    // Sign-off on an active edit; reversal (re-apply) on a denied one.
+    return res.json(approveGrammar(dir, item, req.user.username));
   }
   const out = applyFix(dir, item, req.user.username);
   res.json(out);
@@ -93,14 +88,9 @@ fixesApi.post('/approve-mechanical', wrap(async (req, res) => {
     if (item.kind === 'proposed' && item.decision === 'pending' && item.applicability === 'OK') {
       results.push({ id: item.id, ...applyFix(dir, item, req.user.username) });
     } else if (item.kind === 'grammar' && !item.reverted && !item.signed_off_by) {
-      const ledger = readLedger(dir);
-      const e = ledger.find((x) => x.fix_id === item.id && !x.superseded_at);
-      if (e && !e.signed_off_by) {
-        e.signed_off_by = req.user.username;
-        e.signed_off_at = new Date().toISOString();
-        fs.writeFileSync(path.join(dir, 'fix_ledger.json'), JSON.stringify(ledger, null, 2));
-        results.push({ id: item.id, result: 'SIGNED_OFF' });
-      }
+      // item.reverted filter keeps bulk from reversing an explicit deny —
+      // approveGrammar only ever signs off here.
+      results.push({ id: item.id, ...approveGrammar(dir, item, req.user.username) });
     }
   }
   res.json({ results, skippedMeaningChanging: items.filter((i) => i.meaning_changing).length });

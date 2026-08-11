@@ -245,21 +245,29 @@ function contains(value, needle) {
 
 const count = (hay, needle) => (needle ? hay.split(needle).length - 1 : 0);
 
+// Non-overlapping stepping, so its match numbering agrees with count() —
+// stepping by one character finds overlap positions count() never saw.
 function replaceNth(hay, oldStr, newStr, n) {
   let idx = -1;
   for (let i = 0; i < n; i++) {
-    idx = hay.indexOf(oldStr, idx + 1);
+    idx = hay.indexOf(oldStr, idx === -1 ? 0 : idx + oldStr.length);
     if (idx === -1) return null;
   }
   return hay.slice(0, idx) + newStr + hay.slice(idx + oldStr.length);
 }
 
 // Scalars keep their type: a score stays a number, "null" becomes null (the
-// reference batch really does propose code_style/score: 3 -> null).
+// reference batch really does propose code_style/score: 3 -> null). When the
+// current value is null the type must come from the string itself — typeof
+// null is 'object', and shipping "4" where a score belongs corrupts the label.
 function coerce(newStr, original) {
   if (newStr === 'null') return null;
   if (typeof original === 'number') return Number(newStr);
   if (typeof original === 'boolean') return newStr === 'true';
+  if (original === null || original === undefined) {
+    if (/^-?\d+(\.\d+)?$/.test(newStr)) return Number(newStr);
+    if (newStr === 'true' || newStr === 'false') return newStr === 'true';
+  }
   return newStr;
 }
 
@@ -272,6 +280,10 @@ export function fixApplicability(live, fix) {
   }
   const n = count(value, fix.old);
   if (n === 0) return 'DRIFTED';
+  // A fix authored against the 2nd occurrence of a field that now has one is
+  // just as drifted as a zero-hit — replaceNth would come back null and the
+  // write would replace the whole field with null.
+  if (n < (fix.occurrence ?? 1)) return 'DRIFTED';
   if (n > 1 && (fix.occurrence ?? 1) === 1 && (fix.occurrences_in_field ?? 1) === 1) return 'AMBIGUOUS';
   return 'OK';
 }
@@ -291,7 +303,9 @@ export function applyFix(dir, fix, user, { editedFrom = null } = {}) {
   if (typeof value !== 'string') {
     ptrSet(live, fix.path, coerce(fix.new, value));
   } else {
-    ptrSet(live, fix.path, replaceNth(value, fix.old, fix.new, fix.occurrence ?? 1));
+    const replaced = replaceNth(value, fix.old, fix.new, fix.occurrence ?? 1);
+    if (replaced === null) return { result: 'DRIFTED' }; // belt-and-braces: never persist a null field
+    ptrSet(live, fix.path, replaced);
   }
   writeJsonAtomic(rankPath(dir), live);
 
@@ -320,23 +334,102 @@ export function applyFix(dir, fix, user, { editedFrom = null } = {}) {
 
 // Approve with the reviewer's own replacement text. For a PROPOSED fix this is
 // applyFix with `new` overridden; for an APPLIED grammar edit the eval's text
-// is already in the file, so it is reverted from source first and the edited
-// text applied as a fresh approved entry under the same fix id — the ledger
-// then reads: eval's edit denied-as-superseded, reviewer's edit approved.
+// is already in the file, so the field is rebuilt from source with the edited
+// text in place of the eval's — the ledger then reads: eval's edit
+// denied-as-superseded, reviewer's edit approved. The rebuild is computed
+// fully in memory and only persisted when every step lands, so a drift can't
+// leave the field reverted with the reviewer's text never applied.
 export function approveWithText(dir, item, user, newText) {
   if (item.kind === 'grammar') {
     const ledger = readLedger(dir);
-    const entry = ledger.find((e) => e.fix_id === item.id && !e.reverted_at && e.decision === 'approved' && !e.superseded_at);
-    if (!entry) throw new Error(`no active entry for ${item.id}`);
-    const r = revertEntry(dir, entry, user, 'superseded by reviewer edit');
-    if (r.failures?.length) throw new Error(`revert left unreplayable fixes on ${entry.path}: ${r.failures.join(', ')}`);
-    return applyFix(dir, {
-      id: item.id, path: entry.path, old: entry.old, occurrence: entry.occurrence ?? 1,
-      rule: entry.rule, class: entry.class, meaning_changing: true, owner: entry.owner,
-      status: 'PROPOSED', new: newText,
-    }, user, { editedFrom: entry.new });
+    // Latest non-superseded entry, active or not — editing a previously denied
+    // edit is a legitimate reversal, not an error.
+    const entry = [...ledger].reverse().find((e) => e.fix_id === item.id && !e.superseded_at);
+    if (!entry) throw new Error(`no ledger entry for ${item.id}`);
+    const wasActive = entry.decision === 'approved' && !entry.reverted_at;
+
+    const source = readMaybe(sourcePath(dir));
+    const live = read(rankPath(dir));
+    const srcVal = source ? ptrGet(source, entry.path) : undefined;
+    if (srcVal === undefined) throw new Error(`rank.source.json has no value at ${entry.path} — cannot rebuild the field for an edit`);
+
+    // Rebuild: source value → replay every OTHER approved entry on the path →
+    // the reviewer's text where the eval's edit went.
+    const survivors = ledger
+      .filter((e) => e !== entry && e.path === entry.path && !e.reverted_at && !e.superseded_at && e.decision === 'approved')
+      .sort((a, b) => String(a.decided_at).localeCompare(String(b.decided_at)));
+    let value = srcVal;
+    for (const e of [...survivors, { ...entry, new: newText }]) {
+      if (typeof value !== 'string') { value = coerce(String(e.new), value); continue; }
+      const replaced = replaceNth(value, e.old, e.new, e.occurrence ?? 1);
+      if (replaced === null) throw new Error(`edit does not land: ${e.fix_id}'s old text not found on ${entry.path} after rebuild`);
+      value = replaced;
+    }
+
+    if (wasActive) {
+      entry.reverted_at = new Date().toISOString();
+      entry.decision = 'denied';
+      entry.reverted_by = user;
+      entry.reason = 'superseded by reviewer edit';
+    }
+    // source 'board': fixStates renders grammar items off their seed entries
+    // and reads decision state via latest(fix_id) — a second grammar-source
+    // entry under the same id would render the item twice.
+    ledger.push({
+      fix_id: entry.fix_id, source: 'board', path: entry.path,
+      occurrence: entry.occurrence ?? 1, old: entry.old, new: newText,
+      rule: entry.rule, class: entry.class, error_type: entry.error_type,
+      meaning_changing: true, owner: entry.owner,
+      decision: 'approved', decided_by: user, decided_at: new Date().toISOString(),
+      reverted_at: null, reason: null, edited_from: entry.new,
+    });
+
+    ptrSet(live, entry.path, value);
+    writeJsonAtomic(rankPath(dir), live);
+    writeLedger(dir, ledger);
+    return { result: 'APPLIED' };
   }
   return applyFix(dir, { ...item, status: 'PROPOSED', new: newText }, user, { editedFrom: item.new });
+}
+
+// Plain approval of a grammar edit. The edit is already in the file, so on an
+// active entry this is sign-off, recorded without touching text — and it must
+// stamp the entry fixStates actually reads (the latest non-superseded one),
+// not whichever the ledger lists first. On an entry the reviewer previously
+// denied (text reverted), approve-anyway is a reversal: the eval's edit goes
+// back in as a fresh approved entry, so the trail keeps the deny.
+export function approveGrammar(dir, item, user) {
+  const ledger = readLedger(dir);
+  const entry = [...ledger].reverse().find((e) => e.fix_id === item.id && !e.superseded_at);
+  if (!entry) throw Object.assign(new Error(`no ledger entry for ${item.id}`), { status: 404 });
+
+  if (entry.decision === 'approved' && !entry.reverted_at) {
+    entry.signed_off_by = user;
+    entry.signed_off_at = new Date().toISOString();
+    writeLedger(dir, ledger);
+    return { result: 'SIGNED_OFF' };
+  }
+
+  const live = read(rankPath(dir));
+  const value = ptrGet(live, entry.path);
+  if (typeof value !== 'string') {
+    ptrSet(live, entry.path, coerce(String(entry.new), value));
+  } else {
+    const replaced = replaceNth(value, entry.old, entry.new, entry.occurrence ?? 1);
+    if (replaced === null) return { result: 'DRIFTED' };
+    ptrSet(live, entry.path, replaced);
+  }
+  writeJsonAtomic(rankPath(dir), live);
+  appendLedger(dir, {
+    fix_id: entry.fix_id, source: 'board', path: entry.path,
+    occurrence: entry.occurrence ?? 1, old: entry.old, new: entry.new,
+    rule: entry.rule, class: entry.class, error_type: entry.error_type,
+    meaning_changing: !!entry.meaning_changing, owner: entry.owner,
+    decision: 'approved', decided_by: user, decided_at: new Date().toISOString(),
+    reverted_at: null, reason: null,
+    signed_off_by: user, signed_off_at: new Date().toISOString(),
+  });
+  return { result: 'APPLIED' };
 }
 
 // Deny records a judgement. For PROPOSED that is all it does; for an APPLIED
@@ -370,36 +463,42 @@ export function revertFix(dir, fixId, user, reason) {
 
 function revertEntry(dir, entry, user, reason) {
   const ledger = readLedger(dir);
-  const target = ledger.find((e) => e === undefined ? false : e.fix_id === entry.fix_id && !e.reverted_at && e.decision === 'approved');
-  target.reverted_at = new Date().toISOString();
-  target.decision = 'denied';
-  target.reverted_by = user;
-  if (reason) target.reason = reason;
+  const target = ledger.find((e) => e.fix_id === entry.fix_id && !e.reverted_at && e.decision === 'approved');
+  if (!target) throw new Error(`no active approved entry for ${entry.fix_id}`);
 
   const source = readMaybe(sourcePath(dir));
   const live = read(rankPath(dir));
+  const srcVal = source ? ptrGet(source, entry.path) : undefined;
   const failures = [];
 
-  if (source && ptrGet(source, entry.path) !== undefined) {
-    ptrSet(live, entry.path, ptrGet(source, entry.path));
-  } else if (!source) {
-    // No source file (task had no grammar findings) — the field's pre-fix state
-    // is the live value with this entry's edit inverted. Only safe for the
-    // single-entry case; with survivors on the path and no anchor we refuse.
-    const others = ledger.filter((e) => e.path === entry.path && !e.reverted_at && !e.superseded_at && e.decision === 'approved');
-    if (others.length) { writeLedger(dir, ledger); return { result: 'NO_SOURCE_ANCHOR', failures: [entry.fix_id] }; }
+  // Decide whether a reset is possible BEFORE marking anything — a ledger that
+  // says REVERTED while the text still ships is the §5.1 failure mode, so the
+  // refusal paths below leave both files untouched.
+  if (srcVal === undefined) {
+    // No anchor for this path (no source file, or the source predates the
+    // field). Inverting the entry's own edit is only safe when it is the
+    // field's sole edit and its new-text is still present to find.
+    const others = ledger.filter((e) => e !== target && e.path === entry.path && !e.reverted_at && !e.superseded_at && e.decision === 'approved');
+    if (others.length) return { result: 'NO_SOURCE_ANCHOR', failures: [entry.fix_id] };
     const value = ptrGet(live, entry.path);
-    if (typeof value === 'string' && entry.new !== '' && value.includes(entry.new)) {
+    if (typeof value === 'string') {
+      if (entry.new === '' || !value.includes(entry.new)) return { result: 'NO_SOURCE_ANCHOR', failures: [entry.fix_id] };
       ptrSet(live, entry.path, replaceNth(value, entry.new, entry.old, 1));
-    } else if (typeof value !== 'string') {
+    } else {
       ptrSet(live, entry.path, coerce(String(entry.old), value === null ? 0 : value));
     }
+    markReverted(target, user, reason);
     writeJsonAtomic(rankPath(dir), live);
     writeLedger(dir, ledger);
     return { result: 'REVERTED', failures: [] };
   }
 
-  // Replay the survivors, oldest decision first.
+  // Reset the whole field from source, then replay the survivors, oldest
+  // decision first. A survivor whose old-text no longer lands is flagged
+  // needs_reanchor on its ledger entry — persisted, so the UI and export
+  // gates see it, not just this response (§5.4).
+  ptrSet(live, entry.path, srcVal);
+  markReverted(target, user, reason);
   const survivors = ledger
     .filter((e) => e.path === entry.path && !e.reverted_at && !e.superseded_at && e.decision === 'approved')
     .sort((a, b) => String(a.decided_at).localeCompare(String(b.decided_at)));
@@ -409,13 +508,21 @@ function revertEntry(dir, entry, user, reason) {
       ptrSet(live, e.path, coerce(String(e.new), value));
     } else {
       const replaced = replaceNth(value, e.old, e.new, e.occurrence ?? 1);
-      if (replaced === null) { failures.push(e.fix_id); continue; } // needs re-anchor — human
+      if (replaced === null) { e.needs_reanchor = true; failures.push(e.fix_id); continue; }
+      delete e.needs_reanchor;
       ptrSet(live, e.path, replaced);
     }
   }
   writeJsonAtomic(rankPath(dir), live);
   writeLedger(dir, ledger);
   return { result: 'REVERTED', failures };
+}
+
+function markReverted(target, user, reason) {
+  target.reverted_at = new Date().toISOString();
+  target.decision = 'denied';
+  target.reverted_by = user;
+  if (reason) target.reason = reason;
 }
 
 // ---------------------------------------------------------------------------
@@ -445,6 +552,7 @@ export function fixStates(dir) {
       applied_new: current.decision === 'approved' && !current.reverted_at ? current.new : undefined,
       edited_from: current.edited_from,
       signed_off_by: current.signed_off_by || null,
+      needs_reanchor: !!current.needs_reanchor,
     });
   }
 
@@ -479,11 +587,17 @@ export function fixStates(dir) {
   };
 }
 
-// Cheap summary for taskMeta — called per task on every board list, so it only
-// stats files and counts, never parses markdown.
+// Cheap summary for taskMeta — called per task on every board list. It stats
+// remediation.md and only re-parses when the doc actually changed (a docgen
+// regen), so the hot path stays a stat + two reads while the counts can never
+// go stale — stale pendingFixes here means wrong Staging membership and a
+// backfill export with undecided fixes in it.
 export function fixSummary(dir) {
   const ledger = readLedger(dir);
-  const cached = readMaybe(fixesCachePath(dir));
+  let cached = readMaybe(fixesCachePath(dir));
+  let mtimeMs = null;
+  try { mtimeMs = fs.statSync(path.join(dir, 'remediation.md')).mtimeMs; } catch { /* no doc */ }
+  if (!cached || cached.mtimeMs !== mtimeMs) cached = loadFixBlocks(dir);
   const blocks = cached?.blocks || [];
   const decided = new Set(ledger.filter((e) => !e.superseded_at).map((e) => e.fix_id));
   const pending = blocks.filter((b) => b.status === 'PROPOSED' && b.path && !decided.has(b.id)).length;
